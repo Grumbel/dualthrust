@@ -44,6 +44,12 @@ constexpr float LAND_MAX_VX = 40.0f;
 constexpr float LAND_MAX_ANGLE = 0.22f;
 constexpr float LAND_MAX_ANGVEL = 1.2f;
 
+// Impact speed along surface normal; above this → crash, below → bounce
+constexpr float CRASH_IMPACT_SPEED = 200.0f;
+constexpr float BOUNCE_RESTITUTION = 0.42f;  // normal bounce factor
+constexpr float BOUNCE_FRICTION = 0.85f;     // keep tangential velocity
+constexpr float BOUNCE_ANG_DAMP = 0.55f;
+
 constexpr SDL_Color CRT_BG{0, 10, 4, 255};
 constexpr SDL_Color CRT_DIM{16, 64, 32, 255};
 constexpr SDL_Color CRT_MID{40, 180, 80, 255};
@@ -536,58 +542,122 @@ struct Ship {
 
   void collide(const Cave& cave) {
     if (state != FlightState::Flying) return;
+
     const float ox = cfg->engine_offset_x, oy = cfg->engine_offset_y;
-    Vec2 probes[5] = {
+    Vec2 probes[] = {
         {-ox, oy + 4.f}, {0.f, oy + 6.f}, {ox, oy + 4.f},
         {-ox * 0.5f, oy + 2.f}, {ox * 0.5f, oy + 2.f},
+        {0.f, -cfg->half_h * 0.85f},
+        {-cfg->half_w * 0.55f, 0.f}, {cfg->half_w * 0.55f, 0.f},
     };
-    float max_pen = 0.f;
-    float contact_x = pos.x, contact_y = pos.y;
-    bool any = false;
+
+    bool hit = false;
+    Vec2 contact{};
     for (const auto& lp : probes) {
       Vec2 wp = to_world(lp);
       if (cave.is_solid_world(wp.x, wp.y)) {
-        any = true;
-        // push up out of solid
-        float y = wp.y;
-        while (cave.is_solid_world(wp.x, y) && y > 0.f) y -= 2.f;
-        float pen = wp.y - y;
-        if (pen > max_pen) {
-          max_pen = pen;
-          contact_x = Cave::wrap_x(wp.x);
-          contact_y = y;
-        }
+        hit = true;
+        contact = wp;
+        break;
       }
     }
-    // also nose / sides for crashes into walls
-    Vec2 body[3] = {{0.f, -cfg->half_h * 0.8f}, {-cfg->half_w * 0.5f, 0.f}, {cfg->half_w * 0.5f, 0.f}};
-    bool wall_hit = false;
-    for (const auto& lp : body) {
-      Vec2 wp = to_world(lp);
-      if (cave.is_solid_world(wp.x, wp.y)) wall_hit = true;
+    // Also center-deep embedding
+    if (!hit && cave.is_solid_world(pos.x, pos.y)) {
+      hit = true;
+      contact = pos;
+    }
+    if (!hit)
+      return;
+
+    // Approximate outward normal: sample solid around contact (gradient)
+    Vec2 grad{};
+    const float s = Cave::CELL;
+    const float offs[8][2] = {{s, 0}, {-s, 0}, {0, s}, {0, -s},
+                              {s, s}, {s, -s}, {-s, s}, {-s, -s}};
+    for (auto& o : offs) {
+      if (cave.is_solid_world(contact.x + o[0], contact.y + o[1])) {
+        grad.x += o[0];
+        grad.y += o[1];
+      }
+    }
+    float gl = std::sqrt(grad.x * grad.x + grad.y * grad.y);
+    Vec2 n_out;
+    if (gl > 1e-3f) {
+      // grad points into denser rock; outward is opposite
+      n_out = {-grad.x / gl, -grad.y / gl};
+    } else {
+      // Fallback: push opposite velocity
+      float vl = std::sqrt(vel.x * vel.x + vel.y * vel.y);
+      if (vl > 1e-3f)
+        n_out = {-vel.x / vl, -vel.y / vl};
+      else
+        n_out = {0.f, -1.f};
     }
 
-    if (!any && !wall_hit) return;
+    // Separate ship from rock along outward normal
+    for (int step = 0; step < 24; ++step) {
+      bool still = cave.is_solid_world(pos.x, pos.y);
+      if (!still) {
+        for (const auto& lp : probes) {
+          Vec2 wp = to_world(lp);
+          if (cave.is_solid_world(wp.x, wp.y)) {
+            still = true;
+            break;
+          }
+        }
+      }
+      if (!still)
+        break;
+      pos.x += n_out.x * 3.f;
+      pos.y += n_out.y * 3.f;
+      pos.x = Cave::wrap_x(pos.x);
+    }
 
-    if (any) pos.y -= max_pen;
+    // Impact speed into the surface (positive when moving into rock)
+    float vn = vel.x * (-n_out.x) + vel.y * (-n_out.y);
+    // vn > 0 means velocity has component toward rock (into solid)
 
-    const bool pad = cave.on_pad(contact_x, contact_y + Cave::CELL);
+    float contact_x = Cave::wrap_x(contact.x);
+    float contact_y = contact.y;
+    const bool pad = cave.on_pad(contact_x, contact_y + Cave::CELL) ||
+                     cave.on_pad(pos.x, pos.y + oy + 8.f);
     const bool gentle = vel.y < LAND_MAX_VY && std::abs(vel.x) < LAND_MAX_VX &&
                         std::abs(angle) < LAND_MAX_ANGLE && std::abs(ang_vel) < LAND_MAX_ANGVEL;
 
-    if (pad && gentle && !wall_hit) {
+    // Soft landing on pad
+    if (pad && gentle && vn < CRASH_IMPACT_SPEED * 0.5f) {
       state = FlightState::Landed;
       state_timer = 0.f;
       vel = {};
       ang_vel = 0.f;
       angle = 0.f;
       std::printf("LANDED\n");
-    } else {
+      return;
+    }
+
+    // Hard impact → crash (map is NOT regenerated)
+    if (vn > CRASH_IMPACT_SPEED) {
       state = FlightState::Crashed;
       state_timer = 0.f;
       vel = {};
       ang_vel = 0.f;
-      std::printf("CRASH\n");
+      std::printf("CRASH impact=%.1f\n", vn);
+      return;
+    }
+
+    // Bounce: reflect velocity along outward normal
+    if (vn > 0.f) {
+      // Remove inward component and add restitution
+      vel.x += (1.f + BOUNCE_RESTITUTION) * vn * n_out.x;
+      vel.y += (1.f + BOUNCE_RESTITUTION) * vn * n_out.y;
+      // Tangential friction
+      float tx = vel.x - (vel.x * n_out.x + vel.y * n_out.y) * n_out.x;
+      float ty = vel.y - (vel.x * n_out.x + vel.y * n_out.y) * n_out.y;
+      // rebuild: normal part already set; scale tangent
+      float nn = vel.x * n_out.x + vel.y * n_out.y;
+      vel.x = n_out.x * nn + tx * BOUNCE_FRICTION;
+      vel.y = n_out.y * nn + ty * BOUNCE_FRICTION;
+      ang_vel *= BOUNCE_ANG_DAMP;
     }
   }
 };
@@ -1183,6 +1253,7 @@ int main(int argc, char** argv) {
     persist_config();
   };
 
+  // Respawn / relight only — never regenerates the cave map
   auto reset_or_relight = [&]() {
     if (ship.state == FlightState::Landed) {
       ship.state = FlightState::Flying;
