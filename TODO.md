@@ -2,7 +2,9 @@
 
 ## Current tip
 
-Linux desktop integration (pending commit).
+`8a5519f` — Add Linux desktop integration: .desktop, icons, AppStream, install
+
+Bundle: `dualthrust-008.1-desktop-375fc76.bundle` (base 375fc76)
 
 ## Done recently
 
@@ -23,3 +25,4 @@ Linux desktop integration (pending commit).
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
+- Apply: `git pull path/to/dualthrust-008.1-desktop-375fc76.bundle HEAD`
