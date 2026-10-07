@@ -2,21 +2,23 @@
 
 ## Current tip
 
-`3fc13e8` — Add option to swap left/right engine controls
-
-Bundle: `dualthrust-005.1-swap-engines-375fc76.bundle` (base 375fc76)
+CRT lander: scrolling fractal terrain + collision (pending commit).
 
 ## Done recently
 
-- Orientation fix; ship presets; TIME_SCALE 0.62
-- Start / X toggles left↔right engine mapping (HUD shows state)
+- Green CRT / oscilloscope look (phosphor palette, scanlines, vector ship)
+- Midpoint-displacement fractal terrain with carved landing pads
+- Camera follow / scrolling over 8000px world
+- Lunar Lander–style collision (belly probes, pad + speed + attitude checks)
+- Reset / relight; regenerate terrain (Y / G)
 
 ## Open work
 
-- [ ] Polish physics / tuning per preset
-- [ ] Landing pads / crash detection
-- [ ] Better exhaust VFX / particles
-- [ ] Sound (engine noise)
+- [ ] Polish landing thresholds per ship preset
+- [ ] Fuel gauge / limited fuel
+- [ ] Score / pad bonuses
+- [ ] Better exhaust / crash particles
+- [ ] Sound
 - [ ] Full official GPL-3.0 text in LICENSES/
 
 ## Handoff
@@ -25,4 +27,3 @@ Bundle: `dualthrust-005.1-swap-engines-375fc76.bundle` (base 375fc76)
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
-- Apply: `git pull path/to/dualthrust-005.1-swap-engines-375fc76.bundle HEAD`

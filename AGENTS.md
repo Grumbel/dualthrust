@@ -1,6 +1,6 @@
 # dualthrust
 
-A small 2D spaceship game inspired by Space Taxi. The player controls a ship with two engines (left and right) using only the gamepad triggers. Differential thrust provides both translation and rotation.
+A small 2D dual-engine lander in a green CRT / oscilloscope look. Mildly inspired by Space Taxi and Lunar Lander. The player controls a ship with two engines using only the gamepad triggers; differential thrust provides translation and rotation.
 
 ## Stack
 
@@ -16,25 +16,27 @@ nix develop
 dualthrust-configure
 dualthrust-build
 dualthrust-run
-# or: dualthrust-run-gdb
 ```
 
-Or:
-
-```sh
-nix run
-```
+Or: `nix run`
 
 ## Controls
 
-- Left trigger: left engine thrust (0–1)
-- Right trigger: right engine thrust (0–1)
+- Left / right triggers: engine thrust
 - Select / Back: cycle ship preset (Narrow / Medium / Wide / Barge / Long)
 - Start: swap left/right engine mapping
-- Escape / window close: quit
+- A / B (or keyboard R): reset after crash, or relight after landing
+- Y (or keyboard G): regenerate fractal terrain
+- Escape: quit
 
-Keyboard fallback: A/D or arrows = engines; Tab / [ / ] = cycle preset; X = swap engines.
-Simulation runs at TIME_SCALE 0.62 of wall-clock.
+Keyboard fallback: A/D or arrows = engines; Tab / [ / ] = preset; X = swap.
+
+## Gameplay
+
+- Fractal (midpoint-displacement) ground with flat landing pads
+- Camera scrolls with the ship across an 8000px-wide world
+- Soft landing requires: on a pad, low horizontal/vertical speed, near-upright attitude
+- Otherwise contact = crash; reset to spawn above a pad
 
 ## License
 
