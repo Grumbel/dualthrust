@@ -12,7 +12,7 @@ CRT dual-engine **cave** lander. Left/right triggers = engines. Land on pads ins
 | Triggers | Engines |
 | **Start** | Menu |
 | Menu Up/Down + A | Navigate / select |
-| F | Fullscreen |
+| F / Alt+Enter | Fullscreen |
 | A/B or R | Reset / relight |
 | Y or G | New cave |
 | Escape | Menu / quit |

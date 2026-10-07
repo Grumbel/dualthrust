@@ -1553,6 +1553,12 @@ int main(int argc, char** argv) {
       }
 
       if (ev.type == SDL_KEYDOWN) {
+        // Alt+Enter toggles fullscreen (classic shortcut)
+        if ((ev.key.keysym.sym == SDLK_RETURN || ev.key.keysym.sym == SDLK_KP_ENTER) &&
+            (ev.key.keysym.mod & KMOD_ALT)) {
+          toggle_fullscreen();
+          continue;
+        }
         if (mode == AppMode::Menu) {
           if (ev.key.keysym.sym == SDLK_UP || ev.key.keysym.sym == SDLK_w)
             menu.cursor = (menu.cursor + Menu::N - 1) % Menu::N;
