@@ -81,12 +81,13 @@ struct ShipConfig {
   float mass, inertia, max_thrust;
 };
 
+// half_w, half_h, engine_offset_x, engine_offset_y (aft/+y = bottom when upright)
 constexpr ShipConfig SHIP_CONFIGS[] = {
-    {"Narrow", 22.f, 30.f, 12.f, 20.f, 0.85f, 450.f, 380.f},
-    {"Medium", 32.f, 32.f, 20.f, 22.f, 1.0f, 900.f, 400.f},
-    {"Wide", 48.f, 28.f, 36.f, 18.f, 1.25f, 1600.f, 420.f},
-    {"Barge", 64.f, 26.f, 52.f, 16.f, 1.6f, 2800.f, 440.f},
-    {"Long", 26.f, 42.f, 14.f, 30.f, 1.1f, 1100.f, 390.f},
+    {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f},
+    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f},
+    {"Wide", 48.f, 28.f, 36.f, 26.f, 1.25f, 1600.f, 420.f},
+    {"Barge", 64.f, 26.f, 52.f, 24.f, 1.6f, 2800.f, 440.f},
+    {"Long", 26.f, 42.f, 14.f, 36.f, 1.1f, 1100.f, 390.f},
 };
 constexpr int SHIP_CONFIG_COUNT = static_cast<int>(sizeof(SHIP_CONFIGS) / sizeof(SHIP_CONFIGS[0]));
 
@@ -983,9 +984,12 @@ void draw_cave(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
 }
 
 void draw_ship_vector(SDL_Renderer* ren, const Ship& ship, const Camera& cam) {
+  // Local frame: +y = aft (toward ground when upright), -y = nose (sky).
+  // Engines must sit at +engine_offset_y (bottom of the silhouette).
   const float hw = ship.cfg->half_w * 0.85f;
   const float hh = ship.cfg->half_h * 0.9f;
-  const float ox = ship.cfg->engine_offset_x, oy = ship.cfg->engine_offset_y;
+  const float ox = ship.cfg->engine_offset_x;
+  const float oy = ship.cfg->engine_offset_y;
   auto W = [&](Vec2 l) {
     Vec2 w = ship.to_world(l);
     return cam.to_screen(w.x, w.y);
@@ -997,22 +1001,50 @@ void draw_ship_vector(SDL_Renderer* ren, const Ship& ship, const Camera& cam) {
     SDL_Point pa = W(a), pb = W(b);
     set_color(ren, body);
     SDL_RenderDrawLine(ren, pa.x, pa.y, pb.x, pb.y);
+    set_color(ren, body, 70);
+    SDL_RenderDrawLine(ren, pa.x + 1, pa.y, pb.x + 1, pb.y);
   };
-  line({0.f, -hh}, {-hw * 0.7f, hh * 0.35f});
-  line({0.f, -hh}, {hw * 0.7f, hh * 0.35f});
-  line({-hw * 0.7f, hh * 0.35f}, {hw * 0.7f, hh * 0.35f});
-  line({-ox - 6.f, oy - 4.f}, {-ox + 6.f, oy - 4.f});
-  line({-ox - 6.f, oy - 4.f}, {-ox - 4.f, oy + 8.f});
-  line({-ox + 6.f, oy - 4.f}, {-ox + 4.f, oy + 8.f});
-  line({ox - 6.f, oy - 4.f}, {ox + 6.f, oy - 4.f});
-  line({ox - 6.f, oy - 4.f}, {ox - 4.f, oy + 8.f});
-  line({ox + 6.f, oy - 4.f}, {ox + 4.f, oy + 8.f});
+
+  // Cabin / nose (top)
+  float nose_y = -hh;
+  float cabin_y = -hh * 0.35f;
+  line({-hw * 0.25f, cabin_y}, {0.f, nose_y});
+  line({hw * 0.25f, cabin_y}, {0.f, nose_y});
+  line({-hw * 0.25f, cabin_y}, {hw * 0.25f, cabin_y});
+  // cockpit window
+  line({-hw * 0.12f, cabin_y + 4.f}, {hw * 0.12f, cabin_y + 4.f});
+
+  // Main hull (mid)
+  float belly = std::min(oy - 6.f, hh * 0.45f);
+  line({-hw * 0.45f, cabin_y}, {-hw * 0.55f, belly});
+  line({hw * 0.45f, cabin_y}, {hw * 0.55f, belly});
+  line({-hw * 0.55f, belly}, {hw * 0.55f, belly});
+
+  // Landing legs toward bottom corners
+  line({-hw * 0.55f, belly}, {-hw * 0.9f, oy + 6.f});
+  line({hw * 0.55f, belly}, {hw * 0.9f, oy + 6.f});
+  line({-hw * 0.9f, oy + 6.f}, {-hw * 0.7f, oy + 6.f});
+  line({hw * 0.7f, oy + 6.f}, {hw * 0.9f, oy + 6.f});
+
+  // Engine bells at aft (+y) — open end points further aft (down when upright)
+  auto engine = [&](float side) {
+    float ex = side * ox;
+    // bell top (toward hull)
+    line({ex - 7.f, oy - 2.f}, {ex + 7.f, oy - 2.f});
+    // sides flaring outward toward +y
+    line({ex - 7.f, oy - 2.f}, {ex - 10.f, oy + 12.f});
+    line({ex + 7.f, oy - 2.f}, {ex + 10.f, oy + 12.f});
+    // nozzle rim (bottom)
+    line({ex - 10.f, oy + 12.f}, {ex + 10.f, oy + 12.f});
+  };
+  engine(-1.f);
+  engine(+1.f);
+
+  // Small nose tick (heading), not a long line through the hull
   if (ship.state == FlightState::Flying) {
-    Vec2 tip = ship.to_world({0.f, -hh - 12.f});
-    SDL_Point p0 = cam.to_screen(ship.pos.x, ship.pos.y);
-    SDL_Point p1 = cam.to_screen(tip.x, tip.y);
-    set_color(ren, CRT_WARN);
-    SDL_RenderDrawLine(ren, p0.x, p0.y, p1.x, p1.y);
+    line({0.f, nose_y}, {0.f, nose_y - 10.f});
+    line({-4.f, nose_y - 6.f}, {0.f, nose_y - 10.f});
+    line({4.f, nose_y - 6.f}, {0.f, nose_y - 10.f});
   }
 }
 
@@ -1021,9 +1053,10 @@ void draw_exhaust(SDL_Renderer* ren, const Ship& ship, const Camera& cam, bool l
   float t = left ? ship.left_thrust : ship.right_thrust;
   if (t < 0.05f) return;
   float lx = left ? -ship.cfg->engine_offset_x : ship.cfg->engine_offset_x;
-  Vec2 base = ship.to_world({lx, ship.cfg->engine_offset_y + 10.f});
+  // Nozzle rim is at ~engine_offset_y+12; exhaust continues aft (+local y)
+  Vec2 base = ship.to_world({lx, ship.cfg->engine_offset_y + 14.f});
   float c = std::cos(ship.angle), s = std::sin(ship.angle);
-  float ex = -s, ey = c;
+  float ex = -s, ey = c;  // rotate(0,1) = aft
   int len = static_cast<int>(10 + t * 36);
   for (int i = 0; i < len; i += 2) {
     SDL_Point p = cam.to_screen(base.x + ex * i, base.y + ey * i);
