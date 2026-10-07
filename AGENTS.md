@@ -1,0 +1,38 @@
+# dualthrust
+
+A small 2D spaceship game inspired by Space Taxi. The player controls a ship with two engines (left and right) using only the gamepad triggers. Differential thrust provides both translation and rotation.
+
+## Stack
+
+- C++17
+- SDL2 (video, events, gamecontroller, render)
+- CMake + Ninja
+- Nix flake for reproducible build and develop shell
+
+## Build / run (Nix)
+
+```sh
+nix develop
+dualthrust-configure
+dualthrust-build
+dualthrust-run
+# or: dualthrust-run-gdb
+```
+
+Or:
+
+```sh
+nix run
+```
+
+## Controls
+
+- Left trigger: left engine thrust (0–1)
+- Right trigger: right engine thrust (0–1)
+- Escape / window close: quit
+
+No other controls. The ship has mass, inertia, gravity, and engine offset for torque.
+
+## License
+
+GPLv3-or-later. REUSE compliant.

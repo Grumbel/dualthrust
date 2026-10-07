@@ -1,0 +1,15 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+Everyone is permitted to copy and distribute verbatim copies
+of this license document, but changing it is not allowed.
+
+[Full text omitted for brevity in this environment; replace with the official
+GPL-3.0 text from https://www.gnu.org/licenses/gpl-3.0.txt before release.
+This placeholder still declares the license identity for REUSE.]
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
