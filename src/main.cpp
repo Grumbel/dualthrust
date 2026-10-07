@@ -55,7 +55,7 @@ constexpr SDL_Color CRT_BRIGHT{140, 255, 160, 255};
 constexpr SDL_Color CRT_WARN{220, 200, 60, 255};
 constexpr SDL_Color CRT_HOT{255, 120, 40, 255};
 constexpr SDL_Color CRT_PAD{80, 220, 140, 255};
-constexpr SDL_Color CRT_STAR{60, 140, 80, 255};
+constexpr SDL_Color CRT_STAR{120, 220, 140, 255};
 constexpr SDL_Color CRT_MENU{20, 40, 24, 230};
 
 struct Vec2 {
@@ -786,19 +786,29 @@ int text_width(const char* s) {
 
 void draw_stars(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
   for (const auto& st : cave.stars) {
-    // parallax: slight offset by depth layer from y
-    float parallax = 0.85f + 0.1f * std::fmod(st.y * 0.01f, 1.f);
     float wx = Cave::wrap_x(st.x);
-    // only if roughly in view (open space preferred)
     float sx = cam.continuous_x(wx) - cam.x;
-    float sy = st.y * parallax - cam.y * parallax;
-    // remap sy roughly
-    sy = st.y - cam.y;
-    if (sx < -2 || sx > WINDOW_W + 2 || sy < -2 || sy > WINDOW_H + 2) continue;
-    // dimmer if inside rock
+    float sy = st.y - cam.y;
+    // Deterministic size 2..5 px from position
+    unsigned h = static_cast<unsigned>(st.x * 12.9898f + st.y * 78.233f);
+    h = h * 2654435761u;
+    int sz = 2 + static_cast<int>((h >> 24) % 4);  // 2,3,4,5
+    if (sx < -sz || sx > WINDOW_W + sz || sy < -sz || sy > WINDOW_H + sz)
+      continue;
     bool rock = cave.is_solid_world(wx, st.y);
-    set_color(ren, CRT_STAR, rock ? 40 : 200);
-    SDL_RenderDrawPoint(ren, static_cast<int>(sx), static_cast<int>(sy));
+    if (rock)
+      continue;  // only visible in open space
+    int ix = static_cast<int>(sx) - sz / 2;
+    int iy = static_cast<int>(sy) - sz / 2;
+    set_color(ren, CRT_STAR, 230);
+    SDL_Rect r{ix, iy, sz, sz};
+    SDL_RenderFillRect(ren, &r);
+    // brighter core on larger dots
+    if (sz >= 4) {
+      set_color(ren, CRT_BRIGHT, 200);
+      SDL_Rect core{ix + 1, iy + 1, sz - 2, sz - 2};
+      SDL_RenderFillRect(ren, &core);
+    }
   }
 }
 
