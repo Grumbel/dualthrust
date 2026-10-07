@@ -2,17 +2,12 @@
 
 ## Current tip
 
-`add1212` — Add ship size presets (Select/Back) and slow the simulation
-
-Bundle: `dualthrust-004.1-ship-presets-375fc76.bundle` (base 375fc76)
+Engine L/R swap toggle (pending commit on top of 117179a).
 
 ## Done recently
 
-- Orientation fix (clockwise angle, exhaust, heading marker)
-- Five ship presets: Narrow / Medium / Wide / Barge / Long
-  (size, engine spacing, mass, inertia, max thrust)
-- Select/Back (Tab / [ / ]) cycles presets; name shown on HUD
-- TIME_SCALE 0.62 slows the whole sim
+- Orientation fix; ship presets; TIME_SCALE 0.62
+- Start / X toggles left↔right engine mapping (HUD shows state)
 
 ## Open work
 
@@ -28,4 +23,3 @@ Bundle: `dualthrust-004.1-ship-presets-375fc76.bundle` (base 375fc76)
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
-- Apply: `git pull path/to/dualthrust-004.1-ship-presets-375fc76.bundle HEAD`

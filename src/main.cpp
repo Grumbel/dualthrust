@@ -87,8 +87,11 @@ struct Ship {
   float angle = 0.f;  // radians, clockwise from nose-up
   float ang_vel = 0.f;
 
-  float left_thrust = 0.f;  // 0..1
+  float left_thrust = 0.f;  // 0..1  (applied to physical left engine)
   float right_thrust = 0.f;
+
+  // When true, controller left trigger drives the physical right engine and vice versa.
+  bool swap_engines = false;
 
   int config_index = 1;  // start on Medium
   const ShipConfig* cfg = &SHIP_CONFIGS[1];
@@ -342,6 +345,16 @@ void draw_char(SDL_Renderer* ren, int x, int y, char ch, Uint8 r, Uint8 g, Uint8
     case 'R': map = "110101110101101"; break;
     case 'W': map = "101101111111101"; break;
     case 'D': map = "110101101101110"; break;
+    case 'S': map = "011100010001110"; break;
+    case 'P': map = "110101110100100"; break;
+    case 'T': map = "111010010010010"; break;
+    case 'C': map = "011100100100011"; break;
+    case 'Y': map = "101101010010010"; break;
+    case 'U': map = "101101101101111"; break;
+    case 'H': map = "101101111101101"; break;
+    case 'V': map = "101101101101010"; break;
+    case 'F': map = "111100110100100"; break;
+    case 'K': map = "101110110101101"; break;
     case ' ': map = "000000000000000"; break;
     default: map = "111101101101111"; break;
   }
@@ -365,7 +378,7 @@ int main(int argc, char** argv) {
   }
 
   SDL_Window* window = SDL_CreateWindow(
-      "dualthrust — triggers = engines, Select/Back = ship preset",
+      "dualthrust — triggers=engines  Select=preset  Start=swap L/R",
       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_W, WINDOW_H,
       SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   if (!window) {
@@ -407,6 +420,7 @@ int main(int argc, char** argv) {
     std::printf("No game controller found.\n");
     std::printf("  A/D or Left/Right = engines\n");
     std::printf("  Tab / [ / ] = cycle ship preset\n");
+    std::printf("  X = swap left/right engine mapping\n");
   }
 
   Ship ship;
@@ -435,6 +449,11 @@ int main(int argc, char** argv) {
           ship.cycle_config(+1);
         if (ev.key.keysym.sym == SDLK_LEFTBRACKET)
           ship.cycle_config(-1);
+        if (ev.key.keysym.sym == SDLK_x) {
+          ship.swap_engines = !ship.swap_engines;
+          std::printf("Engine mapping: %s\n",
+                      ship.swap_engines ? "SWAPPED (L↔R)" : "normal (L=left, R=right)");
+        }
       }
       if (ev.type == SDL_KEYUP) {
         if (ev.key.keysym.sym == SDLK_a || ev.key.keysym.sym == SDLK_LEFT)
@@ -443,10 +462,15 @@ int main(int argc, char** argv) {
           key_right = false;
       }
 
-      // Select / Back on the pad cycles presets (also View on Xbox, Share on DS)
+      // Select/Back cycles presets; Start swaps left/right engine mapping
       if (ev.type == SDL_CONTROLLERBUTTONDOWN) {
         if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_BACK)
           ship.cycle_config(+1);
+        if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_START) {
+          ship.swap_engines = !ship.swap_engines;
+          std::printf("Engine mapping: %s\n",
+                      ship.swap_engines ? "SWAPPED (L↔R)" : "normal (L=left, R=right)");
+        }
       }
 
       if (ev.type == SDL_CONTROLLERDEVICEADDED && !pad) {
@@ -475,8 +499,13 @@ int main(int argc, char** argv) {
     if (key_right)
       rt = std::max(rt, 1.f);
 
-    ship.left_thrust = lt;
-    ship.right_thrust = rt;
+    if (ship.swap_engines) {
+      ship.left_thrust = rt;
+      ship.right_thrust = lt;
+    } else {
+      ship.left_thrust = lt;
+      ship.right_thrust = rt;
+    }
 
     Uint64 now = SDL_GetPerformanceCounter();
     float dt = static_cast<float>(now - prev) / static_cast<float>(freq);
@@ -524,6 +553,10 @@ int main(int argc, char** argv) {
     // Preset name (pixel font)
     draw_text(ren, 20, 60, ship.cfg->name, 200, 200, 220);
     draw_text(ren, 20, 68, "SELECT BACK TO CYCLE", 120, 120, 140);
+    if (ship.swap_engines)
+      draw_text(ren, 20, 76, "ENGINES SWAPPED", 255, 180, 80);
+    else
+      draw_text(ren, 20, 76, "START TO SWAP L R", 120, 120, 140);
 
     SDL_RenderPresent(ren);
   }

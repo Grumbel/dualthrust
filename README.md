@@ -10,6 +10,7 @@ A little 2D spaceship game mildly inspired by *Space Taxi*. You pilot a craft wi
 - Gamepad with analog triggers (Xbox, DualShock/DualSense via SDL2 mappings, etc.)
 - For testing without a pad: hold `A` / `←` for left engine, `D` / `→` for right engine
 - **Select / Back** (or keyboard `Tab` / `[` / `]`) cycles ship presets (Narrow, Medium, Wide, Barge, Long)
+- **Start** (or keyboard `X`) swaps left/right engine mapping
 
 ## Build with Nix
 
