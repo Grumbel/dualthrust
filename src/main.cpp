@@ -23,7 +23,7 @@ constexpr float SHIP_MASS = 1.0f;
 constexpr float SHIP_INERTIA = 800.0f;     // moment of inertia
 constexpr float MAX_THRUST = 400.0f;       // force per engine at full trigger
 constexpr float ENGINE_OFFSET_X = 18.0f;   // left/right of center
-constexpr float ENGINE_OFFSET_Y = 22.0f;   // aft of center (local +y = aft when angle=0 upright? see below)
+constexpr float ENGINE_OFFSET_Y = 22.0f;   // aft of center (local +y = aft)
 constexpr float LINEAR_DRAG = 0.15f;
 constexpr float ANGULAR_DRAG = 1.5f;
 constexpr float MAX_ANGULAR_VEL = 8.0f;
@@ -47,24 +47,28 @@ inline Vec2 normalize(Vec2 v) {
   return l > 1e-6f ? Vec2{v.x / l, v.y / l} : Vec2{};
 }
 
-// Ship orientation: angle=0 means "upright", nose points toward -world_y (up on screen),
-// engines point toward +local_y (aft). Local +x is to the right of the ship.
+// Orientation (y increases downward, like SDL):
+//   angle = 0      → nose points up (toward -world y)
+//   angle > 0      → clockwise on screen (matches SDL_RenderCopyEx)
+// Local frame at angle 0: +x = right, +y = aft (down).
+// local→world:  x =  c*lx - s*ly
+//               y =  s*lx + c*ly
+// nose direction: (sin θ, -cos θ)
 struct Ship {
   Vec2 pos{WINDOW_W * 0.5f, WINDOW_H * 0.4f};
   Vec2 vel{};
-  float angle = 0.f;       // radians, 0 = upright (nose up)
+  float angle = 0.f;       // radians, clockwise from nose-up
   float ang_vel = 0.f;
 
   float left_thrust = 0.f;  // 0..1
   float right_thrust = 0.f;
 
   void update(float dt) {
-    // Local engine positions (aft and left/right)
-    // When angle=0: local_x -> world_x, local_y -> world_y
-    // Thrust direction in local space: engines fire toward +local_y (aft), so force on ship is -local_y
+    // Engine hardpoints in local space (aft, left/right of center)
     Vec2 left_local{-ENGINE_OFFSET_X, ENGINE_OFFSET_Y};
     Vec2 right_local{ENGINE_OFFSET_X, ENGINE_OFFSET_Y};
 
+    // local → world (clockwise angle, y-down)
     auto rotate = [this](Vec2 v) -> Vec2 {
       float c = std::cos(angle);
       float s = std::sin(angle);
@@ -74,15 +78,13 @@ struct Ship {
     Vec2 force{};
     float torque = 0.f;
 
-    // Force from each engine in world space: -rotate(local_y unit) * thrust
-    // Local thrust direction vector (unit) is (0, -1) for "forward" force? Wait:
-    // Engine points aft (+local_y). Reaction force on ship is opposite: -local_y direction.
-    Vec2 thrust_dir_local{0.f, -1.f}; // force direction in local coords (nose-ward)
+    // Reaction force on the ship is nose-ward: local (0, -1)
+    Vec2 thrust_dir_local{0.f, -1.f};
 
     if (left_thrust > 0.f) {
       Vec2 f = rotate(thrust_dir_local) * (MAX_THRUST * left_thrust);
       force += f;
-      // Torque = r × F  (2D: rx*Fy - ry*Fx)
+      // 2D cross r×F; with y-down this sign makes left engine produce clockwise torque
       Vec2 r = rotate(left_local);
       torque += r.x * f.y - r.y * f.x;
     }
@@ -124,7 +126,8 @@ struct Ship {
 };
 
 SDL_Texture* create_ship_texture(SDL_Renderer* ren) {
-  // Simple procedural ship: triangle-ish body + two engine pods
+  // Procedural ship. Texture space: nose toward TOP (small y), engines at BOTTOM.
+  // Center at (32,32). This matches local -y = nose when angle=0.
   constexpr int W = 64;
   constexpr int H = 64;
   SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormat(0, W, H, 32, SDL_PIXELFORMAT_RGBA32);
@@ -136,32 +139,44 @@ SDL_Texture* create_ship_texture(SDL_Renderer* ren) {
     *p = (a << 24) | (b << 16) | (g << 8) | r;
   };
 
-  // Clear transparent
   SDL_FillRect(surf, nullptr, 0);
 
-  // Body (pointy nose toward top of texture = local -y)
-  // Texture coords: center at (32,32), nose at y small
-  for (int y = 8; y < 48; ++y) {
-    float t = (y - 8) / 40.f;
-    int half = static_cast<int>(4 + t * 14);
+  // Sharp triangular hull — nose is an unmistakable point at the top
+  for (int y = 4; y < 46; ++y) {
+    float t = (y - 4) / 42.f;                 // 0 at nose → 1 at base
+    int half = static_cast<int>(1 + t * 16);  // 1px tip → wide base
     for (int x = 32 - half; x <= 32 + half; ++x) {
-      put(x, y, 200, 200, 220);
+      // Slight gradient: brighter toward nose
+      Uint8 shade = static_cast<Uint8>(220 - t * 40);
+      put(x, y, shade, shade, static_cast<Uint8>(shade + 15));
     }
   }
-  // Cockpit
-  for (int y = 14; y < 26; ++y)
-    for (int x = 28; x < 36; ++x)
-      put(x, y, 80, 160, 255);
 
-  // Engine pods (aft)
-  for (int y = 46; y < 56; ++y) {
-    for (int x = 14; x < 24; ++x) put(x, y, 160, 80, 60);   // left
-    for (int x = 40; x < 50; ++x) put(x, y, 160, 80, 60);   // right
+  // Bright nose tip (heading cue)
+  for (int y = 2; y < 10; ++y) {
+    int half = (y < 6) ? 1 : 2;
+    for (int x = 32 - half; x <= 32 + half; ++x)
+      put(x, y, 255, 220, 60);
   }
-  // Nozzles
-  for (int y = 54; y < 60; ++y) {
-    for (int x = 16; x < 22; ++x) put(x, y, 40, 40, 40);
-    for (int x = 42; x < 48; ++x) put(x, y, 40, 40, 40);
+
+  // Cockpit window (upper body)
+  for (int y = 16; y < 28; ++y)
+    for (int x = 27; x < 37; ++x)
+      put(x, y, 60, 140, 255);
+
+  // Dark "keel" line down the center for orientation
+  for (int y = 10; y < 46; ++y)
+    put(32, y, 40, 40, 55);
+
+  // Engine pods (aft corners) — warm metal, clearly the rear
+  for (int y = 44; y < 56; ++y) {
+    for (int x = 12; x < 24; ++x) put(x, y, 180, 90, 50);   // left
+    for (int x = 40; x < 52; ++x) put(x, y, 180, 90, 50);   // right
+  }
+  // Nozzle openings
+  for (int y = 54; y < 62; ++y) {
+    for (int x = 14; x < 22; ++x) put(x, y, 25, 25, 30);
+    for (int x = 42; x < 50; ++x) put(x, y, 25, 25, 30);
   }
 
   SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
@@ -175,32 +190,55 @@ void draw_exhaust(SDL_Renderer* ren, const Ship& ship, bool left) {
 
   float t = left ? ship.left_thrust : ship.right_thrust;
   float local_x = left ? -ENGINE_OFFSET_X : ENGINE_OFFSET_X;
-  float local_y = ENGINE_OFFSET_Y + 8.f; // slightly behind nozzle
+  float local_y = ENGINE_OFFSET_Y + 10.f; // just behind nozzle
 
   float c = std::cos(ship.angle);
   float s = std::sin(ship.angle);
+  // same local→world as physics
   float wx = ship.pos.x + c * local_x - s * local_y;
   float wy = ship.pos.y + s * local_x + c * local_y;
 
-  // Exhaust direction = aft = +local_y rotated
-  float ex = s;   // rotate (0,1)
+  // Aft direction = rotate(local +y) = (-s, c)
+  float ex = -s;
   float ey = c;
 
-  int len = static_cast<int>(12 + t * 28);
-  SDL_SetRenderDrawColor(ren, 255, 180, 40, 220);
+  int len = static_cast<int>(14 + t * 32);
+  SDL_SetRenderDrawColor(ren, 255, 190, 50, 230);
   for (int i = 0; i < len; i += 2) {
     int px = static_cast<int>(wx + ex * i);
     int py = static_cast<int>(wy + ey * i);
     SDL_RenderDrawPoint(ren, px, py);
     SDL_RenderDrawPoint(ren, px + 1, py);
   }
-  // Outer glow
-  SDL_SetRenderDrawColor(ren, 255, 80, 20, 120);
+  SDL_SetRenderDrawColor(ren, 255, 70, 20, 140);
   for (int i = 0; i < len / 2; i += 3) {
-    int px = static_cast<int>(wx + ex * i + (left ? -1 : 1));
+    int px = static_cast<int>(wx + ex * i + (left ? -1.f : 1.f));
     int py = static_cast<int>(wy + ey * i);
     SDL_RenderDrawPoint(ren, px, py);
   }
+}
+
+// Bright heading tick from center toward the nose — removes any ambiguity
+void draw_heading_marker(SDL_Renderer* ren, const Ship& ship) {
+  float c = std::cos(ship.angle);
+  float s = std::sin(ship.angle);
+  // nose dir = (s, -c)
+  float nx = s;
+  float ny = -c;
+  int x0 = static_cast<int>(ship.pos.x);
+  int y0 = static_cast<int>(ship.pos.y);
+  int x1 = static_cast<int>(ship.pos.x + nx * 36.f);
+  int y1 = static_cast<int>(ship.pos.y + ny * 36.f);
+  SDL_SetRenderDrawColor(ren, 255, 230, 80, 220);
+  SDL_RenderDrawLine(ren, x0, y0, x1, y1);
+  // small tip crossbar
+  float rx = c;   // right dir
+  float ry = s;
+  SDL_RenderDrawLine(ren,
+                     static_cast<int>(ship.pos.x + nx * 30.f - rx * 5.f),
+                     static_cast<int>(ship.pos.y + ny * 30.f - ry * 5.f),
+                     static_cast<int>(ship.pos.x + nx * 30.f + rx * 5.f),
+                     static_cast<int>(ship.pos.y + ny * 30.f + ry * 5.f));
 }
 
 }  // namespace
@@ -331,13 +369,12 @@ int main(int argc, char** argv) {
     draw_exhaust(ren, ship, true);
     draw_exhaust(ren, ship, false);
 
-    // Ship sprite (texture is 64x64, nose toward top of texture)
+    // Ship sprite: texture nose = top; our angle is clockwise from nose-up → matches SDL
     SDL_Rect dst{static_cast<int>(ship.pos.x - 32), static_cast<int>(ship.pos.y - 32), 64, 64};
-    // SDL_RenderCopyEx angle is clockwise degrees; our angle is CCW math radians from upright.
-    // When angle=0 (upright), texture nose is up → good.
-    // Positive math angle (CCW) should rotate the sprite CCW on screen → SDL needs negative degrees.
-    double deg = -ship.angle * 180.0 / PI;
+    double deg = ship.angle * 180.0 / PI;
     SDL_RenderCopyEx(ren, ship_tex, nullptr, &dst, deg, nullptr, SDL_FLIP_NONE);
+
+    draw_heading_marker(ren, ship);
 
     // HUD
     // (no TTF; just colored bars for thrust)

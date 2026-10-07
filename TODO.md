@@ -2,29 +2,27 @@
 
 ## Current tip
 
-`375fc76` — Initial dualthrust: dual-engine spaceship with gamepad trigger controls
+Orientation / heading clarity fix (pending commit on top of fc6bec5).
 
-Bundle: `dualthrust-001.1-initial-375fc76.bundle` (base = this root commit)
+## Done in this tip
+
+- Unified orientation convention: angle=0 nose-up, positive angle = clockwise (matches SDL + y-down).
+- Fixed SDL_RenderCopyEx sign (was inverted vs physics).
+- Fixed exhaust direction (was mirrored).
+- Clearer procedural ship: sharp nose, gold tip, center keel, distinct rear engines.
+- Yellow heading tick + crossbar drawn toward the nose.
 
 ## Open work
 
 - [ ] Polish physics / tuning (thrust, gravity, drag, engine offset)
 - [ ] Add simple landing pads / crash detection if desired
-- [ ] Optional keyboard already present as fallback (A/D, arrows)
-- [ ] Better ship sprite / exhaust VFX
+- [ ] Better exhaust VFX / particles
 - [ ] Sound (engine noise)
 - [ ] Full official GPL-3.0 text in LICENSES/ (currently short placeholder)
 
 ## Handoff
 
-- Project root: this repo
 - Bundle naming base: dualthrust
-- Next bundle number: 002 (or 001.2 if amending same tip work)
+- Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
-- Apply: `git pull /path/to/dualthrust-001.1-initial-375fc76.bundle HEAD` into a fresh repo, or `git clone ...` from the bundle.
-
-## Notes
-
-- Keyboard fallback (A/D or arrows) is included for development without a pad; primary design is triggers only.
-- No formal levels yet — free flight with gravity and soft screen bounds.
