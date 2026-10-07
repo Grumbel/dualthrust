@@ -2,12 +2,13 @@
 
 ## Current tip
 
-`d76f506` — Reject overlapping landing pads during cave generation
+`8336611` — Toggle fullscreen with Alt+Enter
 
-Bundle: `dualthrust-018.1-pad-spacing-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-019.1-alt-enter-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
+- [ ] Ships with engines at the top (requested)
 - [ ] Polish landing / bounce feel
 - [ ] Fuel / score / sound
 - [ ] Full official GPL-3.0 text in LICENSES/
