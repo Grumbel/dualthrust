@@ -2,13 +2,13 @@
 
 ## Current tip
 
-`2cbdfbf` — Wall bounce at low speed; crash only on hard impacts
+`4b0d187` — Richer pads, dual-stick thrust, CLI, man page, startup banner
 
-Bundle: `dualthrust-014.1-bounce-crash-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-015.1-pads-cli-man-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
-- [ ] Polish landing thresholds / bounce feel
+- [ ] Polish landing / bounce feel
 - [ ] Fuel / score / sound
 - [ ] Full official GPL-3.0 text in LICENSES/
 
