@@ -2,13 +2,13 @@
 
 ## Current tip
 
-`c50f5de` — Remove stray cave pixels, fill rock, XDG config dir
+`2cbdfbf` — Wall bounce at low speed; crash only on hard impacts
 
-Bundle: `dualthrust-013.1-cleanup-xdg-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-014.1-bounce-crash-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
-- [ ] Polish landing thresholds
+- [ ] Polish landing thresholds / bounce feel
 - [ ] Fuel / score / sound
 - [ ] Full official GPL-3.0 text in LICENSES/
 
