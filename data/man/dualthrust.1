@@ -1,0 +1,67 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH DUALTHRUST 1 "October 2026" "dualthrust 0.1.0" "Games"
+.SH NAME
+dualthrust \- CRT dual-engine cave lander
+.SH SYNOPSIS
+.B dualthrust
+[\fIoptions\fR]
+.SH DESCRIPTION
+.B dualthrust
+is a small 2D cave lander with a green CRT look. The left and right
+engines are driven by the gamepad triggers and/or by pushing the
+corresponding analog stick up. Differential thrust translates and rotates
+the ship. Land gently on marked pads; bounce off walls at low speed;
+crash only on hard impacts.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Show help and exit.
+.TP
+.BR \-V ", " \-\-version
+Show version and exit.
+.TP
+.BR \-f ", " \-\-fullscreen
+Start in fullscreen.
+.TP
+.BR \-w ", " \-\-window " " \fIWxH\fR
+Window size (minimum 320x240).
+.TP
+.BR \-s ", " \-\-ship " " \fIN\fR
+Ship preset index (0=Narrow .. 4=Long).
+.TP
+.BR \-S ", " \-\-seed " " \fIN\fR
+Unsigned seed for cave generation.
+.TP
+.BR \-x ", " \-\-swap\-engines
+Swap left/right engine mapping.
+.TP
+.B \-\-config\-dir \fIPATH\fR
+Override XDG config directory (default
+\fI$XDG_CONFIG_HOME/dualthrust\fR or \fI~/.config/dualthrust\fR).
+.SH CONTROLS
+.TP
+Triggers / stick up
+Left and right engine thrust.
+.TP
+Start
+Open or close the menu.
+.TP
+A / B
+Reset after crash, or relight after landing.
+.TP
+Y / G
+Generate a new cave.
+.TP
+F
+Toggle fullscreen.
+.TP
+Escape
+Menu, or quit from the menu.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/dualthrust/config
+Saved settings (fullscreen, ship, engine swap).
+.SH SEE ALSO
+.BR sdl2-config (1)
+.SH AUTHOR
+Ingo Ruhnke <grumbel@gmail.com>

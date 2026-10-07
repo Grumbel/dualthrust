@@ -40,3 +40,7 @@ install(FILES data/icons/hicolor/256x256/apps/dualthrust.png
 install(FILES data/metainfo/dualthrust.metainfo.xml
   DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo
 )
+
+install(FILES data/man/dualthrust.1
+  DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+)

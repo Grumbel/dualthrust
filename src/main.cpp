@@ -917,16 +917,60 @@ void draw_cave(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
   }
 
 
-  // Pad markers
-  for (const auto& p : cave.pads) {
+  // Landing platforms — deck, struts, chevrons, beacon lights
+  Uint32 ticks = SDL_GetTicks();
+  for (int pi = 0; pi < static_cast<int>(cave.pads.size()); ++pi) {
+    const auto& p = cave.pads[pi];
     float sx0 = cam.continuous_x(p.x0) - cam.x;
     float sx1 = sx0 + (p.x1 - p.x0);
+    int x0 = static_cast<int>(sx0);
+    int x1 = static_cast<int>(sx1);
     int y = static_cast<int>(p.y - cam.y);
-    set_color(ren, CRT_PAD);
-    SDL_RenderDrawLine(ren, static_cast<int>(sx0), y, static_cast<int>(sx1), y);
-    SDL_RenderDrawLine(ren, static_cast<int>(sx0), y + 1, static_cast<int>(sx1), y + 1);
-    SDL_RenderDrawLine(ren, static_cast<int>(sx0), y, static_cast<int>(sx0), y + 10);
-    SDL_RenderDrawLine(ren, static_cast<int>(sx1), y, static_cast<int>(sx1), y + 10);
+    if (x1 < -40 || x0 > WINDOW_W + 40 || y < -40 || y > WINDOW_H + 40)
+      continue;
+    int w = std::max(1, x1 - x0);
+
+    // Deck slab
+    set_color(ren, CRT_PAD, 200);
+    SDL_Rect deck{x0, y - 2, w, 5};
+    SDL_RenderFillRect(ren, &deck);
+    set_color(ren, CRT_BRIGHT);
+    SDL_RenderDrawRect(ren, &deck);
+
+    // Cross-hatch on deck
+    set_color(ren, CRT_MID, 180);
+    for (int t = 0; t < w; t += 6)
+      SDL_RenderDrawLine(ren, x0 + t, y - 2, x0 + t + 4, y + 2);
+
+    // Support struts into the rock
+    set_color(ren, CRT_PAD, 160);
+    int mid = (x0 + x1) / 2;
+    SDL_RenderDrawLine(ren, x0 + 4, y + 3, x0 + 4, y + 18);
+    SDL_RenderDrawLine(ren, x1 - 4, y + 3, x1 - 4, y + 18);
+    SDL_RenderDrawLine(ren, mid, y + 3, mid, y + 22);
+    SDL_RenderDrawLine(ren, x0 + 4, y + 18, x1 - 4, y + 18);
+
+    // Approach chevrons above the pad
+    set_color(ren, CRT_WARN, 200);
+    for (int c = 0; c < 3; ++c) {
+      int cy = y - 14 - c * 10;
+      int inset = 8 + c * 6;
+      SDL_RenderDrawLine(ren, x0 + inset, cy, mid, cy + 6);
+      SDL_RenderDrawLine(ren, x1 - inset, cy, mid, cy + 6);
+    }
+
+    // Blinking end beacons
+    bool on = ((ticks / 400) + pi) % 2 == 0;
+    set_color(ren, on ? CRT_HOT : CRT_PAD);
+    SDL_Rect b1{x0 - 2, y - 6, 4, 4};
+    SDL_Rect b2{x1 - 2, y - 6, 4, 4};
+    SDL_RenderFillRect(ren, &b1);
+    SDL_RenderFillRect(ren, &b2);
+
+    // Center T-mark
+    set_color(ren, CRT_BRIGHT);
+    SDL_RenderDrawLine(ren, mid - 8, y, mid + 8, y);
+    SDL_RenderDrawLine(ren, mid, y - 6, mid, y + 2);
   }
 }
 
@@ -1083,13 +1127,14 @@ void draw_scanlines(SDL_Renderer* ren) {
   }
 }
 
-}  // namespace
-
-
 // ---------------------------------------------------------------------------
 // XDG config (~/.config/dualthrust/ or $XDG_CONFIG_HOME/dualthrust/)
 // ---------------------------------------------------------------------------
+static std::string g_config_dir_override;
+
 std::string config_dir_path() {
+  if (!g_config_dir_override.empty())
+    return g_config_dir_override;
   const char* xdg = std::getenv("XDG_CONFIG_HOME");
   if (xdg && xdg[0] != '\0')
     return std::string(xdg) + "/dualthrust";
@@ -1161,18 +1206,143 @@ void save_config(const UserConfig& c) {
   std::fclose(f);
 }
 
+static void print_help(const char* argv0) {
+  std::printf(
+      "Usage: %s [options]\n"
+      "\n"
+      "CRT dual-engine cave lander. Triggers or stick-up control engines.\n"
+      "\n"
+      "Options:\n"
+      "  -h, --help           Show this help\n"
+      "  -V, --version        Show version\n"
+      "  -f, --fullscreen     Start fullscreen\n"
+      "  -w, --window W x H   Window size (e.g. 1280x720)\n"
+      "  -s, --ship N         Ship preset index 0..4\n"
+      "  -S, --seed N         Cave generation seed (unsigned)\n"
+      "  -x, --swap-engines   Swap left/right engine mapping\n"
+      "  --config-dir PATH    Override XDG config directory\n"
+      "\n"
+      "Config: $XDG_CONFIG_HOME/dualthrust/config  (default ~/.config/dualthrust/)\n",
+      argv0);
+}
+
+static void print_version() {
+  std::printf("dualthrust 0.1.0\n");
+}
+
 int main(int argc, char** argv) {
-  (void)argc;
-  (void)argv;
+  bool cli_fullscreen = false;
+  bool cli_fullscreen_set = false;
+  bool cli_swap = false;
+  bool cli_swap_set = false;
+  int cli_ship = -1;
+  unsigned cave_seed = 0xC0FFEE;
+  int win_w = WINDOW_W_DEFAULT;
+  int win_h = WINDOW_H_DEFAULT;
+
+  for (int i = 1; i < argc; ++i) {
+    std::string a = argv[i];
+    auto need = [&](const char* opt) -> const char* {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "dualthrust: %s requires an argument\n", opt);
+        std::exit(2);
+      }
+      return argv[++i];
+    };
+    if (a == "-h" || a == "--help") {
+      print_help(argv[0]);
+      return 0;
+    }
+    if (a == "-V" || a == "--version") {
+      print_version();
+      return 0;
+    }
+    if (a == "-f" || a == "--fullscreen") {
+      cli_fullscreen = true;
+      cli_fullscreen_set = true;
+      continue;
+    }
+    if (a == "-x" || a == "--swap-engines") {
+      cli_swap = true;
+      cli_swap_set = true;
+      continue;
+    }
+    if (a == "-s" || a == "--ship") {
+      cli_ship = std::atoi(need("--ship"));
+      continue;
+    }
+    if (a == "-S" || a == "--seed") {
+      cave_seed = static_cast<unsigned>(std::strtoul(need("--seed"), nullptr, 0));
+      continue;
+    }
+    if (a == "-w" || a == "--window") {
+      const char* v = need("--window");
+      int W = 0, H = 0;
+      if (std::sscanf(v, "%dx%d", &W, &H) != 2 || W < 320 || H < 240) {
+        std::fprintf(stderr, "dualthrust: bad window size '%s' (use WxH)\n", v);
+        return 2;
+      }
+      win_w = W;
+      win_h = H;
+      continue;
+    }
+    if (a == "--config-dir") {
+      g_config_dir_override = need("--config-dir");
+      continue;
+    }
+    std::fprintf(stderr, "dualthrust: unknown option '%s' (try --help)\n", a.c_str());
+    return 2;
+  }
+
+  // --- Startup diagnostics ---
+  {
+    std::printf("dualthrust 0.1.0 starting\n");
+    std::printf("  executable: %s\n", argv[0]);
+#if defined(__linux__)
+    std::printf("  system:     Linux\n");
+#elif defined(__APPLE__)
+    std::printf("  system:     Apple\n");
+#else
+    std::printf("  system:     other\n");
+#endif
+#ifdef __VERSION__
+    std::printf("  compiler:   %s\n", __VERSION__);
+#endif
+    const char* home = std::getenv("HOME");
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    std::printf("  HOME:       %s\n", home ? home : "(unset)");
+    std::printf("  XDG_CONFIG_HOME: %s\n", xdg ? xdg : "(unset)");
+    std::printf("  config dir: %s\n", config_dir_path().c_str());
+    std::printf("  config:     %s\n", config_file_path().c_str());
+    char cwd[4096];
+    if (getcwd(cwd, sizeof(cwd)))
+      std::printf("  cwd:        %s\n", cwd);
+    std::printf("  window:     %dx%d\n", win_w, win_h);
+    std::printf("  cave seed:  0x%08x (%u)\n", cave_seed, cave_seed);
+    std::fflush(stdout);
+  }
 
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) != 0) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
   }
+  {
+    SDL_version v;
+    SDL_GetVersion(&v);
+    std::printf("  SDL:        %d.%d.%d\n", v.major, v.minor, v.patch);
+    std::printf("  joysticks:  %d\n", SDL_NumJoysticks());
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+      if (SDL_IsGameController(i))
+        std::printf("    [%d] controller: %s\n", i, SDL_GameControllerNameForIndex(i));
+      else
+        std::printf("    [%d] joystick\n", i);
+    }
+    std::fflush(stdout);
+  }
 
   SDL_Window* window = SDL_CreateWindow(
-      "dualthrust", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_W_DEFAULT,
-      WINDOW_H_DEFAULT, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+      "dualthrust", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h,
+      SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   if (!window) {
     SDL_Quit();
     return 1;
@@ -1203,10 +1373,25 @@ int main(int argc, char** argv) {
 
   Ship ship;
   UserConfig user_cfg = load_config();
+  if (cli_ship >= 0)
+    user_cfg.ship = cli_ship;
+  if (cli_swap_set)
+    user_cfg.swap_engines = cli_swap;
+  if (cli_fullscreen_set)
+    user_cfg.fullscreen = cli_fullscreen;
   ship.set_config(user_cfg.ship);
   ship.swap_engines = user_cfg.swap_engines;
   float start_x = 0.5f * (cave.pads[0].x0 + cave.pads[0].x1);
   ship.spawn(cave, start_x);
+  std::printf("  ship:       %s (%d)
+", ship.cfg->name, ship.config_index);
+  std::printf("  swap L/R:   %s
+", ship.swap_engines ? "yes" : "no");
+  std::printf("  fullscreen: %s
+", user_cfg.fullscreen ? "yes" : "no");
+  std::printf("Ready.
+");
+  std::fflush(stdout);
 
   Camera cam;
   auto snap_camera = [&]() {
@@ -1380,8 +1565,21 @@ int main(int argc, char** argv) {
     float lt = 0.f, rt = 0.f;
     if (mode == AppMode::Playing) {
       if (pad) {
-        lt = clampf(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32767.f, 0.f, 1.f);
-        rt = clampf(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32767.f, 0.f, 1.f);
+        // Triggers
+        float tL = clampf(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32767.f, 0.f, 1.f);
+        float tR = clampf(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32767.f, 0.f, 1.f);
+        // Analog sticks: push up (negative Y in SDL) = thrust for that side
+        constexpr Sint16 DEAD = 8000;
+        auto stick_up = [](Sint16 raw) -> float {
+          if (raw >= -DEAD)
+            return 0.f;
+          // -DEAD .. -32768  →  0 .. 1
+          return clampf((-raw - DEAD) / static_cast<float>(32768 - DEAD), 0.f, 1.f);
+        };
+        float sL = stick_up(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY));
+        float sR = stick_up(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY));
+        lt = std::max(tL, sL);
+        rt = std::max(tR, sR);
       }
       if (key_left) lt = 1.f;
       if (key_right) rt = 1.f;
@@ -1434,3 +1632,5 @@ int main(int argc, char** argv) {
   SDL_Quit();
   return 0;
 }
+
+}  // namespace

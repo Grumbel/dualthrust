@@ -45,3 +45,14 @@ GPL-3.0-or-later.
 ## Config
 
 Settings (fullscreen, ship preset, engine swap) are stored under `$XDG_CONFIG_HOME/dualthrust/config` (default `~/.config/dualthrust/config`).
+
+## CLI
+
+```
+dualthrust --help
+dualthrust --fullscreen --ship 2 --seed 42
+```
+
+Man page: `man dualthrust` after install.
+
+Controls: triggers **or** analog stick up (left stick → left engine, right stick → right engine).
