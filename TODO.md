@@ -2,7 +2,9 @@
 
 ## Current tip
 
-Engine L/R swap toggle (pending commit on top of 117179a).
+`3fc13e8` — Add option to swap left/right engine controls
+
+Bundle: `dualthrust-005.1-swap-engines-375fc76.bundle` (base 375fc76)
 
 ## Done recently
 
@@ -23,3 +25,4 @@ Engine L/R swap toggle (pending commit on top of 117179a).
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
+- Apply: `git pull path/to/dualthrust-005.1-swap-engines-375fc76.bundle HEAD`
