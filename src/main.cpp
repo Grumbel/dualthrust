@@ -18,8 +18,6 @@
 #include <unistd.h>
 #include <cerrno>
 
-namespace {
-
 // Mutable viewport — updated on window resize / fullscreen
 int WINDOW_W = 1280;
 int WINDOW_H = 720;
@@ -1628,5 +1626,3 @@ int main(int argc, char** argv) {
   SDL_Quit();
   return 0;
 }
-
-}  // namespace
