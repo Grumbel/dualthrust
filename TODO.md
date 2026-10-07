@@ -2,9 +2,9 @@
 
 ## Current tip
 
-`03e1534` — Export global main: drop anonymous namespace wrapper
+`5b744fa` — Make background motion dots larger and brighter
 
-Bundle: `dualthrust-015.3-fix-main-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-016.1-bigger-dots-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
