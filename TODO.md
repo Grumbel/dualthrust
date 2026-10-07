@@ -2,20 +2,14 @@
 
 ## Current tip
 
-`f0ee806` — Cave world with roof, vertical scroll, stars, and Start menu
+`02d1a2d` — Widen caves and render smooth marching-squares vector contours
 
-Bundle: `dualthrust-009.1-cave-menu-375fc76.bundle` (base 375fc76)
-
-## Done recently
-
-- 2D cave (tunnel, branches, stalactites, pillars, pads), 24000×4800
-- Vertical camera scroll, background star dots
-- Start menu: Resume, Fullscreen, New Cave, Ship, Swap, Quit
-- Desktop integration
+Bundle: `dualthrust-010.1-wide-vector-cave-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
-- [ ] Polish cave generation / landing thresholds
+- [ ] Window resize + bigger font (requested earlier)
+- [ ] Polish landing thresholds
 - [ ] Fuel / score / sound
 - [ ] Full official GPL-3.0 text in LICENSES/
 
@@ -25,4 +19,3 @@ Bundle: `dualthrust-009.1-cave-menu-375fc76.bundle` (base 375fc76)
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
-- Apply: `git pull path/to/dualthrust-009.1-cave-menu-375fc76.bundle HEAD`
