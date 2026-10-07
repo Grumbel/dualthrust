@@ -29,9 +29,11 @@ nix run
 
 - Left trigger: left engine thrust (0–1)
 - Right trigger: right engine thrust (0–1)
+- Select / Back: cycle ship preset (Narrow / Medium / Wide / Barge / Long)
 - Escape / window close: quit
 
-No other controls. The ship has mass, inertia, gravity, and engine offset for torque.
+Keyboard fallback: A/D or arrows = engines; Tab / [ / ] = cycle preset.
+Simulation runs at TIME_SCALE 0.62 of wall-clock.
 
 ## License
 

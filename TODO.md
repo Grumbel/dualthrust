@@ -2,25 +2,22 @@
 
 ## Current tip
 
-`c0b0cce` — Fix ship orientation: clockwise angle, exhaust, clearer nose
+Ship presets (Select/Back) + slower simulation (pending commit).
 
-Bundle: `dualthrust-003.1-fix-orientation-375fc76.bundle` (base 375fc76)
+## Done recently
 
-## Done in this tip
-
-- Unified orientation convention: angle=0 nose-up, positive angle = clockwise (matches SDL + y-down).
-- Fixed SDL_RenderCopyEx sign (was inverted vs physics).
-- Fixed exhaust direction (was mirrored).
-- Clearer procedural ship: sharp nose, gold tip, center keel, distinct rear engines.
-- Yellow heading tick + crossbar drawn toward the nose.
+- Orientation fix (clockwise angle, exhaust, heading marker)
+- Five ship presets with different size / engine spacing / mass / inertia / thrust
+- Select/Back (and Tab / [ / ]) cycles presets
+- TIME_SCALE 0.62 slows the whole sim
 
 ## Open work
 
-- [ ] Polish physics / tuning (thrust, gravity, drag, engine offset)
-- [ ] Add simple landing pads / crash detection if desired
+- [ ] Polish physics / tuning per preset
+- [ ] Landing pads / crash detection
 - [ ] Better exhaust VFX / particles
 - [ ] Sound (engine noise)
-- [ ] Full official GPL-3.0 text in LICENSES/ (currently short placeholder)
+- [ ] Full official GPL-3.0 text in LICENSES/
 
 ## Handoff
 
@@ -28,4 +25,3 @@ Bundle: `dualthrust-003.1-fix-orientation-375fc76.bundle` (base 375fc76)
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
-- Apply: `git pull path/to/dualthrust-003.1-fix-orientation-375fc76.bundle HEAD`
