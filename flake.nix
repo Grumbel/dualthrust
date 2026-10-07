@@ -4,9 +4,15 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # ArkOS (R36S) aarch64 sysroot: headers + libs the handheld port links against
+    arkos-sysroot = {
+      url = "github:grumnix/arkos-sysroot";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, arkos-sysroot }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
@@ -14,7 +20,37 @@
       });
     in
     {
-      packages = forAllSystems ({ pkgs }: {
+      packages = forAllSystems ({ pkgs }:
+        let
+          lib = pkgs.lib;
+          version = "0.1.0";
+          r36s = import ./nix/r36s.nix {
+            inherit (pkgs) lib stdenv stdenvNoCC cmake pkg-config writeShellScript zip pkgsCross;
+            sysrootSrc = arkos-sysroot;
+            # `DUALTHRUST_ARKOS_SYSROOT=/nix/store/…-arkos-sysroot-… nix build --impure .#…` uses an
+            # already-built sysroot instead of the input (e.g. one a pingus build unpacked).
+            sysrootOverride =
+              let p = builtins.getEnv "DUALTHRUST_ARKOS_SYSROOT";
+              in if p == "" then null else builtins.storePath p;
+          };
+          dualthrustR36s = r36s.mkDualthrustR36s {
+            src = lib.cleanSource ./.;
+            inherit version;
+          };
+          dualthrustR36sPortMaster = r36s.mkDualthrustR36sPortMaster {
+            r36sPkg = dualthrustR36s;
+            inherit version;
+          };
+        in {
+        # R36S / ArkOS handheld (aarch64, linked against the ArkOS sysroot)
+        arkos-sysroot = r36s.arkosSysroot;
+        dualthrust-r36s = dualthrustR36s;
+        dualthrust-r36s-portmaster = dualthrustR36sPortMaster;
+        dualthrust-r36s-portmaster-zip = r36s.mkDualthrustR36sPortMasterZip {
+          portMasterPkg = dualthrustR36sPortMaster;
+          inherit version;
+        };
+
         default = pkgs.stdenv.mkDerivation {
           pname = "dualthrust";
           version = "0.1.0";

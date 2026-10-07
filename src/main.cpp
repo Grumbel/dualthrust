@@ -4,1304 +4,41 @@
 
 #include <SDL.h>
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
+#include <unistd.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
-#include <vector>
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <cerrno>
+#include "audio.hpp"
+#include "config.hpp"
+#include "defs.hpp"
+#include "game.hpp"
+#include "render.hpp"
+#include "systems.hpp"
+#include "ui.hpp"
 
-// Mutable viewport — updated on window resize / fullscreen
-int WINDOW_W = 1280;
-int WINDOW_H = 720;
+namespace {
+
 constexpr int WINDOW_W_DEFAULT = 1280;
 constexpr int WINDOW_H_DEFAULT = 720;
 
-// Pixel font scale (3x5 glyph cells become FONT_SCALE×FONT_SCALE pixels)
-constexpr int FONT_SCALE = 3;
-constexpr int FONT_CELL_W = 3 * FONT_SCALE + FONT_SCALE;  // glyph width + gap
-constexpr int FONT_CELL_H = 5 * FONT_SCALE;
-
-constexpr float PI = 3.14159265358979323846f;
-constexpr float TIME_SCALE = 0.62f;
-
-constexpr float GRAVITY = 120.0f;
-constexpr float LINEAR_DRAG = 0.08f;
-constexpr float ANGULAR_DRAG = 1.2f;
-constexpr float MAX_ANGULAR_VEL = 8.0f;
-
-constexpr float LAND_MAX_VY = 55.0f;
-constexpr float LAND_MAX_VX = 40.0f;
-constexpr float LAND_MAX_ANGLE = 0.22f;
-constexpr float LAND_MAX_ANGVEL = 1.2f;
-
-// Impact speed along surface normal; above this → crash, below → bounce
-constexpr float CRASH_IMPACT_SPEED = 200.0f;
-constexpr float BOUNCE_RESTITUTION = 0.42f;  // normal bounce factor
-constexpr float BOUNCE_FRICTION = 0.85f;     // keep tangential velocity
-constexpr float BOUNCE_ANG_DAMP = 0.55f;
-
-constexpr SDL_Color CRT_BG{0, 10, 4, 255};
-constexpr SDL_Color CRT_DIM{16, 64, 32, 255};
-constexpr SDL_Color CRT_MID{40, 180, 80, 255};
-constexpr SDL_Color CRT_BRIGHT{140, 255, 160, 255};
-constexpr SDL_Color CRT_WARN{220, 200, 60, 255};
-constexpr SDL_Color CRT_HOT{255, 120, 40, 255};
-constexpr SDL_Color CRT_PAD{80, 220, 140, 255};
-constexpr SDL_Color CRT_STAR{120, 220, 140, 255};
-constexpr SDL_Color CRT_MENU{20, 40, 24, 230};
-
-struct Vec2 {
-  float x = 0.f, y = 0.f;
-  Vec2() = default;
-  Vec2(float x_, float y_) : x(x_), y(y_) {}
-  Vec2 operator+(Vec2 o) const { return {x + o.x, y + o.y}; }
-  Vec2 operator-(Vec2 o) const { return {x - o.x, y - o.y}; }
-  Vec2 operator*(float s) const { return {x * s, y * s}; }
-  Vec2& operator+=(Vec2 o) { x += o.x; y += o.y; return *this; }
+struct Options {
+  bool fullscreen = false, fullscreen_set = false;
+  bool swap = false, swap_set = false;
+  bool mute = false;
+  int ship = -1;
+  unsigned seed = 0xC0FFEE;
+  int win_w = WINDOW_W_DEFAULT, win_h = WINDOW_H_DEFAULT;
+  // Debug / automation
+  int frames = 0;              // exit after N frames (0 = run forever)
+  const char* screenshot = nullptr;
+  bool play = false;           // skip the menu
+  float hold[2] = {0.f, 0.f};  // constant engine input
 };
 
-inline float clampf(float v, float lo, float hi) { return std::max(lo, std::min(hi, v)); }
-inline float lerpf(float a, float b, float t) { return a + (b - a) * t; }
-
-// ---------------------------------------------------------------------------
-// Ship presets
-// ---------------------------------------------------------------------------
-struct ShipConfig {
-  const char* name;
-  float half_w, half_h;
-  float engine_offset_x, engine_offset_y;  // offset magnitudes
-  float mass, inertia, max_thrust;
-  bool engines_top;  // true: engines on nose/top (-y); false: aft/bottom (+y)
-};
-
-// Local +y = ground-side when upright. engines_top places thrusters at -engine_offset_y.
-constexpr ShipConfig SHIP_CONFIGS[] = {
-    {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f, false},
-    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false},
-    {"Wide", 48.f, 28.f, 36.f, 26.f, 1.25f, 1600.f, 420.f, false},
-    {"Barge", 64.f, 26.f, 52.f, 24.f, 1.6f, 2800.f, 440.f, false},
-    {"Long", 26.f, 42.f, 14.f, 36.f, 1.1f, 1100.f, 390.f, false},
-    {"Topdog", 28.f, 34.f, 16.f, 30.f, 1.05f, 950.f, 410.f, true},
-    {"Canopy", 44.f, 30.f, 30.f, 28.f, 1.35f, 1700.f, 430.f, true},
-};
-constexpr int SHIP_CONFIG_COUNT = static_cast<int>(sizeof(SHIP_CONFIGS) / sizeof(SHIP_CONFIGS[0]));
-
-// ---------------------------------------------------------------------------
-// 2D cave world (toroidal in X, tall in Y)
-// ---------------------------------------------------------------------------
-struct LandingPad {
-  float x0, x1, y;  // world surface y of the pad
-};
-
-struct Cave {
-  static constexpr float WORLD_W = 24000.f;
-  static constexpr float WORLD_H = 4800.f;
-  static constexpr float CELL = 16.f;
-  static constexpr int GW = static_cast<int>(WORLD_W / CELL);  // 1500
-  static constexpr int GH = static_cast<int>(WORLD_H / CELL);  // 300
-
-  std::vector<uint8_t> solid;  // GW * GH, 1 = rock
-  std::vector<LandingPad> pads;
-  std::vector<Vec2> stars;  // background dots in world space
-  unsigned seed = 1;
-
-  static float wrap_x(float wx) {
-    wx = std::fmod(wx, WORLD_W);
-    if (wx < 0.f) wx += WORLD_W;
-    return wx;
-  }
-  static float wrap_delta(float from, float to) {
-    float d = to - from;
-    d = std::fmod(d + WORLD_W * 1.5f, WORLD_W) - WORLD_W * 0.5f;
-    return d;
-  }
-
-  int idx(int gx, int gy) const {
-    gx = ((gx % GW) + GW) % GW;
-    gy = clampf(static_cast<float>(gy), 0.f, static_cast<float>(GH - 1));
-    return gy * GW + gx;
-  }
-
-  bool is_solid_cell(int gx, int gy) const {
-    if (gy < 0 || gy >= GH) return true;  // outside vertical = solid
-    gx = ((gx % GW) + GW) % GW;
-    return solid[gy * GW + gx] != 0;
-  }
-
-  bool is_solid_world(float wx, float wy) const {
-    if (wy < 0.f || wy >= WORLD_H) return true;
-    int gx = static_cast<int>(wrap_x(wx) / CELL);
-    int gy = static_cast<int>(wy / CELL);
-    return is_solid_cell(gx, gy);
-  }
-
-  // True if axis-aligned box centered at (wx,wy) is entirely open
-  bool is_open_box(float wx, float wy, float half_w, float half_h) const {
-    const float step = CELL * 0.5f;
-    for (float dy = -half_h; dy <= half_h; dy += step) {
-      for (float dx = -half_w; dx <= half_w; dx += step) {
-        if (is_solid_world(wx + dx, wy + dy))
-          return false;
-      }
-    }
-    return true;
-  }
-
-  // Clear a vertical shaft of open air above a floor cell (for pads / spawn)
-  void clear_shaft(int gx0, int gx1, int floor_gy, int clearance_cells) {
-    for (int gx = gx0; gx <= gx1; ++gx) {
-      int xx = ((gx % GW) + GW) % GW;
-      solid[floor_gy * GW + xx] = 1;  // keep floor
-      for (int uy = 1; uy <= clearance_cells; ++uy) {
-        int yy = floor_gy - uy;
-        if (yy > 2)
-          solid[yy * GW + xx] = 0;
-      }
-    }
-  }
-
-  // Nearest solid surface below a free point (for ALT readout)
-  float floor_below(float wx, float wy) const {
-    wx = wrap_x(wx);
-    int gx = static_cast<int>(wx / CELL);
-    int gy0 = std::max(0, static_cast<int>(wy / CELL));
-    for (int gy = gy0; gy < GH; ++gy) {
-      if (is_solid_cell(gx, gy))
-        return static_cast<float>(gy) * CELL;
-    }
-    return WORLD_H;
-  }
-
-  bool on_pad(float wx, float wy) const {
-    wx = wrap_x(wx);
-    for (const auto& p : pads) {
-      if (wx >= p.x0 && wx <= p.x1 && std::abs(wy - p.y) < CELL * 2.f)
-        return true;
-    }
-    return false;
-  }
-
-  void generate(unsigned s) {
-    seed = s ? s : 1u;
-    solid.assign(GW * GH, 1);
-    pads.clear();
-    stars.clear();
-
-    unsigned state = seed;
-    auto rnd = [&]() -> float {
-      state = state * 1664525u + 1013904223u;
-      return (state >> 8) / static_cast<float>(1u << 24);
-    };
-    auto rnd_i = [&](int lo, int hi) -> int {
-      return lo + static_cast<int>(rnd() * (hi - lo + 1));
-    };
-
-    // --- Main meandering tunnel (very wide gallery) ---
-    float cy = WORLD_H * 0.55f;
-    float half = 520.f;  // half-height world px
-    for (int gx = 0; gx < GW; ++gx) {
-      cy += (rnd() - 0.5f) * 16.f;
-      cy = clampf(cy, WORLD_H * 0.35f, WORLD_H * 0.70f);
-      half += (rnd() - 0.5f) * 14.f;
-      half = clampf(half, 380.f, 900.f);
-      if (rnd() < 0.012f) half = clampf(half + 200.f, 380.f, 1100.f);
-      // rare mild squeeze, still wide
-      if (rnd() < 0.008f) half = clampf(half - 60.f, 300.f, 1100.f);
-
-      int y0 = static_cast<int>((cy - half) / CELL);
-      int y1 = static_cast<int>((cy + half) / CELL);
-      y0 = std::max(3, y0);
-      y1 = std::min(GH - 4, y1);
-      for (int gy = y0; gy <= y1; ++gy)
-        solid[gy * GW + gx] = 0;
-    }
-
-    // --- Branch tunnels ---
-    for (int b = 0; b < 28; ++b) {
-      int gx = rnd_i(0, GW - 1);
-      int gy = rnd_i(GH / 4, GH * 3 / 4);
-      int len = rnd_i(80, 260);
-      int rad = rnd_i(6, 14);
-      float dir = rnd() * 2.f * PI;
-      for (int sstep = 0; sstep < len; ++sstep) {
-        dir += (rnd() - 0.5f) * 0.4f;
-        gx = static_cast<int>(gx + std::cos(dir) * 1.4f);
-        gy = static_cast<int>(gy + std::sin(dir) * 1.4f);
-        gx = ((gx % GW) + GW) % GW;
-        gy = static_cast<int>(clampf(static_cast<float>(gy), 4.f, static_cast<float>(GH - 5)));
-        for (int dy = -rad; dy <= rad; ++dy)
-          for (int dx = -rad; dx <= rad; ++dx) {
-            if (dx * dx + dy * dy <= rad * rad) {
-              int xx = ((gx + dx) % GW + GW) % GW;
-              int yy = gy + dy;
-              if (yy >= 3 && yy < GH - 3)
-                solid[yy * GW + xx] = 0;
-            }
-          }
-      }
-    }
-
-    // --- Light stalactites / stalagmites ---
-    for (int n = 0; n < 120; ++n) {
-      int gx = rnd_i(0, GW - 1);
-      bool down = rnd() < 0.5f;
-      int len = rnd_i(2, 6);
-      if (down) {
-        for (int gy = 3; gy < GH - 4; ++gy) {
-          if (solid[gy * GW + gx] && !solid[(gy + 1) * GW + gx]) {
-            for (int k = 1; k <= len && gy + k < GH - 3; ++k)
-              solid[(gy + k) * GW + gx] = 1;
-            break;
-          }
-        }
-      } else {
-        for (int gy = GH - 4; gy > 3; --gy) {
-          if (solid[gy * GW + gx] && !solid[(gy - 1) * GW + gx]) {
-            for (int k = 1; k <= len && gy - k > 3; ++k)
-              solid[(gy - k) * GW + gx] = 1;
-            break;
-          }
-        }
-      }
-    }
-
-    // --- Sparse thin pillars ---
-    for (int n = 0; n < 16; ++n) {
-      int gx = rnd_i(0, GW - 1);
-      for (int gy = 4; gy < GH - 4; ++gy) {
-        bool near_open = false;
-        for (int o = -4; o <= 4; ++o) {
-          int yy = gy + o;
-          if (yy >= 0 && yy < GH && !solid[yy * GW + gx]) near_open = true;
-        }
-        if (near_open && rnd() < 0.55f)
-          solid[gy * GW + gx] = 1;
-      }
-    }
-
-    // --- Smooth + open dilation ---
-    for (int pass = 0; pass < 8; ++pass) {
-      std::vector<uint8_t> next = solid;
-      for (int gy = 3; gy < GH - 3; ++gy) {
-        for (int gx = 0; gx < GW; ++gx) {
-          int n = 0;
-          for (int dy = -1; dy <= 1; ++dy)
-            for (int dx = -1; dx <= 1; ++dx) {
-              if (dx == 0 && dy == 0) continue;
-              int xx = ((gx + dx) % GW + GW) % GW;
-              n += solid[(gy + dy) * GW + xx] ? 1 : 0;
-            }
-          if (solid[gy * GW + gx] && n <= 4)
-            next[gy * GW + gx] = 0;
-          else if (!solid[gy * GW + gx] && n >= 8)
-            next[gy * GW + gx] = 1;
-        }
-      }
-      solid.swap(next);
-    }
-
-    // Open dilation (erode rock that touches open)
-    for (int pass = 0; pass < 2; ++pass) {
-      std::vector<uint8_t> next = solid;
-      for (int gy = 3; gy < GH - 3; ++gy) {
-        for (int gx = 0; gx < GW; ++gx) {
-          if (!solid[gy * GW + gx]) continue;
-          bool touch_open = false;
-          for (int dy = -1; dy <= 1 && !touch_open; ++dy)
-            for (int dx = -1; dx <= 1; ++dx) {
-              int xx = ((gx + dx) % GW + GW) % GW;
-              if (!solid[(gy + dy) * GW + xx]) { touch_open = true; break; }
-            }
-          if (touch_open)
-            next[gy * GW + gx] = 0;
-        }
-      }
-      solid.swap(next);
-    }
-
-    // Remove stray single pixels / tiny blobs (solid islands and open holes)
-    for (int pass = 0; pass < 4; ++pass) {
-      std::vector<uint8_t> next = solid;
-      for (int gy = 3; gy < GH - 3; ++gy) {
-        for (int gx = 0; gx < GW; ++gx) {
-          int n4 = 0;  // orthogonal neighbours
-          const int ox[4] = {1, -1, 0, 0};
-          const int oy[4] = {0, 0, 1, -1};
-          for (int k = 0; k < 4; ++k) {
-            int xx = ((gx + ox[k]) % GW + GW) % GW;
-            int yy = gy + oy[k];
-            n4 += solid[yy * GW + xx] ? 1 : 0;
-          }
-          // Lone solid pixel or thin spur → open
-          if (solid[gy * GW + gx] && n4 <= 1)
-            next[gy * GW + gx] = 0;
-          // Lone open hole inside rock → solid
-          else if (!solid[gy * GW + gx] && n4 >= 3)
-            next[gy * GW + gx] = 1;
-        }
-      }
-      solid.swap(next);
-    }
-
-    // Final 2 smooth passes
-    for (int pass = 0; pass < 2; ++pass) {
-      std::vector<uint8_t> next = solid;
-      for (int gy = 3; gy < GH - 3; ++gy) {
-        for (int gx = 0; gx < GW; ++gx) {
-          int n = 0;
-          for (int dy = -1; dy <= 1; ++dy)
-            for (int dx = -1; dx <= 1; ++dx) {
-              if (dx == 0 && dy == 0) continue;
-              int xx = ((gx + dx) % GW + GW) % GW;
-              n += solid[(gy + dy) * GW + xx] ? 1 : 0;
-            }
-          next[gy * GW + gx] = (n >= 5) ? 1 : 0;
-        }
-      }
-      solid.swap(next);
-    }
-
-    // Solid crust (roof + deep floor)
-    for (int gx = 0; gx < GW; ++gx) {
-      for (int gy = 0; gy < 4; ++gy)
-        solid[gy * GW + gx] = 1;
-      for (int gy = GH - 4; gy < GH; ++gy)
-        solid[gy * GW + gx] = 1;
-    }
-
-    // --- Landing pads with tall cleared shafts for safe spawn ---
-    constexpr int PAD_CLEARANCE = 18;  // cells of open air above pad (~288px)
-    constexpr float PAD_MIN_DX = 480.f;   // min horizontal separation (world)
-    constexpr float PAD_MIN_DY = 220.f;   // min vertical separation if near in X
-    auto pads_overlap = [&](float x0, float x1, float y) -> bool {
-      float cx = 0.5f * (x0 + x1);
-      float half = 0.5f * (x1 - x0);
-      for (const auto& p : pads) {
-        float pcx = 0.5f * (p.x0 + p.x1);
-        float ph = 0.5f * (p.x1 - p.x0);
-        float dx = std::abs(wrap_delta(cx, pcx));
-        float dy = std::abs(y - p.y);
-        // Reject if intervals overlap (or nearly) in X, or centers too close
-        float min_gap = half + ph + 80.f;  // extra margin beyond pad widths
-        if (dx < std::max(min_gap, PAD_MIN_DX) && dy < PAD_MIN_DY)
-          return true;
-        if (dx < min_gap)
-          return true;  // same horizontal slot even if Y differs a lot
-      }
-      return false;
-    };
-
-    for (int attempt = 0; attempt < 200 && static_cast<int>(pads.size()) < 14; ++attempt) {
-      int gx0 = rnd_i(20, GW - 50);
-      int width = rnd_i(10, 18);
-      int mid = gx0 + width / 2;
-      int floor_gy = -1;
-      // Prefer floors with a decent open run; skip if already claimed
-      for (int gy = 5; gy < GH - 6; ++gy) {
-        if (!solid[gy * GW + (mid % GW)] && solid[(gy + 1) * GW + (mid % GW)]) {
-          floor_gy = gy + 1;
-          break;
-        }
-      }
-      if (floor_gy < 0 || floor_gy < PAD_CLEARANCE + 5)
-        continue;
-      int open_count = 0;
-      for (int uy = 1; uy <= 6; ++uy)
-        if (!solid[(floor_gy - uy) * GW + (mid % GW)])
-          ++open_count;
-      if (open_count < 3)
-        continue;
-
-      float x0 = static_cast<float>(gx0) * CELL;
-      float x1 = static_cast<float>(gx0 + width) * CELL;
-      float y = static_cast<float>(floor_gy) * CELL;
-      if (pads_overlap(x0, x1, y))
-        continue;
-
-      clear_shaft(gx0, gx0 + width - 1, floor_gy, PAD_CLEARANCE);
-      pads.push_back({x0, x1, y});
-    }
-    if (pads.empty()) {
-      int gx0 = GW / 2;
-      int floor_gy = GH * 2 / 3;
-      clear_shaft(gx0, gx0 + 16, floor_gy, PAD_CLEARANCE);
-      pads.push_back({gx0 * CELL, (gx0 + 16) * CELL, floor_gy * CELL});
-    }
-
-    // Background stars (dots) scattered in open space + some in rock (dim depth)
-    for (int i = 0; i < 2200; ++i) {
-      float sx = rnd() * WORLD_W;
-      float sy = rnd() * WORLD_H;
-      stars.push_back({sx, sy});
-    }
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Ship
-// ---------------------------------------------------------------------------
-enum class FlightState { Flying, Landed, Crashed };
-
-struct Ship {
-  Vec2 pos, vel;
-  float angle = 0.f, ang_vel = 0.f;
-  float left_thrust = 0.f, right_thrust = 0.f;
-  bool swap_engines = false;
-  int config_index = 1;
-  const ShipConfig* cfg = &SHIP_CONFIGS[1];
-  FlightState state = FlightState::Flying;
-  float state_timer = 0.f;
-
-  void set_config(int index) {
-    if (index < 0) index = SHIP_CONFIG_COUNT - 1;
-    if (index >= SHIP_CONFIG_COUNT) index = 0;
-    config_index = index;
-    cfg = &SHIP_CONFIGS[config_index];
-    ang_vel *= 0.5f;
-    vel = vel * 0.7f;
-  }
-  void cycle_config(int d) { set_config(config_index + d); }
-
-  // Signed local Y of engine mounts
-  float eng_y() const {
-    return cfg->engines_top ? -cfg->engine_offset_y : cfg->engine_offset_y;
-  }
-  // Bottom of hull / feet (always +y when upright) for landing probes
-  float foot_y() const { return cfg->half_h * 0.95f; }
-
-  void spawn(const Cave& cave, float wx) {
-    // Always prefer a real landing pad with a cleared shaft.
-    const float need_w = std::max(cfg->half_w, cfg->engine_offset_x) + 8.f;
-    const float need_h = cfg->half_h + cfg->engine_offset_y + 12.f;
-
-    auto try_pad = [&](const LandingPad& p) -> bool {
-      float cx = Cave::wrap_x(0.5f * (p.x0 + p.x1));
-      // Search upward from just above the pad for an open box
-      for (float y = p.y - need_h - 10.f; y > p.y - 320.f; y -= 8.f) {
-        if (cave.is_open_box(cx, y, need_w, need_h)) {
-          pos = {cx, y};
-          return true;
-        }
-      }
-      return false;
-    };
-
-    bool ok = false;
-    // Prefer pad nearest requested wx
-    int best = -1;
-    float best_d = 1e12f;
-    for (int i = 0; i < static_cast<int>(cave.pads.size()); ++i) {
-      float cx = 0.5f * (cave.pads[i].x0 + cave.pads[i].x1);
-      float d = std::abs(Cave::wrap_delta(wx, cx));
-      if (d < best_d) { best_d = d; best = i; }
-    }
-    if (best >= 0 && try_pad(cave.pads[best]))
-      ok = true;
-    if (!ok) {
-      for (const auto& p : cave.pads) {
-        if (try_pad(p)) { ok = true; break; }
-      }
-    }
-    if (!ok) {
-      // Last resort: scan world near wx for any open box
-      float cx = Cave::wrap_x(wx);
-      for (float y = Cave::WORLD_H * 0.2f; y < Cave::WORLD_H * 0.8f && !ok; y += 16.f) {
-        if (cave.is_open_box(cx, y, need_w, need_h)) {
-          pos = {cx, y};
-          ok = true;
-        }
-      }
-    }
-    if (!ok) {
-      pos = {Cave::wrap_x(wx), Cave::WORLD_H * 0.4f};
-    }
-
-    vel = {};
-    angle = 0.f;
-    ang_vel = 0.f;
-    left_thrust = right_thrust = 0.f;
-    state = FlightState::Flying;
-    state_timer = 0.f;
-  }
-
-  Vec2 to_world(Vec2 local) const {
-    float c = std::cos(angle), s = std::sin(angle);
-    return {pos.x + c * local.x - s * local.y, pos.y + s * local.x + c * local.y};
-  }
-
-  void update_physics(float dt) {
-    if (state != FlightState::Flying) return;
-    const float ox = cfg->engine_offset_x;
-    const float ey = eng_y();
-    auto rotate = [this](Vec2 v) {
-      float c = std::cos(angle), s = std::sin(angle);
-      return Vec2{c * v.x - s * v.y, s * v.x + c * v.y};
-    };
-    Vec2 force{};
-    float torque = 0.f;
-    // Force toward nose (up when upright); exhaust is opposite
-    Vec2 thrust_dir{0.f, -1.f};
-    if (left_thrust > 0.f) {
-      Vec2 f = rotate(thrust_dir) * (cfg->max_thrust * left_thrust);
-      force += f;
-      Vec2 r = rotate({-ox, ey});
-      torque += r.x * f.y - r.y * f.x;
-    }
-    if (right_thrust > 0.f) {
-      Vec2 f = rotate(thrust_dir) * (cfg->max_thrust * right_thrust);
-      force += f;
-      Vec2 r = rotate({ox, ey});
-      torque += r.x * f.y - r.y * f.x;
-    }
-    force.y += GRAVITY * cfg->mass;
-    vel += force * (1.f / cfg->mass) * dt;
-    vel = vel * std::max(0.f, 1.f - LINEAR_DRAG * dt);
-    pos += vel * dt;
-    pos.x = Cave::wrap_x(pos.x);
-    ang_vel += (torque / cfg->inertia) * dt;
-    ang_vel *= std::max(0.f, 1.f - ANGULAR_DRAG * dt);
-    ang_vel = clampf(ang_vel, -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL);
-    angle += ang_vel * dt;
-    while (angle > PI) angle -= 2.f * PI;
-    while (angle < -PI) angle += 2.f * PI;
-  }
-
-  void collide(const Cave& cave) {
-    if (state != FlightState::Flying) return;
-
-    const float ox = cfg->engine_offset_x;
-    const float ey = eng_y();
-    const float fy = foot_y();
-    Vec2 probes[] = {
-        // Feet / belly (always ground-side)
-        {-ox * 0.6f, fy}, {0.f, fy + 4.f}, {ox * 0.6f, fy},
-        {-cfg->half_w * 0.7f, fy - 2.f}, {cfg->half_w * 0.7f, fy - 2.f},
-        // Engines
-        {-ox, ey}, {ox, ey},
-        // Nose / sides
-        {0.f, -cfg->half_h * 0.85f},
-        {-cfg->half_w * 0.55f, 0.f}, {cfg->half_w * 0.55f, 0.f},
-    };
-
-    bool hit = false;
-    Vec2 contact{};
-    for (const auto& lp : probes) {
-      Vec2 wp = to_world(lp);
-      if (cave.is_solid_world(wp.x, wp.y)) {
-        hit = true;
-        contact = wp;
-        break;
-      }
-    }
-    // Also center-deep embedding
-    if (!hit && cave.is_solid_world(pos.x, pos.y)) {
-      hit = true;
-      contact = pos;
-    }
-    if (!hit)
-      return;
-
-    // Approximate outward normal: sample solid around contact (gradient)
-    Vec2 grad{};
-    const float s = Cave::CELL;
-    const float offs[8][2] = {{s, 0}, {-s, 0}, {0, s}, {0, -s},
-                              {s, s}, {s, -s}, {-s, s}, {-s, -s}};
-    for (auto& o : offs) {
-      if (cave.is_solid_world(contact.x + o[0], contact.y + o[1])) {
-        grad.x += o[0];
-        grad.y += o[1];
-      }
-    }
-    float gl = std::sqrt(grad.x * grad.x + grad.y * grad.y);
-    Vec2 n_out;
-    if (gl > 1e-3f) {
-      // grad points into denser rock; outward is opposite
-      n_out = {-grad.x / gl, -grad.y / gl};
-    } else {
-      // Fallback: push opposite velocity
-      float vl = std::sqrt(vel.x * vel.x + vel.y * vel.y);
-      if (vl > 1e-3f)
-        n_out = {-vel.x / vl, -vel.y / vl};
-      else
-        n_out = {0.f, -1.f};
-    }
-
-    // Separate ship from rock along outward normal
-    for (int step = 0; step < 24; ++step) {
-      bool still = cave.is_solid_world(pos.x, pos.y);
-      if (!still) {
-        for (const auto& lp : probes) {
-          Vec2 wp = to_world(lp);
-          if (cave.is_solid_world(wp.x, wp.y)) {
-            still = true;
-            break;
-          }
-        }
-      }
-      if (!still)
-        break;
-      pos.x += n_out.x * 3.f;
-      pos.y += n_out.y * 3.f;
-      pos.x = Cave::wrap_x(pos.x);
-    }
-
-    // Impact speed into the surface (positive when moving into rock)
-    float vn = vel.x * (-n_out.x) + vel.y * (-n_out.y);
-    // vn > 0 means velocity has component toward rock (into solid)
-
-    float contact_x = Cave::wrap_x(contact.x);
-    float contact_y = contact.y;
-    const bool pad = cave.on_pad(contact_x, contact_y + Cave::CELL) ||
-                     cave.on_pad(pos.x, pos.y + foot_y() + 8.f);
-    const bool gentle = vel.y < LAND_MAX_VY && std::abs(vel.x) < LAND_MAX_VX &&
-                        std::abs(angle) < LAND_MAX_ANGLE && std::abs(ang_vel) < LAND_MAX_ANGVEL;
-
-    // Soft landing on pad
-    if (pad && gentle && vn < CRASH_IMPACT_SPEED * 0.5f) {
-      state = FlightState::Landed;
-      state_timer = 0.f;
-      vel = {};
-      ang_vel = 0.f;
-      angle = 0.f;
-      std::printf("LANDED\n");
-      return;
-    }
-
-    // Hard impact → crash (map is NOT regenerated)
-    if (vn > CRASH_IMPACT_SPEED) {
-      state = FlightState::Crashed;
-      state_timer = 0.f;
-      vel = {};
-      ang_vel = 0.f;
-      std::printf("CRASH impact=%.1f\n", vn);
-      return;
-    }
-
-    // Bounce: reflect velocity along outward normal
-    if (vn > 0.f) {
-      // Remove inward component and add restitution
-      vel.x += (1.f + BOUNCE_RESTITUTION) * vn * n_out.x;
-      vel.y += (1.f + BOUNCE_RESTITUTION) * vn * n_out.y;
-      // Tangential friction
-      float tx = vel.x - (vel.x * n_out.x + vel.y * n_out.y) * n_out.x;
-      float ty = vel.y - (vel.x * n_out.x + vel.y * n_out.y) * n_out.y;
-      // rebuild: normal part already set; scale tangent
-      float nn = vel.x * n_out.x + vel.y * n_out.y;
-      vel.x = n_out.x * nn + tx * BOUNCE_FRICTION;
-      vel.y = n_out.y * nn + ty * BOUNCE_FRICTION;
-      ang_vel *= BOUNCE_ANG_DAMP;
-    }
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Camera
-// ---------------------------------------------------------------------------
-struct Camera {
-  float x = 0.f, y = 0.f;
-  float prev_ship_x = 0.f;
-  bool have_prev = false;
-
-  void follow(const Ship& ship, float dt) {
-    if (have_prev) {
-      float d = ship.pos.x - prev_ship_x;
-      if (d > Cave::WORLD_W * 0.5f) x -= Cave::WORLD_W;
-      else if (d < -Cave::WORLD_W * 0.5f) x += Cave::WORLD_W;
-    }
-    prev_ship_x = ship.pos.x;
-    have_prev = true;
-    float target_x = ship.pos.x - WINDOW_W * 0.5f;
-    float target_y = ship.pos.y - WINDOW_H * 0.55f;
-    float k = 1.f - std::exp(-6.f * dt);
-    x += (target_x - x) * k;
-    y += (target_y - y) * k;
-    y = clampf(y, -100.f, Cave::WORLD_H - WINDOW_H * 0.3f);
-  }
-
-  float continuous_x(float wx) const {
-    float cam_center = x + WINDOW_W * 0.5f;
-    float d = Cave::wrap_delta(cam_center, Cave::wrap_x(wx));
-    return cam_center + d;
-  }
-
-  SDL_Point to_screen(float wx, float wy) const {
-    float sx = continuous_x(wx) - x;
-    return {static_cast<int>(sx + 0.5f), static_cast<int>(wy - y + 0.5f)};
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Menu
-// ---------------------------------------------------------------------------
-enum class AppMode { Playing, Menu };
-
-struct Menu {
-  int cursor = 0;
-  // 0 Resume, 1 Fullscreen, 2 New cave, 3 Ship, 4 Swap engines, 5 Quit
-  static constexpr int N = 6;
-  const char* labels[N] = {
-      "RESUME", "FULLSCREEN", "NEW CAVE", "SHIP PRESET", "SWAP ENGINES", "QUIT",
-  };
-};
-
-// ---------------------------------------------------------------------------
-// Drawing
-// ---------------------------------------------------------------------------
-void set_color(SDL_Renderer* ren, SDL_Color c, Uint8 a = 255) {
-  SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, a);
-}
-
-void draw_char(SDL_Renderer* ren, int x, int y, char ch, SDL_Color col) {
-  const char* map = "111101101101111";
-  switch (ch) {
-    case '0': map = "111101101101111"; break;
-    case '1': map = "010010010010010"; break;
-    case '2': map = "111001111100111"; break;
-    case '3': map = "111001111001111"; break;
-    case '4': map = "101101111001001"; break;
-    case '5': map = "111100111001111"; break;
-    case '6': map = "111100111101111"; break;
-    case '7': map = "111001001001001"; break;
-    case '8': map = "111101111101111"; break;
-    case '9': map = "111101111001111"; break;
-    case 'A': map = "010101111101101"; break;
-    case 'B': map = "110101110101110"; break;
-    case 'C': map = "011100100100011"; break;
-    case 'D': map = "110101101101110"; break;
-    case 'E': map = "111100110100111"; break;
-    case 'F': map = "111100110100100"; break;
-    case 'G': map = "011100101101011"; break;
-    case 'H': map = "101101111101101"; break;
-    case 'I': map = "111010010010111"; break;
-    case 'K': map = "101110110101101"; break;
-    case 'L': map = "100100100100111"; break;
-    case 'M': map = "101111111101101"; break;
-    case 'N': map = "101111111111101"; break;
-    case 'O': map = "010101101101010"; break;
-    case 'P': map = "110101110100100"; break;
-    case 'Q': map = "010101101111011"; break;
-    case 'R': map = "110101110101101"; break;
-    case 'S': map = "011100010001110"; break;
-    case 'T': map = "111010010010010"; break;
-    case 'U': map = "101101101101111"; break;
-    case 'V': map = "101101101101010"; break;
-    case 'W': map = "101101111111101"; break;
-    case 'X': map = "101101010101101"; break;
-    case 'Y': map = "101101010010010"; break;
-    case '-': map = "000000111000000"; break;
-    case '.': map = "000000000010010"; break;
-    case ':': map = "000010000010000"; break;
-    case '>': map = "100010001010100"; break;
-    case ' ': map = "000000000000000"; break;
-    default: break;
-  }
-  set_color(ren, col);
-  for (int row = 0; row < 5; ++row) {
-    for (int colx = 0; colx < 3; ++colx) {
-      if (map[row * 3 + colx] != '1')
-        continue;
-      SDL_Rect px{x + colx * FONT_SCALE, y + row * FONT_SCALE, FONT_SCALE, FONT_SCALE};
-      SDL_RenderFillRect(ren, &px);
-    }
-  }
-}
-
-void draw_text(SDL_Renderer* ren, int x, int y, const char* s, SDL_Color col) {
-  for (int i = 0; s[i]; ++i)
-    draw_char(ren, x + i * FONT_CELL_W, y, s[i], col);
-}
-
-int text_width(const char* s) {
-  int n = 0;
-  while (s[n])
-    ++n;
-  return n * FONT_CELL_W;
-}
-
-void draw_stars(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
-  for (const auto& st : cave.stars) {
-    float wx = Cave::wrap_x(st.x);
-    float sx = cam.continuous_x(wx) - cam.x;
-    float sy = st.y - cam.y;
-    // Deterministic size 2..5 px from position
-    unsigned h = static_cast<unsigned>(st.x * 12.9898f + st.y * 78.233f);
-    h = h * 2654435761u;
-    int sz = 2 + static_cast<int>((h >> 24) % 4);  // 2,3,4,5
-    if (sx < -sz || sx > WINDOW_W + sz || sy < -sz || sy > WINDOW_H + sz)
-      continue;
-    bool rock = cave.is_solid_world(wx, st.y);
-    if (rock)
-      continue;  // only visible in open space
-    int ix = static_cast<int>(sx) - sz / 2;
-    int iy = static_cast<int>(sy) - sz / 2;
-    set_color(ren, CRT_STAR, 230);
-    SDL_Rect r{ix, iy, sz, sz};
-    SDL_RenderFillRect(ren, &r);
-    // brighter core on larger dots
-    if (sz >= 4) {
-      set_color(ren, CRT_BRIGHT, 200);
-      SDL_Rect core{ix + 1, iy + 1, sz - 2, sz - 2};
-      SDL_RenderFillRect(ren, &core);
-    }
-  }
-}
-
-void draw_cave(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
-  // Vector contour via marching squares on the solid grid (no fat pixel blocks).
-  const float C = Cave::CELL;
-  int gx0 = static_cast<int>(std::floor(cam.x / C)) - 1;
-  int gx1 = static_cast<int>(std::ceil((cam.x + WINDOW_W) / C)) + 1;
-  int gy0 = std::max(0, static_cast<int>(std::floor(cam.y / C)) - 1);
-  int gy1 = std::min(Cave::GH - 2, static_cast<int>(std::ceil((cam.y + WINDOW_H) / C)) + 1);
-
-  auto corner = [&](int gx, int gy) -> float {
-    return cave.is_solid_cell(gx, gy) ? 1.f : 0.f;
-  };
-
-  // Screen X for a continuous grid column relative to gx0
-  auto screen_xy = [&](float wx, float wy, int gx_ref, float sx_ref) -> SDL_Point {
-    float sx = sx_ref + (wx - static_cast<float>(gx_ref) * C);
-    float sy = wy - cam.y;
-    return {static_cast<int>(sx + 0.5f), static_cast<int>(sy + 0.5f)};
-  };
-
-  float sx_ref = cam.continuous_x(Cave::wrap_x(static_cast<float>(gx0) * C)) - cam.x;
-
-  auto lerp_pt = [](float ax, float ay, float bx, float by, float va, float vb, float iso) {
-    float t = (std::abs(vb - va) < 1e-6f) ? 0.5f : (iso - va) / (vb - va);
-    t = clampf(t, 0.f, 1.f);
-    return std::pair<float, float>{ax + (bx - ax) * t, ay + (by - ay) * t};
-  };
-
-  auto seg = [&](float x0, float y0, float x1, float y1, SDL_Color col) {
-    SDL_Point a = screen_xy(x0, y0, gx0, sx_ref);
-    SDL_Point b = screen_xy(x1, y1, gx0, sx_ref);
-    set_color(ren, col);
-    SDL_RenderDrawLine(ren, a.x, a.y, b.x, b.y);
-    set_color(ren, col, 70);
-    SDL_RenderDrawLine(ren, a.x + 1, a.y, b.x + 1, b.y);
-  };
-
-  // Filled rock body: green hatch so solid ground reads differently from void
-  for (int gy = gy0; gy <= gy1; ++gy) {
-    for (int gx = gx0; gx <= gx1; ++gx) {
-      if (!cave.is_solid_cell(gx, gy))
-        continue;
-      float x0 = static_cast<float>(gx) * C;
-      float y0 = static_cast<float>(gy) * C;
-      SDL_Point a = screen_xy(x0, y0, gx0, sx_ref);
-      SDL_Point b = screen_xy(x0 + C, y0 + C, gx0, sx_ref);
-      int ix0 = a.x, iy0 = a.y, ix1 = b.x, iy1 = b.y;
-      if (ix1 < ix0) std::swap(ix0, ix1);
-      if (iy1 < iy0) std::swap(iy0, iy1);
-      // Base fill (dim phosphor green)
-      set_color(ren, CRT_DIM, 160);
-      SDL_Rect cell{ix0, iy0, std::max(1, ix1 - ix0), std::max(1, iy1 - iy0)};
-      SDL_RenderFillRect(ren, &cell);
-      // Diagonal hatch pattern
-      set_color(ren, CRT_MID, 100);
-      for (int t = -cell.h; t <= cell.w; t += 4) {
-        int x0s = cell.x + t;
-        int y0s = cell.y;
-        int x1s = cell.x + t + cell.h;
-        int y1s = cell.y + cell.h;
-        // clip roughly to cell
-        SDL_RenderDrawLine(ren, x0s, y0s, x1s, y1s);
-      }
-    }
-  }
-
-  const float iso = 0.5f;
-  for (int gy = gy0; gy <= gy1; ++gy) {
-    for (int gx = gx0; gx <= gx1; ++gx) {
-      // Corner values (TL, TR, BR, BL) in world coords of cell (gx,gy)
-      float v0 = corner(gx, gy);
-      float v1 = corner(gx + 1, gy);
-      float v2 = corner(gx + 1, gy + 1);
-      float v3 = corner(gx, gy + 1);
-      int mask = (v0 >= iso ? 1 : 0) | (v1 >= iso ? 2 : 0) | (v2 >= iso ? 4 : 0) | (v3 >= iso ? 8 : 0);
-      if (mask == 0 || mask == 15)
-        continue;
-
-      float x0 = static_cast<float>(gx) * C;
-      float y0 = static_cast<float>(gy) * C;
-      float x1 = x0 + C;
-      float y1 = y0 + C;
-
-      // Edge midpoints via linear interp
-      auto top = lerp_pt(x0, y0, x1, y0, v0, v1, iso);
-      auto right = lerp_pt(x1, y0, x1, y1, v1, v2, iso);
-      auto bottom = lerp_pt(x0, y1, x1, y1, v3, v2, iso);
-      auto left = lerp_pt(x0, y0, x0, y1, v0, v3, iso);
-
-      // Standard marching-squares edge connections
-      auto connect = [&](std::pair<float, float> a, std::pair<float, float> b) {
-        seg(a.first, a.second, b.first, b.second, CRT_BRIGHT);
-      };
-      switch (mask) {
-        case 1: case 14: connect(left, top); break;
-        case 2: case 13: connect(top, right); break;
-        case 3: case 12: connect(left, right); break;
-        case 4: case 11: connect(right, bottom); break;
-        case 5:
-          connect(left, top);
-          connect(right, bottom);
-          break;
-        case 6: case 9: connect(top, bottom); break;
-        case 7: case 8: connect(left, bottom); break;
-        case 10:
-          connect(top, right);
-          connect(left, bottom);
-          break;
-        default: break;
-      }
-    }
-  }
-
-
-  // Landing platforms — deck, struts, chevrons, beacon lights
-  Uint32 ticks = SDL_GetTicks();
-  for (int pi = 0; pi < static_cast<int>(cave.pads.size()); ++pi) {
-    const auto& p = cave.pads[pi];
-    float sx0 = cam.continuous_x(p.x0) - cam.x;
-    float sx1 = sx0 + (p.x1 - p.x0);
-    int x0 = static_cast<int>(sx0);
-    int x1 = static_cast<int>(sx1);
-    int y = static_cast<int>(p.y - cam.y);
-    if (x1 < -40 || x0 > WINDOW_W + 40 || y < -40 || y > WINDOW_H + 40)
-      continue;
-    int w = std::max(1, x1 - x0);
-
-    // Deck slab
-    set_color(ren, CRT_PAD, 200);
-    SDL_Rect deck{x0, y - 2, w, 5};
-    SDL_RenderFillRect(ren, &deck);
-    set_color(ren, CRT_BRIGHT);
-    SDL_RenderDrawRect(ren, &deck);
-
-    // Cross-hatch on deck
-    set_color(ren, CRT_MID, 180);
-    for (int t = 0; t < w; t += 6)
-      SDL_RenderDrawLine(ren, x0 + t, y - 2, x0 + t + 4, y + 2);
-
-    // Support struts into the rock
-    set_color(ren, CRT_PAD, 160);
-    int mid = (x0 + x1) / 2;
-    SDL_RenderDrawLine(ren, x0 + 4, y + 3, x0 + 4, y + 18);
-    SDL_RenderDrawLine(ren, x1 - 4, y + 3, x1 - 4, y + 18);
-    SDL_RenderDrawLine(ren, mid, y + 3, mid, y + 22);
-    SDL_RenderDrawLine(ren, x0 + 4, y + 18, x1 - 4, y + 18);
-
-    // Approach chevrons above the pad
-    set_color(ren, CRT_WARN, 200);
-    for (int c = 0; c < 3; ++c) {
-      int cy = y - 14 - c * 10;
-      int inset = 8 + c * 6;
-      SDL_RenderDrawLine(ren, x0 + inset, cy, mid, cy + 6);
-      SDL_RenderDrawLine(ren, x1 - inset, cy, mid, cy + 6);
-    }
-
-    // Blinking end beacons
-    bool on = ((ticks / 400) + pi) % 2 == 0;
-    set_color(ren, on ? CRT_HOT : CRT_PAD);
-    SDL_Rect b1{x0 - 2, y - 6, 4, 4};
-    SDL_Rect b2{x1 - 2, y - 6, 4, 4};
-    SDL_RenderFillRect(ren, &b1);
-    SDL_RenderFillRect(ren, &b2);
-
-    // Center T-mark
-    set_color(ren, CRT_BRIGHT);
-    SDL_RenderDrawLine(ren, mid - 8, y, mid + 8, y);
-    SDL_RenderDrawLine(ren, mid, y - 6, mid, y + 2);
-  }
-}
-
-void draw_ship_vector(SDL_Renderer* ren, const Ship& ship, const Camera& cam) {
-  // Local: -y nose (sky), +y feet (ground) when upright.
-  const float hw = ship.cfg->half_w * 0.85f;
-  const float hh = ship.cfg->half_h * 0.9f;
-  const float ox = ship.cfg->engine_offset_x;
-  const float ey = ship.eng_y();
-  const bool top = ship.cfg->engines_top;
-  auto W = [&](Vec2 l) {
-    Vec2 w = ship.to_world(l);
-    return cam.to_screen(w.x, w.y);
-  };
-  SDL_Color body = ship.state == FlightState::Crashed ? CRT_HOT
-                   : ship.state == FlightState::Landed  ? CRT_PAD
-                                                       : CRT_BRIGHT;
-  auto line = [&](Vec2 a, Vec2 b) {
-    SDL_Point pa = W(a), pb = W(b);
-    set_color(ren, body);
-    SDL_RenderDrawLine(ren, pa.x, pa.y, pb.x, pb.y);
-    set_color(ren, body, 70);
-    SDL_RenderDrawLine(ren, pa.x + 1, pa.y, pb.x + 1, pb.y);
-  };
-
-  float nose_y = -hh;
-  float cabin_y = -hh * 0.35f;
-  float foot = hh * 0.85f;
-
-  // Cabin / nose
-  line({-hw * 0.25f, cabin_y}, {0.f, nose_y});
-  line({hw * 0.25f, cabin_y}, {0.f, nose_y});
-  line({-hw * 0.25f, cabin_y}, {hw * 0.25f, cabin_y});
-  line({-hw * 0.12f, cabin_y + 4.f}, {hw * 0.12f, cabin_y + 4.f});
-
-  // Hull
-  float belly = top ? hh * 0.35f : std::min(std::abs(ey) - 6.f, hh * 0.45f);
-  if (belly < cabin_y + 8.f)
-    belly = cabin_y + 12.f;
-  line({-hw * 0.45f, cabin_y}, {-hw * 0.55f, belly});
-  line({hw * 0.45f, cabin_y}, {hw * 0.55f, belly});
-  line({-hw * 0.55f, belly}, {hw * 0.55f, belly});
-
-  // Landing feet at bottom
-  line({-hw * 0.55f, belly}, {-hw * 0.9f, foot});
-  line({hw * 0.55f, belly}, {hw * 0.9f, foot});
-  line({-hw * 0.9f, foot}, {-hw * 0.7f, foot});
-  line({hw * 0.7f, foot}, {hw * 0.9f, foot});
-
-  // Engine bells: open end points in exhaust direction (toward +y / ground)
-  // so top mounts still fire "down" for lift.
-  auto engine = [&](float side) {
-    float ex = side * ox;
-    if (!top) {
-      line({ex - 7.f, ey - 2.f}, {ex + 7.f, ey - 2.f});
-      line({ex - 7.f, ey - 2.f}, {ex - 10.f, ey + 12.f});
-      line({ex + 7.f, ey - 2.f}, {ex + 10.f, ey + 12.f});
-      line({ex - 10.f, ey + 12.f}, {ex + 10.f, ey + 12.f});
-    } else {
-      // Mounted above cabin; nozzle rim further toward ground (+y) under the bell
-      line({ex - 8.f, ey + 2.f}, {ex + 8.f, ey + 2.f});  // backplate toward sky
-      line({ex - 8.f, ey + 2.f}, {ex - 11.f, ey + 16.f});
-      line({ex + 8.f, ey + 2.f}, {ex + 11.f, ey + 16.f});
-      line({ex - 11.f, ey + 16.f}, {ex + 11.f, ey + 16.f});
-    }
-  };
-  engine(-1.f);
-  engine(+1.f);
-
-  if (ship.state == FlightState::Flying) {
-    line({0.f, nose_y}, {0.f, nose_y - 10.f});
-    line({-4.f, nose_y - 6.f}, {0.f, nose_y - 10.f});
-    line({4.f, nose_y - 6.f}, {0.f, nose_y - 10.f});
-  }
-}
-
-void draw_exhaust(SDL_Renderer* ren, const Ship& ship, const Camera& cam, bool left) {
-  if (ship.state != FlightState::Flying) return;
-  float t = left ? ship.left_thrust : ship.right_thrust;
-  if (t < 0.05f) return;
-  float lx = left ? -ship.cfg->engine_offset_x : ship.cfg->engine_offset_x;
-  // Exhaust goes ground-ward (+local y), opposite of lift force
-  float rim = ship.eng_y() + (ship.cfg->engines_top ? 16.f : 14.f);
-  Vec2 base = ship.to_world({lx, rim});
-  float c = std::cos(ship.angle), s = std::sin(ship.angle);
-  float ex = -s, ey = c;  // rotate(0,1) = ground-side
-  int len = static_cast<int>(10 + t * 36);
-  for (int i = 0; i < len; i += 2) {
-    SDL_Point p = cam.to_screen(base.x + ex * i, base.y + ey * i);
-    set_color(ren, i < len / 2 ? CRT_BRIGHT : CRT_HOT);
-    SDL_RenderDrawPoint(ren, p.x, p.y);
-  }
-}
-
-void draw_hud(SDL_Renderer* ren, const Ship& ship, const Cave& cave) {
-  const int lh = FONT_CELL_H + 4;
-  auto bar = [&](int x, int y, float v) {
-    set_color(ren, CRT_DIM);
-    SDL_Rect bg{x, y, 120, 10};
-    SDL_RenderFillRect(ren, &bg);
-    set_color(ren, CRT_MID);
-    SDL_Rect fg{x, y, static_cast<int>(120 * clampf(v, 0.f, 1.f)), 10};
-    SDL_RenderFillRect(ren, &fg);
-  };
-  int y = 16;
-  bar(20, y, ship.left_thrust);
-  y += 14;
-  bar(20, y, ship.right_thrust);
-  y += 18;
-  {
-    char nm[32];
-    std::snprintf(nm, sizeof(nm), "%s%s", ship.cfg->name, ship.cfg->engines_top ? " TOP" : "");
-    draw_text(ren, 20, y, nm, CRT_BRIGHT);
-  }
-  y += lh;
-  draw_text(ren, 20, y, ship.swap_engines ? "ENGINES SWAPPED" : "START MENU",
-            ship.swap_engines ? CRT_WARN : CRT_DIM);
-  y += lh + 4;
-
-  char buf[64];
-  float alt = cave.floor_below(ship.pos.x, ship.pos.y) - ship.pos.y;
-  std::snprintf(buf, sizeof(buf), "ALT %.0f", alt);
-  draw_text(ren, 20, y, buf, CRT_BRIGHT);
-  y += lh;
-  std::snprintf(buf, sizeof(buf), "VX %.0f VY %.0f", ship.vel.x, ship.vel.y);
-  draw_text(ren, 20, y, buf, CRT_MID);
-
-  bool pad = false;
-  for (const auto& p : cave.pads) {
-    if (std::abs(Cave::wrap_delta(ship.pos.x, 0.5f * (p.x0 + p.x1))) < (p.x1 - p.x0) &&
-        std::abs(alt) < 120.f)
-      pad = true;
-  }
-  bool ok_v = ship.vel.y < LAND_MAX_VY && std::abs(ship.vel.x) < LAND_MAX_VX;
-  bool ok_a = std::abs(ship.angle) < LAND_MAX_ANGLE;
-  const char* t0 = pad ? "PAD OK" : "NO PAD";
-  const char* t1 = ok_v ? "SPEED OK" : "SPEED HI";
-  const char* t2 = ok_a ? "ATT OK" : "ATT BAD";
-  int rx = WINDOW_W - text_width(t1) - 24;
-  draw_text(ren, rx, 16, t0, pad ? CRT_PAD : CRT_HOT);
-  draw_text(ren, rx, 16 + lh, t1, ok_v ? CRT_PAD : CRT_HOT);
-  draw_text(ren, rx, 16 + lh * 2, t2, ok_a ? CRT_PAD : CRT_HOT);
-
-  if (ship.state == FlightState::Landed) {
-    const char* a = "LANDED";
-    const char* b = "A TO RELIGHT";
-    draw_text(ren, WINDOW_W / 2 - text_width(a) / 2, 48, a, CRT_PAD);
-    draw_text(ren, WINDOW_W / 2 - text_width(b) / 2, 48 + lh, b, CRT_MID);
-  } else if (ship.state == FlightState::Crashed) {
-    const char* a = "CRASH";
-    const char* b = "A TO RESET";
-    draw_text(ren, WINDOW_W / 2 - text_width(a) / 2, 48, a, CRT_HOT);
-    draw_text(ren, WINDOW_W / 2 - text_width(b) / 2, 48 + lh, b, CRT_MID);
-  }
-}
-
-void draw_menu(SDL_Renderer* ren, const Menu& menu, const Ship& ship, bool fullscreen) {
-  const int lh = FONT_CELL_H + 8;
-  const int panel_w = 420;
-  const int panel_h = 80 + Menu::N * lh + 40;
-  int px = WINDOW_W / 2 - panel_w / 2;
-  int py = WINDOW_H / 2 - panel_h / 2;
-  set_color(ren, CRT_MENU);
-  SDL_Rect panel{px, py, panel_w, panel_h};
-  SDL_RenderFillRect(ren, &panel);
-  set_color(ren, CRT_BRIGHT);
-  SDL_RenderDrawRect(ren, &panel);
-
-  const char* title = "DUALTHRUST";
-  const char* sub = "CRT CAVE LANDER";
-  draw_text(ren, WINDOW_W / 2 - text_width(title) / 2, py + 16, title, CRT_BRIGHT);
-  draw_text(ren, WINDOW_W / 2 - text_width(sub) / 2, py + 16 + lh, sub, CRT_DIM);
-
-  int row_y = py + 16 + lh * 2 + 8;
-  for (int i = 0; i < Menu::N; ++i) {
-    char line[48];
-    if (i == 1)
-      std::snprintf(line, sizeof(line), "%s %s", menu.labels[i], fullscreen ? "ON" : "OFF");
-    else if (i == 3)
-      std::snprintf(line, sizeof(line), "%s %s", menu.labels[i], ship.cfg->name);
-    else if (i == 4)
-      std::snprintf(line, sizeof(line), "%s %s", menu.labels[i], ship.swap_engines ? "ON" : "OFF");
-    else
-      std::snprintf(line, sizeof(line), "%s", menu.labels[i]);
-    SDL_Color col = (i == menu.cursor) ? CRT_WARN : CRT_MID;
-    int lx = px + 40;
-    if (i == menu.cursor)
-      draw_text(ren, lx - FONT_CELL_W - 4, row_y + i * lh, ">", CRT_WARN);
-    draw_text(ren, lx, row_y + i * lh, line, col);
-  }
-  const char* hint = "UP DOWN MOVE  A SELECT";
-  draw_text(ren, WINDOW_W / 2 - text_width(hint) / 2, py + panel_h - lh - 8, hint, CRT_DIM);
-}
-
-void draw_scanlines(SDL_Renderer* ren) {
-  for (int y = 0; y < WINDOW_H; y += 3) {
-    SDL_SetRenderDrawColor(ren, 0, 0, 0, 45);
-    SDL_RenderDrawLine(ren, 0, y, WINDOW_W, y);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// XDG config (~/.config/dualthrust/ or $XDG_CONFIG_HOME/dualthrust/)
-// ---------------------------------------------------------------------------
-static std::string g_config_dir_override;
-
-std::string config_dir_path() {
-  if (!g_config_dir_override.empty())
-    return g_config_dir_override;
-  const char* xdg = std::getenv("XDG_CONFIG_HOME");
-  if (xdg && xdg[0] != '\0')
-    return std::string(xdg) + "/dualthrust";
-  const char* home = std::getenv("HOME");
-  if (home && home[0] != '\0')
-    return std::string(home) + "/.config/dualthrust";
-  return "dualthrust-config";
-}
-
-std::string config_file_path() { return config_dir_path() + "/config"; }
-
-bool ensure_config_dir() {
-  std::string dir = config_dir_path();
-  // mkdir -p style: create .config then dualthrust if needed
-  // simplistic: try mkdir once for leaf; if fail try parent
-  if (mkdir(dir.c_str(), 0755) == 0 || errno == EEXIST)
-    return true;
-  // try creating parent ~/.config
-  auto slash = dir.find_last_of('/');
-  if (slash != std::string::npos) {
-    std::string parent = dir.substr(0, slash);
-    mkdir(parent.c_str(), 0755);
-    if (mkdir(dir.c_str(), 0755) == 0 || errno == EEXIST)
-      return true;
-  }
-  return false;
-}
-
-struct UserConfig {
-  bool fullscreen = false;
-  bool swap_engines = false;
-  int ship = 1;
-};
-
-UserConfig load_config() {
-  UserConfig c;
-  std::FILE* f = std::fopen(config_file_path().c_str(), "r");
-  if (!f)
-    return c;
-  char line[256];
-  while (std::fgets(line, sizeof(line), f)) {
-    if (line[0] == '#' || line[0] == '\n')
-      continue;
-    char key[64];
-    int val = 0;
-    if (std::sscanf(line, "%63[^=]=%d", key, &val) == 2) {
-      if (std::strcmp(key, "fullscreen") == 0)
-        c.fullscreen = val != 0;
-      else if (std::strcmp(key, "swap_engines") == 0)
-        c.swap_engines = val != 0;
-      else if (std::strcmp(key, "ship") == 0)
-        c.ship = val;
-    }
-  }
-  std::fclose(f);
-  return c;
-}
-
-void save_config(const UserConfig& c) {
-  if (!ensure_config_dir())
-    return;
-  std::FILE* f = std::fopen(config_file_path().c_str(), "w");
-  if (!f)
-    return;
-  std::fprintf(f, "# dualthrust config (XDG)\n");
-  std::fprintf(f, "fullscreen=%d\n", c.fullscreen ? 1 : 0);
-  std::fprintf(f, "swap_engines=%d\n", c.swap_engines ? 1 : 0);
-  std::fprintf(f, "ship=%d\n", c.ship);
-  std::fclose(f);
-}
-
-static void print_help(const char* argv0) {
+void print_help(const char* argv0) {
   std::printf(
       "Usage: %s [options]\n"
       "\n"
@@ -1311,32 +48,27 @@ static void print_help(const char* argv0) {
       "  -h, --help           Show this help\n"
       "  -V, --version        Show version\n"
       "  -f, --fullscreen     Start fullscreen\n"
-      "  -w, --window W x H   Window size (e.g. 1280x720)\n"
-      "  -s, --ship N         Ship preset index 0..6 (5=Topdog, 6=Canopy)\n"
+      "  -w, --window WxH     Window size (e.g. 1280x720)\n"
+      "  -s, --ship N         Ship preset index 0..%d (5=Topdog, 6=Canopy)\n"
       "  -S, --seed N         Cave generation seed (unsigned)\n"
       "  -x, --swap-engines   Swap left/right engine mapping\n"
+      "  -m, --mute           Start with sound off\n"
       "  --config-dir PATH    Override XDG config directory\n"
       "\n"
+      "Debug:\n"
+      "  --play               Skip the menu and start flying\n"
+      "  --thrust L,R         Hold both engines at fixed levels (0..1)\n"
+      "  --frames N           Exit after N frames\n"
+      "  --screenshot FILE    Save a BMP of the last frame (with --frames)\n"
+      "\n"
       "Config: $XDG_CONFIG_HOME/dualthrust/config  (default ~/.config/dualthrust/)\n",
-      argv0);
+      argv0, SHIP_DEF_COUNT - 1);
 }
 
-static void print_version() {
-  std::printf("dualthrust 0.1.0\n");
-}
-
-int main(int argc, char** argv) {
-  bool cli_fullscreen = false;
-  bool cli_fullscreen_set = false;
-  bool cli_swap = false;
-  bool cli_swap_set = false;
-  int cli_ship = -1;
-  unsigned cave_seed = 0xC0FFEE;
-  int win_w = WINDOW_W_DEFAULT;
-  int win_h = WINDOW_H_DEFAULT;
-
+// Returns -1 to continue, otherwise the process exit code.
+int parse_args(int argc, char** argv, Options& o) {
   for (int i = 1; i < argc; ++i) {
-    std::string a = argv[i];
+    const std::string a = argv[i];
     auto need = [&](const char* opt) -> const char* {
       if (i + 1 >= argc) {
         std::fprintf(stderr, "dualthrust: %s requires an argument\n", opt);
@@ -1344,78 +76,88 @@ int main(int argc, char** argv) {
       }
       return argv[++i];
     };
-    if (a == "-h" || a == "--help") {
-      print_help(argv[0]);
-      return 0;
-    }
-    if (a == "-V" || a == "--version") {
-      print_version();
-      return 0;
-    }
-    if (a == "-f" || a == "--fullscreen") {
-      cli_fullscreen = true;
-      cli_fullscreen_set = true;
-      continue;
-    }
-    if (a == "-x" || a == "--swap-engines") {
-      cli_swap = true;
-      cli_swap_set = true;
-      continue;
-    }
-    if (a == "-s" || a == "--ship") {
-      cli_ship = std::atoi(need("--ship"));
-      continue;
-    }
-    if (a == "-S" || a == "--seed") {
-      cave_seed = static_cast<unsigned>(std::strtoul(need("--seed"), nullptr, 0));
-      continue;
-    }
-    if (a == "-w" || a == "--window") {
+    if (a == "-h" || a == "--help") { print_help(argv[0]); return 0; }
+    else if (a == "-V" || a == "--version") { std::printf("dualthrust %s\n", APP_VERSION); return 0; }
+    else if (a == "-f" || a == "--fullscreen") o.fullscreen = o.fullscreen_set = true;
+    else if (a == "-x" || a == "--swap-engines") o.swap = o.swap_set = true;
+    else if (a == "-s" || a == "--ship") o.ship = std::atoi(need("--ship"));
+    else if (a == "-S" || a == "--seed") o.seed = static_cast<unsigned>(std::strtoul(need("--seed"), nullptr, 0));
+    else if (a == "-m" || a == "--mute") o.mute = true;
+    else if (a == "--config-dir") set_config_dir_override(need("--config-dir"));
+    else if (a == "--play") o.play = true;
+    else if (a == "--frames") o.frames = std::atoi(need("--frames"));
+    else if (a == "--screenshot") o.screenshot = need("--screenshot");
+    else if (a == "--thrust") {
+      const char* v = need("--thrust");
+      if (std::sscanf(v, "%f,%f", &o.hold[0], &o.hold[1]) != 2) {
+        std::fprintf(stderr, "dualthrust: bad --thrust '%s' (use L,R)\n", v);
+        return 2;
+      }
+    } else if (a == "-w" || a == "--window") {
       const char* v = need("--window");
-      int W = 0, H = 0;
-      if (std::sscanf(v, "%dx%d", &W, &H) != 2 || W < 320 || H < 240) {
+      if (std::sscanf(v, "%dx%d", &o.win_w, &o.win_h) != 2 || o.win_w < 320 || o.win_h < 240) {
         std::fprintf(stderr, "dualthrust: bad window size '%s' (use WxH)\n", v);
         return 2;
       }
-      win_w = W;
-      win_h = H;
-      continue;
+    } else {
+      std::fprintf(stderr, "dualthrust: unknown option '%s' (try --help)\n", a.c_str());
+      return 2;
     }
-    if (a == "--config-dir") {
-      g_config_dir_override = need("--config-dir");
-      continue;
-    }
-    std::fprintf(stderr, "dualthrust: unknown option '%s' (try --help)\n", a.c_str());
-    return 2;
   }
+  return -1;
+}
 
-  // --- Startup diagnostics ---
-  {
-    std::printf("dualthrust 0.1.0 starting\n");
-    std::printf("  executable: %s\n", argv[0]);
+void print_diagnostics(const char* argv0, const Options& o) {
+  std::printf("dualthrust %s starting\n  executable: %s\n", APP_VERSION, argv0);
 #if defined(__linux__)
-    std::printf("  system:     Linux\n");
+  std::printf("  system:     Linux\n");
 #elif defined(__APPLE__)
-    std::printf("  system:     Apple\n");
+  std::printf("  system:     Apple\n");
 #else
-    std::printf("  system:     other\n");
+  std::printf("  system:     other\n");
 #endif
 #ifdef __VERSION__
-    std::printf("  compiler:   %s\n", __VERSION__);
+  std::printf("  compiler:   %s\n", __VERSION__);
 #endif
-    const char* home = std::getenv("HOME");
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    std::printf("  HOME:       %s\n", home ? home : "(unset)");
-    std::printf("  XDG_CONFIG_HOME: %s\n", xdg ? xdg : "(unset)");
-    std::printf("  config dir: %s\n", config_dir_path().c_str());
-    std::printf("  config:     %s\n", config_file_path().c_str());
-    char cwd[4096];
-    if (getcwd(cwd, sizeof(cwd)))
-      std::printf("  cwd:        %s\n", cwd);
-    std::printf("  window:     %dx%d\n", win_w, win_h);
-    std::printf("  cave seed:  0x%08x (%u)\n", cave_seed, cave_seed);
-    std::fflush(stdout);
+  const char* home = std::getenv("HOME");
+  const char* xdg = std::getenv("XDG_CONFIG_HOME");
+  std::printf("  HOME:       %s\n  XDG_CONFIG_HOME: %s\n", home ? home : "(unset)", xdg ? xdg : "(unset)");
+  std::printf("  config:     %s\n", config_file_path().c_str());
+  char cwd[4096];
+  if (getcwd(cwd, sizeof cwd)) std::printf("  cwd:        %s\n", cwd);
+  std::printf("  window:     %dx%d\n  cave seed:  0x%08x (%u)\n", o.win_w, o.win_h, o.seed, o.seed);
+  std::fflush(stdout);
+}
+
+// Engine levels 0..1 from triggers / sticks (up = thrust) and the keyboard
+void read_thrust(SDL_GameController* pad, bool key_left, bool key_right, float out[2]) {
+  out[0] = out[1] = 0.f;
+  if (pad) {
+    auto trigger = [&](SDL_GameControllerAxis ax) {
+      return clampf(SDL_GameControllerGetAxis(pad, ax) / 32767.f, 0.f, 1.f);
+    };
+    constexpr int DEAD = 8000;
+    auto stick_up = [&](SDL_GameControllerAxis ax) {
+      int raw = SDL_GameControllerGetAxis(pad, ax);
+      return raw >= -DEAD ? 0.f : clampf((-raw - DEAD) / static_cast<float>(32768 - DEAD), 0.f, 1.f);
+    };
+    out[0] = std::max(trigger(SDL_CONTROLLER_AXIS_TRIGGERLEFT), stick_up(SDL_CONTROLLER_AXIS_LEFTY));
+    out[1] = std::max(trigger(SDL_CONTROLLER_AXIS_TRIGGERRIGHT), stick_up(SDL_CONTROLLER_AXIS_RIGHTY));
   }
+  if (pad) {  // shoulder buttons: full thrust (handhelds without analog triggers)
+    if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) out[0] = 1.f;
+    if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) out[1] = 1.f;
+  }
+  if (key_left) out[0] = 1.f;
+  if (key_right) out[1] = 1.f;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  Options opt;
+  if (int rc = parse_args(argc, argv, opt); rc >= 0) return rc;
+  print_diagnostics(argv[0], opt);
 
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) != 0) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -1424,308 +166,270 @@ int main(int argc, char** argv) {
   {
     SDL_version v;
     SDL_GetVersion(&v);
-    std::printf("  SDL:        %d.%d.%d\n", v.major, v.minor, v.patch);
-    std::printf("  joysticks:  %d\n", SDL_NumJoysticks());
-    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
-      if (SDL_IsGameController(i))
-        std::printf("    [%d] controller: %s\n", i, SDL_GameControllerNameForIndex(i));
-      else
-        std::printf("    [%d] joystick\n", i);
-    }
+    std::printf("  SDL:        %d.%d.%d\n  joysticks:  %d\n", v.major, v.minor, v.patch, SDL_NumJoysticks());
+    for (int i = 0; i < SDL_NumJoysticks(); ++i)
+      std::printf("    [%d] %s\n", i, SDL_IsGameController(i) ? SDL_GameControllerNameForIndex(i) : "joystick");
     std::fflush(stdout);
   }
 
-  SDL_Window* window = SDL_CreateWindow(
-      "dualthrust", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h,
-      SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+  SDL_Window* window = SDL_CreateWindow("dualthrust", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, opt.win_w,
+                                        opt.win_h, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   if (!window) {
+    std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
     SDL_Quit();
     return 1;
   }
-  SDL_Renderer* ren =
-      SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-  if (!ren) {
+  SDL_Renderer* ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+  if (!ren) ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+  Gfx gfx;
+  if (!ren || !gfx.init(ren)) {
+    std::fprintf(stderr, "renderer setup failed: %s\n", SDL_GetError());
+    gfx.shutdown();
+    if (ren) SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 1;
   }
-  SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
 
-  auto sync_viewport = [&]() {
-    int w = 0, h = 0;
-    SDL_GetRendererOutputSize(ren, &w, &h);
-    if (w < 320) w = 320;
-    if (h < 240) h = 240;
-    WINDOW_W = w;
-    WINDOW_H = h;
-  };
-  sync_viewport();
-
-  Cave cave;
-  std::printf("Generating cave...\n");
-  cave.generate(0xC0FFEE);
-  std::printf("Cave ready (%d pads)\n", (int)cave.pads.size());
-
-  Ship ship;
-  UserConfig user_cfg = load_config();
-  if (cli_ship >= 0)
-    user_cfg.ship = cli_ship;
-  if (user_cfg.ship < 0 || user_cfg.ship >= SHIP_CONFIG_COUNT)
-    user_cfg.ship = 1;
-  if (cli_swap_set)
-    user_cfg.swap_engines = cli_swap;
-  if (cli_fullscreen_set)
-    user_cfg.fullscreen = cli_fullscreen;
-  ship.set_config(user_cfg.ship);
-  ship.swap_engines = user_cfg.swap_engines;
-  float start_x = 0.5f * (cave.pads[0].x0 + cave.pads[0].x1);
-  ship.spawn(cave, start_x);
-  std::printf("  ship:       %s (%d)\n", ship.cfg->name, ship.config_index);
-  std::printf("  swap L/R:   %s\n", ship.swap_engines ? "yes" : "no");
-  std::printf("  fullscreen: %s\n", user_cfg.fullscreen ? "yes" : "no");
-  std::printf("Ready.\n");
-  std::fflush(stdout);
-
-  Camera cam;
-  auto snap_camera = [&]() {
-    cam.x = ship.pos.x - WINDOW_W * 0.5f;
-    cam.y = ship.pos.y - WINDOW_H * 0.55f;
-    cam.prev_ship_x = ship.pos.x;
-    cam.have_prev = true;
-  };
-  snap_camera();
-
-  AppMode mode = AppMode::Menu;  // start in menu
-  Menu menu;
-  bool fullscreen = user_cfg.fullscreen;
-  bool running = true;
-
-  if (fullscreen)
-    SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-
-  auto persist_config = [&]() {
-    UserConfig c;
-    c.fullscreen = fullscreen;
-    c.swap_engines = ship.swap_engines;
-    c.ship = ship.config_index;
-    save_config(c);
-  };
-
-  SDL_GameController* pad = nullptr;
-  for (int i = 0; i < SDL_NumJoysticks(); ++i) {
-    if (SDL_IsGameController(i)) {
-      pad = SDL_GameControllerOpen(i);
-      if (pad) break;
-    }
+  {
+    SDL_RendererInfo info;
+    if (SDL_GetRendererInfo(ren, &info) == 0)
+      std::printf("  renderer:   %s (%s)\n", info.name, (info.flags & SDL_RENDERER_ACCELERATED) ? "accelerated" : "software");
+    std::printf("  video:      %s\n", SDL_GetCurrentVideoDriver());
   }
 
-  bool key_left = false, key_right = false;
-  Uint64 prev = SDL_GetPerformanceCounter();
-  const Uint64 freq = SDL_GetPerformanceFrequency();
+  // --- World ---
+  Game game;
+  std::printf("Generating cave...\n");
+  game.cave.generate(opt.seed);
+  std::printf("Cave ready (%d pads)\n", static_cast<int>(game.cave.pads.size()));
+  game.rng = Rng(SDL_GetTicks() | 1u);
 
-  auto toggle_fullscreen = [&]() {
-    fullscreen = !fullscreen;
-    SDL_SetWindowFullscreen(window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+  UserConfig user = load_config();
+  if (opt.ship >= 0) user.ship = opt.ship;
+  if (user.ship < 0 || user.ship >= SHIP_DEF_COUNT) user.ship = DEFAULT_SHIP;
+  if (opt.swap_set) user.swap_engines = opt.swap;
+  if (opt.fullscreen_set) user.fullscreen = opt.fullscreen;
+
+  create_ship(game, user.ship);
+  game.cam.vw = static_cast<float>(gfx.width());
+  game.cam.vh = static_cast<float>(gfx.height());
+  auto new_game_at = [&](float wx) {
+    respawn_ship(game, wx);
+    snap_camera(game);
+  };
+  auto first_pad_x = [&] { return 0.5f * (game.cave.pads[0].x0 + game.cave.pads[0].x1); };
+  new_game_at(first_pad_x());
+  std::printf("  ship:       %s (%d)\n  swap L/R:   %s\n  fullscreen: %s\nReady.\n", SHIP_DEFS[user.ship].name,
+              user.ship, user.swap_engines ? "yes" : "no", user.fullscreen ? "yes" : "no");
+  std::fflush(stdout);
+
+  UiState ui;
+  ui.menu_open = !opt.play;
+  ui.fullscreen = user.fullscreen;
+  ui.swap_engines = user.swap_engines;
+  ui.sound = user.sound && !opt.mute;
+  Audio audio;
+  audio.init();
+  audio.set_enabled(ui.sound);
+  bool running = true;
+
+  if (ui.fullscreen) SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+
+  auto persist_config = [&] {
+    UserConfig c;
+    c.fullscreen = ui.fullscreen;
+    c.swap_engines = ui.swap_engines;
+    c.sound = opt.mute ? user.sound : ui.sound;
+    c.ship = ship_def_index(game);
+    save_config(c);
+  };
+  auto sync_viewport = [&] {
+    gfx.resize();
+    game.cam.vw = static_cast<float>(gfx.width());
+    game.cam.vh = static_cast<float>(gfx.height());
+  };
+  auto toggle_fullscreen = [&] {
+    ui.fullscreen = !ui.fullscreen;
+    SDL_SetWindowFullscreen(window, ui.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
     SDL_PumpEvents();
     sync_viewport();
     persist_config();
   };
-
-  // Respawn / relight only — never regenerates the cave map
-  auto reset_or_relight = [&]() {
-    if (ship.state == FlightState::Landed) {
-      ship.state = FlightState::Flying;
-      ship.vel.y = -30.f;
+  auto new_cave = [&] {
+    game.cave.generate(SDL_GetTicks());
+    new_game_at(first_pad_x());
+  };
+  // Respawn / relight only — never regenerates the cave
+  auto reset_or_relight = [&] {
+    if (game.ecs.get<Flight>(game.ship).state == FlightState::Landed) {
+      relight_ship(game);
     } else {
-      int pi = static_cast<int>(SDL_GetTicks() % cave.pads.size());
-      float cx = 0.5f * (cave.pads[pi].x0 + cave.pads[pi].x1);
-      ship.spawn(cave, cx);
-      snap_camera();
+      int pi = game.rng.range_i(0, static_cast<int>(game.cave.pads.size()) - 1);
+      new_game_at(0.5f * (game.cave.pads[pi].x0 + game.cave.pads[pi].x1));
     }
   };
+  auto cycle_ship = [&] {
+    set_ship_def(game, ship_def_index(game) + 1);
+    persist_config();
+  };
+  auto toggle_swap = [&] {
+    ui.swap_engines = !ui.swap_engines;
+    persist_config();
+  };
+  auto toggle_sound = [&] {
+    ui.sound = !ui.sound;
+    audio.set_enabled(ui.sound);
+    persist_config();
+  };
+  auto activate_menu = [&] {
+    switch (MENU_ITEMS[ui.cursor].action) {
+      case MenuAction::Resume: ui.menu_open = false; break;
+      case MenuAction::Fullscreen: toggle_fullscreen(); break;
+      case MenuAction::NewCave: new_cave(); ui.menu_open = false; break;
+      case MenuAction::Ship: cycle_ship(); break;
+      case MenuAction::SwapEngines: toggle_swap(); break;
+      case MenuAction::Sound: toggle_sound(); break;
+      case MenuAction::Quit: persist_config(); running = false; break;
+    }
+  };
+  auto menu_move = [&](int d) { ui.cursor = (ui.cursor + MENU_COUNT + d) % MENU_COUNT; };
 
-  auto activate_menu = [&]() {
-    switch (menu.cursor) {
-      case 0: mode = AppMode::Playing; break;
-      case 1: toggle_fullscreen(); break;
-      case 2:
-        cave.generate(SDL_GetTicks());
-        ship.spawn(cave, 0.5f * (cave.pads[0].x0 + cave.pads[0].x1));
-        snap_camera();
-        mode = AppMode::Playing;
-        break;
-      case 3:
-        ship.cycle_config(+1);
-        persist_config();
-        break;
-      case 4:
-        ship.swap_engines = !ship.swap_engines;
-        persist_config();
-        break;
-      case 5:
-        persist_config();
-        running = false;
-        break;
-    }
-  };
+  SDL_GameController* pad = nullptr;
+  for (int i = 0; i < SDL_NumJoysticks() && !pad; ++i)
+    if (SDL_IsGameController(i)) pad = SDL_GameControllerOpen(i);
+
+  bool key_left = false, key_right = false;
+  Uint64 prev = SDL_GetPerformanceCounter();
+  const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
+  float accumulator = 0.f;
+  int frame = 0;
+  double t_sim = 0, t_draw = 0, t_present = 0;  // seconds, for --frames timing stats
+  auto stamp = [&] { return SDL_GetPerformanceCounter() / freq; };
 
   while (running) {
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
-      if (ev.type == SDL_QUIT) running = false;
-      if (ev.type == SDL_WINDOWEVENT) {
-        if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-            ev.window.event == SDL_WINDOWEVENT_RESIZED ||
-            ev.window.event == SDL_WINDOWEVENT_EXPOSED) {
-          sync_viewport();
-        }
-      }
-      if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE) {
-        if (mode == AppMode::Playing) mode = AppMode::Menu;
-        else running = false;
-      }
+      switch (ev.type) {
+        case SDL_QUIT: running = false; break;
 
-      if (ev.type == SDL_KEYDOWN) {
-        // Alt+Enter toggles fullscreen (classic shortcut)
-        if ((ev.key.keysym.sym == SDLK_RETURN || ev.key.keysym.sym == SDLK_KP_ENTER) &&
-            (ev.key.keysym.mod & KMOD_ALT)) {
-          toggle_fullscreen();
-          continue;
-        }
-        if (mode == AppMode::Menu) {
-          if (ev.key.keysym.sym == SDLK_UP || ev.key.keysym.sym == SDLK_w)
-            menu.cursor = (menu.cursor + Menu::N - 1) % Menu::N;
-          if (ev.key.keysym.sym == SDLK_DOWN || ev.key.keysym.sym == SDLK_s)
-            menu.cursor = (menu.cursor + 1) % Menu::N;
-          if (ev.key.keysym.sym == SDLK_RETURN || ev.key.keysym.sym == SDLK_SPACE)
-            activate_menu();
-        } else {
-          if (ev.key.keysym.sym == SDLK_a || ev.key.keysym.sym == SDLK_LEFT) key_left = true;
-          if (ev.key.keysym.sym == SDLK_d || ev.key.keysym.sym == SDLK_RIGHT) key_right = true;
-          if (ev.key.keysym.sym == SDLK_TAB) {
-            ship.cycle_config(+1);
-            persist_config();
-          }
-          if (ev.key.keysym.sym == SDLK_x) {
-            ship.swap_engines = !ship.swap_engines;
-            persist_config();
-          }
-          if (ev.key.keysym.sym == SDLK_r) reset_or_relight();
-          if (ev.key.keysym.sym == SDLK_f) toggle_fullscreen();
-          if (ev.key.keysym.sym == SDLK_g) {
-            cave.generate(SDL_GetTicks());
-            ship.spawn(cave, 0.5f * (cave.pads[0].x0 + cave.pads[0].x1));
-            snap_camera();
-          }
-        }
-      }
-      if (ev.type == SDL_KEYUP) {
-        if (ev.key.keysym.sym == SDLK_a || ev.key.keysym.sym == SDLK_LEFT) key_left = false;
-        if (ev.key.keysym.sym == SDLK_d || ev.key.keysym.sym == SDLK_RIGHT) key_right = false;
-      }
+        case SDL_WINDOWEVENT:
+          if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || ev.window.event == SDL_WINDOWEVENT_RESIZED ||
+              ev.window.event == SDL_WINDOWEVENT_EXPOSED)
+            sync_viewport();
+          break;
 
-      if (ev.type == SDL_CONTROLLERBUTTONDOWN) {
-        if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_START) {
-          if (mode == AppMode::Playing) mode = AppMode::Menu;
-          else mode = AppMode::Playing;
-        }
-        if (mode == AppMode::Menu) {
-          if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_UP)
-            menu.cursor = (menu.cursor + Menu::N - 1) % Menu::N;
-          if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_DOWN)
-            menu.cursor = (menu.cursor + 1) % Menu::N;
-          if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_A)
-            activate_menu();
-          if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_B)
-            mode = AppMode::Playing;
-        } else {
-          if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) ship.cycle_config(+1);
-          if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_A ||
-              ev.cbutton.button == SDL_CONTROLLER_BUTTON_B)
-            reset_or_relight();
-          if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_Y) {
-            cave.generate(SDL_GetTicks());
-            ship.spawn(cave, 0.5f * (cave.pads[0].x0 + cave.pads[0].x1));
-            snap_camera();
+        case SDL_KEYDOWN: {
+          const SDL_Keycode k = ev.key.keysym.sym;
+          if (k == SDLK_ESCAPE) {
+            if (ui.menu_open) running = false;
+            else ui.menu_open = true;
+          } else if ((k == SDLK_RETURN || k == SDLK_KP_ENTER) && (ev.key.keysym.mod & KMOD_ALT)) {
+            toggle_fullscreen();
+          } else if (ui.menu_open) {
+            if (k == SDLK_UP || k == SDLK_w) menu_move(-1);
+            if (k == SDLK_DOWN || k == SDLK_s) menu_move(+1);
+            if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_SPACE) activate_menu();
+          } else {
+            if (k == SDLK_a || k == SDLK_LEFT) key_left = true;
+            if (k == SDLK_d || k == SDLK_RIGHT) key_right = true;
+            if (k == SDLK_TAB) cycle_ship();
+            if (k == SDLK_x) toggle_swap();
+            if (k == SDLK_m) toggle_sound();
+            if (k == SDLK_r) reset_or_relight();
+            if (k == SDLK_f) toggle_fullscreen();
+            if (k == SDLK_g) new_cave();
           }
+          break;
         }
-      }
+        case SDL_KEYUP:
+          if (ev.key.keysym.sym == SDLK_a || ev.key.keysym.sym == SDLK_LEFT) key_left = false;
+          if (ev.key.keysym.sym == SDLK_d || ev.key.keysym.sym == SDLK_RIGHT) key_right = false;
+          break;
 
-      if (ev.type == SDL_CONTROLLERDEVICEADDED && !pad)
-        pad = SDL_GameControllerOpen(ev.cdevice.which);
-      if (ev.type == SDL_CONTROLLERDEVICEREMOVED && pad) {
-        if (ev.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))) {
-          SDL_GameControllerClose(pad);
-          pad = nullptr;
+        case SDL_CONTROLLERBUTTONDOWN: {
+          const int b = ev.cbutton.button;
+          if (b == SDL_CONTROLLER_BUTTON_START) ui.menu_open = !ui.menu_open;
+          else if (ui.menu_open) {
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) menu_move(-1);
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) menu_move(+1);
+            if (b == SDL_CONTROLLER_BUTTON_A) activate_menu();
+            if (b == SDL_CONTROLLER_BUTTON_B) ui.menu_open = false;
+          } else {
+            if (b == SDL_CONTROLLER_BUTTON_BACK) cycle_ship();
+            if (b == SDL_CONTROLLER_BUTTON_A || b == SDL_CONTROLLER_BUTTON_B) reset_or_relight();
+            if (b == SDL_CONTROLLER_BUTTON_Y) new_cave();
+          }
+          break;
         }
+        case SDL_CONTROLLERDEVICEADDED:
+          if (!pad) pad = SDL_GameControllerOpen(ev.cdevice.which);
+          break;
+        case SDL_CONTROLLERDEVICEREMOVED:
+          if (pad && ev.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))) {
+            SDL_GameControllerClose(pad);
+            pad = nullptr;
+          }
+          break;
       }
     }
 
-    float lt = 0.f, rt = 0.f;
-    if (mode == AppMode::Playing) {
-      if (pad) {
-        // Triggers
-        float tL = clampf(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32767.f, 0.f, 1.f);
-        float tR = clampf(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32767.f, 0.f, 1.f);
-        // Analog sticks: push up (negative Y in SDL) = thrust for that side
-        constexpr Sint16 DEAD = 8000;
-        auto stick_up = [](Sint16 raw) -> float {
-          if (raw >= -DEAD)
-            return 0.f;
-          // -DEAD .. -32768  →  0 .. 1
-          return clampf((-raw - DEAD) / static_cast<float>(32768 - DEAD), 0.f, 1.f);
-        };
-        float sL = stick_up(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY));
-        float sR = stick_up(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY));
-        lt = std::max(tL, sL);
-        rt = std::max(tR, sR);
-      }
-      if (key_left) lt = 1.f;
-      if (key_right) rt = 1.f;
+    // Input → thruster levels (L/R swapped on request)
+    float in[2] = {0.f, 0.f};
+    if (!ui.menu_open) {
+      read_thrust(pad, key_left, key_right, in);
+      in[0] = std::max(in[0], opt.hold[0]);
+      in[1] = std::max(in[1], opt.hold[1]);
     }
-    if (ship.swap_engines) {
-      ship.left_thrust = rt;
-      ship.right_thrust = lt;
-    } else {
-      ship.left_thrust = lt;
-      ship.right_thrust = rt;
-    }
+    if (ui.swap_engines) std::swap(in[0], in[1]);
+    set_thrust(game, in[0], in[1]);
+    const bool flying = game.ecs.get<Flight>(game.ship).state == FlightState::Flying;
+    audio.set_engines(flying ? in[0] : 0.f, flying ? in[1] : 0.f);
 
-    Uint64 now = SDL_GetPerformanceCounter();
-    float dt = static_cast<float>(now - prev) / static_cast<float>(freq);
+    const Uint64 now = SDL_GetPerformanceCounter();
+    const float dt = std::min(static_cast<float>((now - prev) / freq), 0.05f);
     prev = now;
-    dt = std::min(dt, 0.05f);
+    ui.time += dt;
 
-    if (mode == AppMode::Playing) {
-      float sdt = dt * TIME_SCALE;
-      ship.update_physics(sdt);
-      ship.collide(cave);
-      if (ship.state != FlightState::Flying) ship.state_timer += sdt;
-      cam.follow(ship, dt);
+    const double t0 = stamp();
+    if (!ui.menu_open) {
+      // Fixed-step simulation, independent of display refresh
+      accumulator += dt;
+      for (int n = 0; accumulator >= tune::SIM_STEP && n < tune::MAX_STEPS_PER_FRAME; ++n) {
+        step_sim(game, tune::SIM_STEP * tune::TIME_SCALE);
+        accumulator -= tune::SIM_STEP;
+      }
+      accumulator = std::min(accumulator, tune::SIM_STEP);
+      update_camera(game, dt);
+    } else {
+      accumulator = 0.f;
     }
 
-    set_color(ren, CRT_BG);
-    SDL_RenderClear(ren);
-    draw_stars(ren, cave, cam);
-    draw_cave(ren, cave, cam);
-    draw_exhaust(ren, ship, cam, true);
-    draw_exhaust(ren, ship, cam, false);
-    draw_ship_vector(ren, ship, cam);
-    if (ship.state == FlightState::Crashed) {
-      float flash = 0.5f + 0.5f * std::sin(ship.state_timer * 20.f);
-      set_color(ren, CRT_HOT, static_cast<Uint8>(30 + 60 * flash));
-      SDL_Rect full{0, 0, WINDOW_W, WINDOW_H};
-      SDL_RenderFillRect(ren, &full);
-    }
-    draw_hud(ren, ship, cave);
-    if (mode == AppMode::Menu)
-      draw_menu(ren, menu, ship, fullscreen);
-    draw_scanlines(ren);
+    for (const SimEvent& ev : game.fired) audio.trigger(ev.kind, ev.strength);
+    game.fired.clear();
+
+    const double t1 = stamp();
+    gfx.draw(game, ui);
+    const double t2 = stamp();
     SDL_RenderPresent(ren);
+    const double t3 = stamp();
+    t_sim += t1 - t0;
+    t_draw += t2 - t1;
+    t_present += t3 - t2;
+
+    if (opt.frames > 0 && ++frame >= opt.frames) {
+      std::printf("timing: %d frames, per frame: sim %.2f ms, draw %.2f ms, present %.2f ms\n", frame,
+                  1000 * t_sim / frame, 1000 * t_draw / frame, 1000 * t_present / frame);
+      if (opt.screenshot && !gfx.save_screenshot(opt.screenshot))
+        std::fprintf(stderr, "screenshot failed: %s\n", SDL_GetError());
+      break;
+    }
   }
 
   persist_config();
   if (pad) SDL_GameControllerClose(pad);
+  audio.shutdown();
+  gfx.shutdown();
   SDL_DestroyRenderer(ren);
   SDL_DestroyWindow(window);
   SDL_Quit();

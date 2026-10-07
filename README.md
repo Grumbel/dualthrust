@@ -9,15 +9,16 @@ CRT dual-engine **cave** lander. Left/right triggers = engines. Land on pads ins
 
 | Input | Action |
 |-------|--------|
-| Triggers | Engines |
+| Triggers / L1 R1 / sticks up | Engines |
 | **Start** | Menu |
 | Menu Up/Down + A | Navigate / select |
 | F / Alt+Enter | Fullscreen |
 | A/B or R | Reset / relight |
 | Y or G | New cave |
+| M | Sound on/off |
 | Escape | Menu / quit |
 
-Menu items: Resume, Fullscreen, New Cave, Ship Preset, Swap Engines, Quit.
+Menu items: Resume, Fullscreen, New Cave, Ship Preset, Swap Engines, Sound, Quit.
 
 ## World
 
@@ -25,6 +26,7 @@ Menu items: Resume, Fullscreen, New Cave, Ship Preset, Swap Engines, Quit.
 - Carved tunnels, chambers, stalactites, pillars, landing pads
 - Vertical + horizontal camera scroll
 - Background dots for motion in open space
+- Minimap of the whole wrapped world; exhaust, landing and crash particles
 
 ## Build
 
@@ -33,6 +35,10 @@ nix develop
 dualthrust-run
 # or nix run
 ```
+
+## R36S handheld (ArkOS / PortMaster)
+
+`nix build .#dualthrust-r36s-portmaster-zip` — see AGENTS.md for the sysroot requirement.
 
 ## Desktop install (Linux)
 

@@ -1,0 +1,698 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 Ingo Ruhnke <grumbel@gmail.com>
+
+#include "render.hpp"
+
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
+namespace {
+
+// --- Pixel font: 3x5 glyphs, rows top→bottom, '1' = lit ---------------------
+constexpr int FONT_SCALE = 3;
+constexpr int GLYPH_W = 3 * FONT_SCALE, FONT_CELL_W = GLYPH_W + FONT_SCALE;
+constexpr int FONT_CELL_H = 5 * FONT_SCALE;
+constexpr int FIRST_CHAR = 32, CHAR_COUNT = 95;
+
+struct Glyph {
+  char ch;
+  const char* bits;
+};
+constexpr Glyph GLYPHS[] = {
+    {'0', "111101101101111"}, {'1', "010010010010010"}, {'2', "111001111100111"}, {'3', "111001111001111"},
+    {'4', "101101111001001"}, {'5', "111100111001111"}, {'6', "111100111101111"}, {'7', "111001001001001"},
+    {'8', "111101111101111"}, {'9', "111101111001111"}, {'A', "010101111101101"}, {'B', "110101110101110"},
+    {'C', "011100100100011"}, {'D', "110101101101110"}, {'E', "111100110100111"}, {'F', "111100110100100"},
+    {'G', "011100101101011"}, {'H', "101101111101101"}, {'I', "111010010010111"}, {'J', "001001001101010"},
+    {'K', "101110110101101"}, {'L', "100100100100111"}, {'M', "101111111101101"}, {'N', "101111111111101"},
+    {'O', "010101101101010"}, {'P', "110101110100100"}, {'Q', "010101101111011"}, {'R', "110101110101101"},
+    {'S', "011100010001110"}, {'T', "111010010010010"}, {'U', "101101101101111"}, {'V', "101101101101010"},
+    {'W', "101101111111101"}, {'X', "101101010101101"}, {'Y', "101101010010010"}, {'Z', "111001010100111"},
+    {'-', "000000111000000"}, {'.', "000000000010010"}, {':', "000010000010000"}, {'>', "100010001010100"},
+    {'<', "001010100010001"}, {'/', "001001010100100"}, {'!', "010010010000010"}, {'+', "000010111010000"},
+    {'=', "000111000111000"}, {'?', "111001010000010"}, {'(', "010100100100010"}, {')', "010001001001010"},
+    {',', "000000000010100"}, {'_', "000000000000111"}, {'%', "101001010100101"},
+};
+
+// --- Rock tiles: one per depth band; deeper rock is dimmer with a fainter hatch ----
+struct RockBand {
+  uint8_t base_alpha, hatch_alpha;
+};
+constexpr RockBand ROCK_BANDS[Cave::MAX_DEPTH] = {{160, 100}, {140, 70}, {115, 40}, {90, 18}, {65, 0}};
+constexpr int TILE = static_cast<int>(Cave::CELL);
+
+// World chunks: 30x30 cells; divides the 24000 x 4800 world exactly (50 x 10 chunks)
+constexpr int CHUNK_CELLS = 30;
+constexpr int CHUNK = CHUNK_CELLS * TILE;
+constexpr int CHUNKS_X = static_cast<int>(Cave::WORLD_W) / CHUNK, CHUNKS_Y = static_cast<int>(Cave::WORLD_H) / CHUNK;
+
+constexpr int MM_DOWNSCALE = 4;
+constexpr int MM_W = Cave::GW / MM_DOWNSCALE, MM_H = Cave::GH / MM_DOWNSCALE;
+
+SDL_Texture* texture_from_pixels(SDL_Renderer* ren, const std::vector<uint32_t>& px, int w, int h) {
+  SDL_Texture* t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, w, h);
+  if (!t) return nullptr;
+  SDL_UpdateTexture(t, nullptr, px.data(), w * 4);
+  SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+  return t;
+}
+
+uint32_t pack(Rgba c) {  // RGBA32 byte order is R,G,B,A in memory
+  uint32_t v;
+  const uint8_t b[4] = {c.r, c.g, c.b, c.a};
+  std::memcpy(&v, b, 4);
+  return v;
+}
+
+// Cheap smooth flicker in [0,1]
+float flicker(double t, float seed) {
+  return 0.5f + 0.25f * std::sin(static_cast<float>(t) * 53.f + seed) +
+         0.25f * std::sin(static_cast<float>(t) * 97.f + seed * 2.3f);
+}
+
+// Straight-alpha RGBA canvas for baking chunk textures
+struct Canvas {
+  int w, h;
+  uint8_t* px;
+
+  void blend(int x, int y, Rgba c) {
+    if (x < 0 || y < 0 || x >= w || y >= h || c.a == 0) return;
+    uint8_t* p = px + (y * w + x) * 4;
+    if (c.a == 255 || p[3] == 0) {
+      p[0] = c.r; p[1] = c.g; p[2] = c.b; p[3] = c.a;
+      return;
+    }
+    const int da = p[3] * (255 - c.a) / 255;
+    const int oa = c.a + da;
+    p[0] = static_cast<uint8_t>((c.r * c.a + p[0] * da) / oa);
+    p[1] = static_cast<uint8_t>((c.g * c.a + p[1] * da) / oa);
+    p[2] = static_cast<uint8_t>((c.b * c.a + p[2] * da) / oa);
+    p[3] = static_cast<uint8_t>(oa);
+  }
+  void rect(int x0, int y0, int rw, int rh, Rgba c) {
+    for (int y = y0; y < y0 + rh; ++y)
+      for (int x = x0; x < x0 + rw; ++x) blend(x, y, c);
+  }
+  void line(int x0, int y0, int x1, int y1, Rgba c) {  // Bresenham, clipped per pixel
+    int dx = std::abs(x1 - x0), dy = -std::abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    for (int err = dx + dy;; ) {
+      blend(x0, y0, c);
+      if (x0 == x1 && y0 == y1) break;
+      int e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  }
+  // Phosphor glow: faint halo on the minor axis, then the bright core
+  void glow_line(int x0, int y0, int x1, int y1, Rgba c) {
+    const Rgba halo = with_alpha(c, static_cast<uint8_t>(c.a * 70 / 255));
+    if (std::abs(x1 - x0) >= std::abs(y1 - y0)) {
+      line(x0, y0 - 1, x1, y1 - 1, halo);
+      line(x0, y0 + 1, x1, y1 + 1, halo);
+    } else {
+      line(x0 - 1, y0, x1 - 1, y1, halo);
+      line(x0 + 1, y0, x1 + 1, y1, halo);
+    }
+    line(x0, y0, x1, y1, c);
+  }
+};
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// Setup
+// ---------------------------------------------------------------------------
+bool Gfx::init(SDL_Renderer* ren) {
+  ren_ = ren;
+  SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_BLEND);
+  for (const Glyph& g : GLYPHS) glyph_bits_[g.ch - FIRST_CHAR] = g.bits;
+  build_rock_tiles();
+  resize();
+  return !rock_px_.empty();
+}
+
+void Gfx::shutdown() {
+  for (SDL_Texture** t : {&overlay_, &minimap_}) {
+    if (*t) SDL_DestroyTexture(*t);
+    *t = nullptr;
+  }
+  for (Chunk& c : chunks_)
+    if (c.tex) SDL_DestroyTexture(c.tex);
+  chunks_.clear();
+}
+
+void Gfx::resize() {
+  SDL_GetRendererOutputSize(ren_, &w_, &h_);
+  w_ = std::max(w_, 320);
+  h_ = std::max(h_, 240);
+  build_overlay();
+}
+
+void Gfx::build_rock_tiles() {
+  rock_px_.assign(static_cast<size_t>(Cave::MAX_DEPTH) * TILE * TILE * 4, 0);
+  for (int band = 0; band < Cave::MAX_DEPTH; ++band)
+    for (int y = 0; y < TILE; ++y)
+      for (int x = 0; x < TILE; ++x) {
+        const bool hatch = ((x - y) & 3) == 0 && ROCK_BANDS[band].hatch_alpha > 0;
+        const Rgba c = hatch ? with_alpha(pal::MID, ROCK_BANDS[band].hatch_alpha)
+                             : with_alpha(pal::DIM, ROCK_BANDS[band].base_alpha);
+        uint8_t* p = &rock_px_[((band * TILE + y) * TILE + x) * 4];
+        p[0] = c.r; p[1] = c.g; p[2] = c.b; p[3] = c.a;
+      }
+}
+
+// CRT look: scanlines + vignette in one screen-sized black overlay
+void Gfx::build_overlay() {
+  if (overlay_) SDL_DestroyTexture(overlay_);
+  std::vector<uint32_t> px(static_cast<size_t>(w_) * h_);
+  for (int y = 0; y < h_; ++y) {
+    float ny = (y + 0.5f) / h_ * 2.f - 1.f;
+    for (int x = 0; x < w_; ++x) {
+      float nx = (x + 0.5f) / w_ * 2.f - 1.f;
+      float r2 = (nx * nx + ny * ny) * 0.5f;                // 0 centre … 1 corner
+      float vig = 0.55f * r2 * r2;                           // darken the edges
+      float scan = (y % 3 == 0) ? 45.f / 255.f : 0.f;
+      float a = 1.f - (1.f - vig) * (1.f - scan);
+      px[y * w_ + x] = pack({0, 0, 0, static_cast<uint8_t>(clampf(a, 0.f, 1.f) * 255.f)});
+    }
+  }
+  overlay_ = texture_from_pixels(ren_, px, w_, h_);
+}
+
+void Gfx::build_minimap(const Cave& cave) {
+  if (minimap_) SDL_DestroyTexture(minimap_);
+  std::vector<uint32_t> px(static_cast<size_t>(MM_W) * MM_H);
+  for (int my = 0; my < MM_H; ++my)
+    for (int mx = 0; mx < MM_W; ++mx) {
+      int n = 0;
+      for (int dy = 0; dy < MM_DOWNSCALE; ++dy)
+        for (int dx = 0; dx < MM_DOWNSCALE; ++dx)
+          n += cave.solid[(my * MM_DOWNSCALE + dy) * Cave::GW + mx * MM_DOWNSCALE + dx];
+      px[my * MM_W + mx] = pack(with_alpha(pal::MID, static_cast<uint8_t>(n * 150 / (MM_DOWNSCALE * MM_DOWNSCALE))));
+    }
+  minimap_ = texture_from_pixels(ren_, px, MM_W, MM_H);
+  minimap_generation_ = cave.generation;
+}
+
+// ---------------------------------------------------------------------------
+// Primitives
+// ---------------------------------------------------------------------------
+void Gfx::color(Rgba c) const { SDL_SetRenderDrawColor(ren_, c.r, c.g, c.b, c.a); }
+
+// Bright core with a faint halo on the minor axis — the phosphor glow
+void Gfx::line(int x0, int y0, int x1, int y1, Rgba c) const {
+  color(with_alpha(c, static_cast<uint8_t>(c.a * 70 / 255)));
+  if (std::abs(x1 - x0) >= std::abs(y1 - y0)) {
+    SDL_RenderDrawLine(ren_, x0, y0 - 1, x1, y1 - 1);
+    SDL_RenderDrawLine(ren_, x0, y0 + 1, x1, y1 + 1);
+  } else {
+    SDL_RenderDrawLine(ren_, x0 - 1, y0, x1 - 1, y1);
+    SDL_RenderDrawLine(ren_, x0 + 1, y0, x1 + 1, y1);
+  }
+  color(c);
+  SDL_RenderDrawLine(ren_, x0, y0, x1, y1);
+}
+
+// Scanline fill of an (x-monotone per row) polygon, submitted as a single FillRects call.
+void Gfx::polygon(const SDL_Point* pts, int n, Rgba c) const {
+  static thread_local std::vector<SDL_Rect> rects;
+  rects.clear();
+  int ymin = pts[0].y, ymax = pts[0].y;
+  for (int i = 1; i < n; ++i) { ymin = std::min(ymin, pts[i].y); ymax = std::max(ymax, pts[i].y); }
+  for (int y = ymin; y <= ymax; ++y) {
+    const float fy = y + 0.5f;
+    float lo = 1e9f, hi = -1e9f;
+    for (int i = 0; i < n; ++i) {
+      const SDL_Point p = pts[i], q = pts[(i + 1) % n];
+      if ((fy < std::min(p.y, q.y)) || (fy >= std::max(p.y, q.y)) || p.y == q.y) continue;
+      const float x = p.x + (q.x - p.x) * (fy - p.y) / static_cast<float>(q.y - p.y);
+      lo = std::min(lo, x);
+      hi = std::max(hi, x);
+    }
+    if (lo <= hi) {
+      const int x0 = static_cast<int>(std::floor(lo + 0.5f)), x1 = static_cast<int>(std::floor(hi + 0.5f));
+      rects.push_back({x0, y, std::max(1, x1 - x0), 1});
+    }
+  }
+  if (rects.empty()) return;
+  color(c);
+  SDL_RenderFillRects(ren_, rects.data(), static_cast<int>(rects.size()));
+}
+
+// Triangle with a colour gradient base→apex, as a few flat slices (SDL_RenderGeometry needs SDL 2.0.18;
+// the R36S ships older).
+void Gfx::gradient_triangle(SDL_Point a, SDL_Point b, SDL_Point c, Rgba base, Rgba tip) const {
+  constexpr int SLICES = 5;
+  auto at = [](SDL_Point p, SDL_Point q, float t) {
+    return SDL_Point{static_cast<int>(std::lround(lerpf(p.x, q.x, t))), static_cast<int>(std::lround(lerpf(p.y, q.y, t)))};
+  };
+  for (int i = 0; i < SLICES; ++i) {
+    const float t0 = static_cast<float>(i) / SLICES, t1 = static_cast<float>(i + 1) / SLICES;
+    const SDL_Point quad[4] = {at(a, c, t0), at(b, c, t0), at(b, c, t1), at(a, c, t1)};
+    polygon(quad, 4, mix(base, tip, (t0 + t1) * 0.5f));
+  }
+}
+
+void Gfx::fill(int x, int y, int w, int h, Rgba c) const {
+  color(c);
+  SDL_Rect r{x, y, w, h};
+  SDL_RenderFillRect(ren_, &r);
+}
+
+void Gfx::outline(int x, int y, int w, int h, Rgba c) const {
+  color(c);
+  SDL_Rect r{x, y, w, h};
+  SDL_RenderDrawRect(ren_, &r);
+}
+
+// One FillRects call per string (horizontal pixel runs merged): far fewer GL draws than a copy per glyph.
+void Gfx::text(int x, int y, const char* s, Rgba c) const {
+  static thread_local std::vector<SDL_Rect> rects;
+  rects.clear();
+  for (; *s; ++s, x += FONT_CELL_W) {
+    int ch = *s;
+    if (ch >= 'a' && ch <= 'z') ch -= 32;
+    if (ch < FIRST_CHAR || ch >= FIRST_CHAR + CHAR_COUNT || !glyph_bits_[ch - FIRST_CHAR]) continue;
+    const char* bits = glyph_bits_[ch - FIRST_CHAR];
+    for (int row = 0; row < 5; ++row)
+      for (int col = 0; col < 3;) {
+        if (bits[row * 3 + col] != '1') { ++col; continue; }
+        int run = 1;
+        while (col + run < 3 && bits[row * 3 + col + run] == '1') ++run;
+        rects.push_back({x + col * FONT_SCALE, y + row * FONT_SCALE, run * FONT_SCALE, FONT_SCALE});
+        col += run;
+      }
+  }
+  if (rects.empty()) return;
+  color(c);
+  SDL_RenderFillRects(ren_, rects.data(), static_cast<int>(rects.size()));
+}
+
+int Gfx::text_width(const char* s) const { return static_cast<int>(std::strlen(s)) * FONT_CELL_W; }
+
+int Gfx::sx(const Camera& cam, float wx) const {
+  return static_cast<int>(std::lround(cam.continuous_x(wx) - view_.ox));
+}
+int Gfx::sy(float wy) const { return static_cast<int>(std::lround(wy - view_.oy)); }
+
+// ---------------------------------------------------------------------------
+// World
+// ---------------------------------------------------------------------------
+// Bake one chunk: stars (open space only), rock tiles by depth, marching-squares contour.
+// Samples sit at cell centres so the outline lies exactly on the collision boundary.
+void Gfx::render_chunk(const Cave& cave, int cx, int cy, std::vector<uint8_t>& px) const {
+  px.assign(static_cast<size_t>(CHUNK) * CHUNK * 4, 0);
+  Canvas cv{CHUNK, CHUNK, px.data()};
+  const int wx0 = cx * CHUNK, wy0 = cy * CHUNK;  // world px of the chunk's top-left
+  const int gx0 = cx * CHUNK_CELLS, gy0 = cy * CHUNK_CELLS;
+
+  for (const Star& s : cave.stars) {
+    const int sy = static_cast<int>(s.y) - wy0;
+    if (sy < -8 || sy > CHUNK + 8) continue;
+    for (float shift : {0.f, -Cave::WORLD_W, Cave::WORLD_W}) {  // stars straddling the X seam
+      const int sx = static_cast<int>(s.x + shift) - wx0;
+      if (sx < -8 || sx > CHUNK + 8) continue;
+      const int sz = s.size, x = sx - sz / 2, y = sy - sz / 2;
+      cv.rect(x, y, sz, sz, with_alpha(pal::STAR, 200));
+      if (sz >= 4) cv.rect(x + 1, y + 1, sz - 2, sz - 2, with_alpha(pal::BRIGHT, 180));
+    }
+  }
+
+  for (int j = 0; j < CHUNK_CELLS; ++j)
+    for (int i = 0; i < CHUNK_CELLS; ++i) {
+      const int d = cave.depth_at(gx0 + i, gy0 + j);
+      if (!d) continue;
+      const uint8_t* tile = &rock_px_[static_cast<size_t>(std::min(d, Cave::MAX_DEPTH) - 1) * TILE * TILE * 4];
+      for (int y = 0; y < TILE; ++y)
+        for (int x = 0; x < TILE; ++x) {
+          const uint8_t* t = tile + (y * TILE + x) * 4;
+          cv.blend(i * TILE + x, j * TILE + y, {t[0], t[1], t[2], t[3]});
+        }
+    }
+
+  constexpr int H = TILE / 2;
+  static constexpr int EDGE[4][2] = {{H, 0}, {TILE, H}, {H, TILE}, {0, H}};  // edge midpoints in a cell
+  for (int gy = std::max(gy0 - 1, 0); gy <= std::min(gy0 + CHUNK_CELLS, Cave::GH - 1); ++gy)
+    for (int gx = gx0 - 1; gx <= gx0 + CHUNK_CELLS; ++gx) {  // neighbours' lines reach into this chunk
+      const ContourCase& cc = CONTOUR_CASES[cave.contour_at(gx, gy)];
+      const int ox = (gx - gx0) * TILE + H, oy = (gy - gy0) * TILE + H;
+      for (const auto& s : cc.seg) {
+        if (s[0] < 0) continue;
+        cv.glow_line(ox + EDGE[s[0]][0], oy + EDGE[s[0]][1], ox + EDGE[s[1]][0], oy + EDGE[s[1]][1], pal::BRIGHT);
+      }
+    }
+}
+
+void Gfx::draw_world(const Game& g) {
+  const Cave& cave = g.cave;
+  if (chunk_generation_ != cave.generation) {  // new cave: drop everything cached
+    for (Chunk& c : chunks_)
+      if (c.tex) SDL_DestroyTexture(c.tex);
+    chunks_.assign(CHUNKS_X * CHUNKS_Y, Chunk{});
+    chunk_count_ = 0;
+    chunk_generation_ = cave.generation;
+  }
+
+  const int ucx0 = static_cast<int>(std::floor(view_.ox / CHUNK));
+  const int ucx1 = static_cast<int>(std::floor((view_.ox + w_ - 1) / CHUNK));
+  const int cy0 = std::max(0, static_cast<int>(std::floor(view_.oy / CHUNK)));
+  const int cy1 = std::min(CHUNKS_Y - 1, static_cast<int>(std::floor((view_.oy + h_ - 1) / CHUNK)));
+  const int visible = (ucx1 - ucx0 + 1) * std::max(0, cy1 - cy0 + 1);
+  const int max_cached = std::max(24, visible * 2);
+  const int base_x = sx(g.cam, Cave::wrap_x(static_cast<float>(ucx0 * CHUNK)));
+
+  for (int cy = cy0; cy <= cy1; ++cy)
+    for (int ucx = ucx0; ucx <= ucx1; ++ucx) {
+      const int cx = ((ucx % CHUNKS_X) + CHUNKS_X) % CHUNKS_X;
+      Chunk& ch = chunks_[cy * CHUNKS_X + cx];
+      if (!ch.tex) {
+        SDL_Texture* reuse = nullptr;
+        if (chunk_count_ >= max_cached) {  // evict the least recently used chunk not on screen
+          Chunk* victim = nullptr;
+          for (Chunk& c : chunks_)
+            if (c.tex && c.last_used != frame_ && (!victim || c.last_used < victim->last_used)) victim = &c;
+          if (victim) { reuse = victim->tex; victim->tex = nullptr; --chunk_count_; }
+        }
+        if (!reuse) {
+          reuse = SDL_CreateTexture(ren_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, CHUNK, CHUNK);
+          if (!reuse) continue;
+          SDL_SetTextureBlendMode(reuse, SDL_BLENDMODE_BLEND);
+        }
+        render_chunk(cave, cx, cy, chunk_px_);
+        SDL_UpdateTexture(reuse, nullptr, chunk_px_.data(), CHUNK * 4);
+        ch.tex = reuse;
+        ++chunk_count_;
+      }
+      ch.last_used = frame_;
+      SDL_Rect dst{base_x + (ucx - ucx0) * CHUNK, sy(static_cast<float>(cy * CHUNK)), CHUNK, CHUNK};
+      SDL_RenderCopy(ren_, ch.tex, nullptr, &dst);
+    }
+}
+
+void Gfx::draw_pads(const Game& g, double t) const {
+  const auto& pads = g.cave.pads;
+  for (int pi = 0; pi < static_cast<int>(pads.size()); ++pi) {
+    const LandingPad& p = pads[pi];
+    int x0 = sx(g.cam, p.x0);
+    int x1 = x0 + static_cast<int>(p.x1 - p.x0);
+    int y = sy(p.y);
+    if (x1 < -40 || x0 > w_ + 40 || y < -80 || y > h_ + 40) continue;
+    int w = std::max(1, x1 - x0), mid = (x0 + x1) / 2;
+
+    // Deck slab with cross-hatch
+    fill(x0, y - 2, w, 5, with_alpha(pal::PAD, 200));
+    outline(x0, y - 2, w, 5, pal::BRIGHT);
+    color(with_alpha(pal::MID, 180));
+    for (int i = 0; i < w - 4; i += 6) SDL_RenderDrawLine(ren_, x0 + i, y - 2, x0 + i + 4, y + 2);
+
+    // Support struts into the rock
+    color(with_alpha(pal::PAD, 160));
+    SDL_RenderDrawLine(ren_, x0 + 4, y + 3, x0 + 4, y + 18);
+    SDL_RenderDrawLine(ren_, x1 - 4, y + 3, x1 - 4, y + 18);
+    SDL_RenderDrawLine(ren_, mid, y + 3, mid, y + 22);
+    SDL_RenderDrawLine(ren_, x0 + 4, y + 18, x1 - 4, y + 18);
+
+    // Approach chevrons, chasing upward
+    int chase = static_cast<int>(t * 3.0) % 3;
+    for (int c = 0; c < 3; ++c) {
+      int cy = y - 14 - c * 10, inset = 8 + c * 6;
+      Rgba col = with_alpha(pal::WARN, c == chase ? 255 : 110);
+      color(col);
+      SDL_RenderDrawLine(ren_, x0 + inset, cy, mid, cy + 6);
+      SDL_RenderDrawLine(ren_, x1 - inset, cy, mid, cy + 6);
+    }
+
+    // Alternating end beacons with a soft halo
+    bool on = (static_cast<int>(t * 2.5) + pi) % 2 == 0;
+    Rgba beacon = on ? pal::HOT : pal::PAD;
+    for (int bxp : {x0, x1}) {
+      fill(bxp - 5, y - 9, 10, 10, with_alpha(beacon, on ? 50 : 20));
+      fill(bxp - 2, y - 6, 4, 4, beacon);
+    }
+
+    // Centre T-mark
+    color(pal::BRIGHT);
+    SDL_RenderDrawLine(ren_, mid - 8, y, mid + 8, y);
+    SDL_RenderDrawLine(ren_, mid, y - 6, mid, y + 2);
+  }
+}
+
+// Additive sparks, batched into a few colour buckets by age (one FillRects call each)
+void Gfx::draw_particles(const Game& g) const {
+  constexpr int BUCKETS = 8;
+  static thread_local std::vector<SDL_Rect> rects[BUCKETS];
+  static thread_local Rgba colors[BUCKETS];
+  for (auto& v : rects) v.clear();
+  g.ecs.view<Particle, Transform>([&](Entity, const Particle& p, const Transform& t) {
+    const int x = sx(g.cam, t.pos.x), y = sy(t.pos.y);
+    if (x < -8 || x > w_ + 8 || y < -8 || y > h_ + 8) return;
+    const float age = 1.f - p.life / p.ttl;
+    const int b = std::clamp(static_cast<int>(age * BUCKETS), 0, BUCKETS - 1);
+    colors[b] = mix(p.from, p.to, (b + 0.5f) / BUCKETS);
+    const int s = std::max(1, static_cast<int>(p.size * (0.4f + 0.6f * (1.f - age))));
+    rects[b].push_back({x - s / 2, y - s / 2, s, s});
+  });
+  SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_ADD);
+  for (int b = 0; b < BUCKETS; ++b)
+    if (!rects[b].empty()) {
+      color(colors[b]);
+      SDL_RenderFillRects(ren_, rects[b].data(), static_cast<int>(rects[b].size()));
+    }
+  SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_BLEND);
+}
+
+void Gfx::draw_ship(const Game& g, double t) const {
+  const Transform& tf = g.ecs.get<Transform>(g.ship);
+  const ShipDef& d = *g.ecs.get<Hull>(g.ship).def;
+  const Flight& fl = g.ecs.get<Flight>(g.ship);
+  const Thrusters& th = g.ecs.get<Thrusters>(g.ship);
+  const float hw = d.half_w * 0.85f, hh = d.half_h * 0.9f, ox = d.engine_offset_x, ey = d.eng_y();
+  const bool top = d.engines_top;
+
+  auto W = [&](Vec2 l) {
+    Vec2 w = tf.pos + rotate(l, tf.angle);
+    return SDL_Point{sx(g.cam, w.x), sy(w.y)};
+  };
+  const Rgba body = fl.state == FlightState::Crashed ? pal::HOT
+                    : fl.state == FlightState::Landed ? pal::PAD
+                                                      : pal::BRIGHT;
+  auto seg = [&](Vec2 a, Vec2 b) {
+    SDL_Point pa = W(a), pb = W(b);
+    line(pa.x, pa.y, pb.x, pb.y, body);
+  };
+
+  const float nose_y = -hh, cabin_y = -hh * 0.35f, foot = hh * 0.85f;
+  float belly = top ? hh * 0.35f : std::min(std::abs(ey) - 6.f, hh * 0.45f);
+  if (belly < cabin_y + 8.f) belly = cabin_y + 12.f;
+
+  // Flames first so the hull draws over them
+  if (fl.state == FlightState::Flying) {
+    SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_ADD);
+    for (int i = 0; i < 2; ++i) {
+      float lvl = th.level[i];
+      if (lvl < 0.05f) continue;
+      float lx = i == 0 ? -ox : ox;
+      float len = (10.f + 46.f * lvl) * (0.8f + 0.4f * flicker(t, i * 1.7f));
+      const float wd = top ? 8.f : 7.f;
+      float y0 = d.nozzle_y();
+      auto tri = [&](float half_w, float length, Rgba base, Rgba tip) {
+        gradient_triangle(W({lx - half_w, y0}), W({lx + half_w, y0}), W({lx, y0 + length}), base, tip);
+      };
+      tri(wd, len, with_alpha(pal::FLAME_EDGE, 220), with_alpha(pal::FLAME_EDGE, 0));
+      tri(wd * 0.5f, len * 0.6f, with_alpha(pal::FLAME_CORE, 255), with_alpha(pal::FLAME_CORE, 0));
+    }
+    SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_BLEND);
+  }
+
+  // Dark hull fill so rock and stars don't show through (convex fan around the nose)
+  {
+    const Vec2 outline_pts[] = {{0.f, nose_y}, {hw * 0.45f, cabin_y}, {hw * 0.55f, belly}, {hw * 0.9f, foot},
+                                {-hw * 0.9f, foot}, {-hw * 0.55f, belly}, {-hw * 0.45f, cabin_y}};
+    constexpr int N = sizeof(outline_pts) / sizeof(outline_pts[0]);
+    SDL_Point p[N];
+    for (int i = 0; i < N; ++i) p[i] = W(outline_pts[i]);
+    polygon(p, N, pal::HULL_FILL);
+  }
+
+  // Cabin / nose
+  seg({-hw * 0.25f, cabin_y}, {0.f, nose_y});
+  seg({hw * 0.25f, cabin_y}, {0.f, nose_y});
+  seg({-hw * 0.25f, cabin_y}, {hw * 0.25f, cabin_y});
+  seg({-hw * 0.12f, cabin_y + 4.f}, {hw * 0.12f, cabin_y + 4.f});
+  // Hull
+  seg({-hw * 0.45f, cabin_y}, {-hw * 0.55f, belly});
+  seg({hw * 0.45f, cabin_y}, {hw * 0.55f, belly});
+  seg({-hw * 0.55f, belly}, {hw * 0.55f, belly});
+  // Landing feet
+  seg({-hw * 0.55f, belly}, {-hw * 0.9f, foot});
+  seg({hw * 0.55f, belly}, {hw * 0.9f, foot});
+  seg({-hw * 0.9f, foot}, {-hw * 0.7f, foot});
+  seg({hw * 0.7f, foot}, {hw * 0.9f, foot});
+  // Engine bells: the open end points ground-ward so top mounts still fire "down"
+  for (float side : {-1.f, 1.f}) {
+    float ex = side * ox;
+    float back = top ? ey + 2.f : ey - 2.f, rim = top ? ey + 16.f : ey + 12.f;
+    float bw = top ? 8.f : 7.f, rw = top ? 11.f : 10.f;
+    seg({ex - bw, back}, {ex + bw, back});
+    seg({ex - bw, back}, {ex - rw, rim});
+    seg({ex + bw, back}, {ex + rw, rim});
+    seg({ex - rw, rim}, {ex + rw, rim});
+  }
+  if (fl.state == FlightState::Flying) {  // nose marker
+    seg({0.f, nose_y}, {0.f, nose_y - 10.f});
+    seg({-4.f, nose_y - 6.f}, {0.f, nose_y - 10.f});
+    seg({4.f, nose_y - 6.f}, {0.f, nose_y - 10.f});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HUD / UI
+// ---------------------------------------------------------------------------
+void Gfx::draw_hud(const Game& g) const {
+  const Transform& tf = g.ecs.get<Transform>(g.ship);
+  const Motion& m = g.ecs.get<Motion>(g.ship);
+  const ShipDef& d = *g.ecs.get<Hull>(g.ship).def;
+  const Flight& fl = g.ecs.get<Flight>(g.ship);
+  const Thrusters& th = g.ecs.get<Thrusters>(g.ship);
+  const int lh = FONT_CELL_H + 4;
+
+  fill(8, 8, 210, 18 * 2 + 4 + lh * 4 + 28, with_alpha(pal::MENU, 120));
+  int y = 16;
+  for (int i = 0; i < 2; ++i) {
+    fill(20, y, 120, 10, pal::DIM);
+    float v = clampf(th.level[i], 0.f, 1.f);
+    fill(20, y, static_cast<int>(120 * v), 10, mix(pal::MID, pal::HOT, smoothstep((v - 0.6f) / 0.4f)));
+    outline(20, y, 120, 10, with_alpha(pal::MID, 120));
+    text(148, y - 3, i == 0 ? "L" : "R", pal::MID);
+    y += 18;
+  }
+  y += 4;
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%s%s", d.name, d.engines_top ? " TOP" : "");
+  text(20, y, buf, pal::BRIGHT);
+  y += lh;
+  text(20, y, "START MENU", pal::MID);
+  y += lh + 4;
+
+  const float alt = g.cave.floor_below(tf.pos.x, tf.pos.y) - tf.pos.y;
+  std::snprintf(buf, sizeof(buf), "ALT %.0f", alt);
+  text(20, y, buf, pal::BRIGHT);
+  y += lh;
+  std::snprintf(buf, sizeof(buf), "VX %.0f VY %.0f", m.vel.x, m.vel.y);
+  text(20, y, buf, pal::MID);
+
+  const bool pad = g.cave.pad_below(tf.pos.x, tf.pos.y, 140.f) != nullptr;
+  const bool ok_v = m.vel.y < tune::LAND_MAX_VY && std::abs(m.vel.x) < tune::LAND_MAX_VX;
+  const bool ok_a = std::abs(tf.angle) < tune::LAND_MAX_ANGLE;
+  const struct { const char* s; bool ok; } status[] = {
+      {pad ? "PAD OK" : "NO PAD", pad}, {ok_v ? "SPEED OK" : "SPEED HI", ok_v}, {ok_a ? "ATT OK" : "ATT BAD", ok_a}};
+  const int rx = w_ - text_width("SPEED OK") - 24;
+  fill(rx - 12, 8, w_ - rx + 4, lh * 3 + 16, with_alpha(pal::MENU, 120));
+  for (int i = 0; i < 3; ++i) text(rx, 16 + lh * i, status[i].s, status[i].ok ? pal::PAD : pal::HOT);
+
+  if (fl.state != FlightState::Flying) {
+    const bool landed = fl.state == FlightState::Landed;
+    float pulse = 0.65f + 0.35f * std::sin(fl.timer * 10.f);
+    Rgba c = landed ? pal::PAD : pal::HOT;
+    text_centered(w_ / 2, 48, landed ? "LANDED" : "CRASH", with_alpha(c, static_cast<uint8_t>(255 * pulse)));
+    text_centered(w_ / 2, 48 + lh, landed ? "A TO RELIGHT" : "A TO RESET", pal::MID);
+  }
+}
+
+void Gfx::draw_minimap(const Game& g, double t) {
+  if (!minimap_ || minimap_generation_ != g.cave.generation) build_minimap(g.cave);
+  const int x = (w_ - MM_W) / 2, y = h_ - MM_H - 14;
+  fill(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::BG, 170));
+  SDL_Rect dst{x, y, MM_W, MM_H};
+  SDL_RenderCopy(ren_, minimap_, nullptr, &dst);
+  outline(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::MID, 140));
+
+  const float k = MM_W / Cave::WORLD_W;
+  for (const LandingPad& p : g.cave.pads) fill(x + static_cast<int>(p.x0 * k), y + static_cast<int>(p.y * k) - 1, 3, 2, pal::WARN);
+  // Viewport box (drawn twice when it wraps the seam)
+  const float vx = Cave::wrap_x(g.cam.x) * k;
+  const int vw = static_cast<int>(g.cam.vw * k), vh = static_cast<int>(g.cam.vh * k);
+  const int vy = y + static_cast<int>(clampf(g.cam.y, 0.f, Cave::WORLD_H) * k);
+  for (float off : {0.f, -static_cast<float>(MM_W)}) {
+    int bx = x + static_cast<int>(vx + off);
+    if (bx + vw < x || bx > x + MM_W) continue;
+    outline(bx, vy, vw, vh, with_alpha(pal::BRIGHT, 120));
+  }
+  const Transform& tf = g.ecs.get<Transform>(g.ship);
+  if (std::fmod(t, 0.6) < 0.35)
+    fill(x + static_cast<int>(Cave::wrap_x(tf.pos.x) * k) - 1, y + static_cast<int>(tf.pos.y * k) - 1, 3, 3, pal::HOT);
+}
+
+void Gfx::draw_menu(const Game& g, const UiState& ui) const {
+  const int lh = FONT_CELL_H + 8;
+  const int panel_w = 420, panel_h = 80 + MENU_COUNT * lh + 40;
+  const int px = w_ / 2 - panel_w / 2, py = h_ / 2 - panel_h / 2;
+  fill(px, py, panel_w, panel_h, pal::MENU);
+  outline(px, py, panel_w, panel_h, pal::BRIGHT);
+  outline(px + 3, py + 3, panel_w - 6, panel_h - 6, with_alpha(pal::MID, 90));
+
+  text_centered(w_ / 2, py + 16, "DUALTHRUST", pal::BRIGHT);
+  text_centered(w_ / 2, py + 16 + lh, "CRT CAVE LANDER", pal::MID);
+
+  const int row_y = py + 16 + lh * 2 + 8;
+  for (int i = 0; i < MENU_COUNT; ++i) {
+    char line[48];
+    const char* label = MENU_ITEMS[i].label;
+    switch (MENU_ITEMS[i].action) {
+      case MenuAction::Fullscreen: std::snprintf(line, sizeof line, "%s %s", label, ui.fullscreen ? "ON" : "OFF"); break;
+      case MenuAction::Ship:
+        std::snprintf(line, sizeof line, "%s %s", label, g.ecs.get<Hull>(g.ship).def->name);
+        break;
+      case MenuAction::SwapEngines: std::snprintf(line, sizeof line, "%s %s", label, ui.swap_engines ? "ON" : "OFF"); break;
+      case MenuAction::Sound: std::snprintf(line, sizeof line, "%s %s", label, ui.sound ? "ON" : "OFF"); break;
+      default: std::snprintf(line, sizeof line, "%s", label);
+    }
+    const bool sel = i == ui.cursor;
+    const int lx = px + 40, ly = row_y + i * lh;
+    if (sel) {
+      fill(px + 12, ly - 4, panel_w - 24, FONT_CELL_H + 8, with_alpha(pal::MID, 40));
+      if (std::fmod(ui.time, 0.8) < 0.55) text(lx - FONT_CELL_W - 4, ly, ">", pal::WARN);
+    }
+    text(lx, ly, line, sel ? pal::WARN : pal::MID);
+  }
+  text_centered(w_ / 2, py + panel_h - lh - 8, "UP DOWN MOVE  A SELECT", pal::MID);
+}
+
+// ---------------------------------------------------------------------------
+// Frame
+// ---------------------------------------------------------------------------
+void Gfx::draw(const Game& g, const UiState& ui) {
+  view_.ox = std::round(g.cam.x + g.cam.shake_off.x);
+  view_.oy = std::round(g.cam.y + g.cam.shake_off.y);
+  const double t = ui.time;
+
+  color(pal::BG);
+  SDL_RenderClear(ren_);
+  ++frame_;
+  draw_world(g);
+  draw_pads(g, t);
+  draw_particles(g);
+  draw_ship(g, t);
+
+  const Flight& fl = g.ecs.get<Flight>(g.ship);
+  if (fl.state == FlightState::Crashed) {
+    float flash = (0.5f + 0.5f * std::sin(fl.timer * 20.f)) * std::exp(-fl.timer * 1.5f);
+    fill(0, 0, w_, h_, with_alpha(pal::HOT, static_cast<uint8_t>(8 + 100 * flash)));
+  }
+  draw_hud(g);
+  draw_minimap(g, t);
+  if (ui.menu_open) draw_menu(g, ui);
+
+  SDL_Rect full{0, 0, w_, h_};
+  SDL_RenderCopy(ren_, overlay_, nullptr, &full);
+}
+
+bool Gfx::save_screenshot(const char* path) const {
+  SDL_Surface* s = SDL_CreateRGBSurfaceWithFormat(0, w_, h_, 32, SDL_PIXELFORMAT_ARGB8888);
+  if (!s) return false;
+  bool ok = SDL_RenderReadPixels(ren_, nullptr, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) == 0 &&
+            SDL_SaveBMP(s, path) == 0;
+  SDL_FreeSurface(s);
+  return ok;
+}
