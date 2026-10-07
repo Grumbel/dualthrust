@@ -33,6 +33,9 @@ Keyboard fallback: A/D or arrows = engines; Tab / [ / ] = preset; X = swap.
 
 ## Gameplay
 
+- World is **24000px** wide and **wraps in X** (fly off one side, appear on the other).
+
+
 - Fractal (midpoint-displacement) ground with flat landing pads
 - Camera scrolls with the ship across an 8000px-wide world
 - Soft landing requires: on a pad, low horizontal/vertical speed, near-upright attitude

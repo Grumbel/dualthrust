@@ -90,36 +90,58 @@ struct LandingPad {
 };
 
 struct Terrain {
-  static constexpr float WORLD_W = 8000.f;
+  // Large toroidal world: X wraps. Height samples form a seamless ring.
+  static constexpr float WORLD_W = 24000.f;
   static constexpr float STEP = 8.f;
-  static constexpr int COUNT = static_cast<int>(WORLD_W / STEP) + 1;
+  // One sample per STEP; last sample coincides with x=0 for seamless wrap.
+  static constexpr int COUNT = static_cast<int>(WORLD_W / STEP);
 
   std::vector<float> h;  // height at sample i → world y of surface
   std::vector<LandingPad> pads;
   unsigned seed = 1;
 
-  float x_at(int i) const { return static_cast<float>(i) * STEP; }
-
-  float height_at(float wx) const {
-    if (wx <= 0.f)
-      return h.front();
-    if (wx >= WORLD_W)
-      return h.back();
-    float t = wx / STEP;
-    int i = static_cast<int>(t);
-    if (i >= COUNT - 1)
-      return h.back();
-    float f = t - static_cast<float>(i);
-    return lerpf(h[i], h[i + 1], f);
+  static float wrap_x(float wx) {
+    wx = std::fmod(wx, WORLD_W);
+    if (wx < 0.f)
+      wx += WORLD_W;
+    return wx;
   }
 
-  // Approximate surface slope (dy/dx) near wx
+  // Shortest signed delta on the ring (result in (-WORLD_W/2, WORLD_W/2])
+  static float wrap_delta(float from, float to) {
+    float d = to - from;
+    d = std::fmod(d + WORLD_W * 1.5f, WORLD_W) - WORLD_W * 0.5f;
+    return d;
+  }
+
+  float x_at(int i) const { return static_cast<float>(i) * STEP; }
+
+  int sample_index(float wx) const {
+    wx = wrap_x(wx);
+    int i = static_cast<int>(wx / STEP) % COUNT;
+    if (i < 0)
+      i += COUNT;
+    return i;
+  }
+
+  float height_at(float wx) const {
+    wx = wrap_x(wx);
+    float t = wx / STEP;
+    int i0 = static_cast<int>(t) % COUNT;
+    if (i0 < 0)
+      i0 += COUNT;
+    int i1 = (i0 + 1) % COUNT;
+    float f = t - std::floor(t);
+    return lerpf(h[i0], h[i1], f);
+  }
+
   float slope_at(float wx) const {
     const float d = STEP;
     return (height_at(wx + d) - height_at(wx - d)) / (2.f * d);
   }
 
   bool on_pad(float wx) const {
+    wx = wrap_x(wx);
     for (const auto& p : pads) {
       if (wx >= p.x0 && wx <= p.x1)
         return true;
@@ -132,69 +154,78 @@ struct Terrain {
     h.assign(COUNT, 0.f);
     pads.clear();
 
-    // Seeded LCG
     unsigned state = seed ? seed : 1u;
     auto rnd = [&]() -> float {
       state = state * 1664525u + 1013904223u;
       return (state >> 8) / static_cast<float>(1u << 24);
     };
 
-    // Endpoints + a few anchor peaks
-    h[0] = 520.f;
-    h[COUNT - 1] = 540.f;
+    // Seed all samples with low-frequency base, then diamond-style midpoints on a ring
+    for (int i = 0; i < COUNT; ++i)
+      h[i] = 500.f + (rnd() * 2.f - 1.f) * 40.f;
 
-    // Midpoint displacement on dyadic spans
-    int step = COUNT - 1;
-    float amp = 220.f;
+    // Power-of-two style passes wrapping around the ring
+    int step = COUNT;
+    // Find largest power-of-two <= COUNT
+    int po2 = 1;
+    while (po2 * 2 <= COUNT)
+      po2 *= 2;
+    step = po2;
+    float amp = 260.f;
     while (step > 1) {
       int half = step / 2;
-      for (int i = 0; i + step < COUNT; i += step) {
-        int mid = i + half;
-        float avg = 0.5f * (h[i] + h[i + step]);
-        h[mid] = avg + (rnd() * 2.f - 1.f) * amp;
-        h[mid] = clampf(h[mid], 280.f, 680.f);
+      for (int i = 0; i < COUNT; i += step) {
+        int i0 = i % COUNT;
+        int i1 = (i + step) % COUNT;
+        int mid = (i + half) % COUNT;
+        float avg = 0.5f * (h[i0] + h[i1]);
+        h[mid] = clampf(avg + (rnd() * 2.f - 1.f) * amp, 260.f, 720.f);
       }
       step = half;
       amp *= 0.55f;
     }
 
-    // Carve a few flat landing pads
+    // More pads across the larger ring (stay clear of the x=0 seam)
     struct PadSpec {
       float center_frac;
       float width;
     };
     const PadSpec specs[] = {
-        {0.12f, 140.f}, {0.28f, 120.f}, {0.45f, 180.f},
-        {0.62f, 130.f}, {0.78f, 160.f}, {0.92f, 120.f},
+        {0.06f, 160.f}, {0.14f, 130.f}, {0.22f, 150.f}, {0.30f, 120.f},
+        {0.38f, 180.f}, {0.46f, 140.f}, {0.54f, 160.f}, {0.62f, 130.f},
+        {0.70f, 170.f}, {0.78f, 140.f}, {0.86f, 150.f}, {0.94f, 120.f},
     };
     for (const auto& sp : specs) {
       float cx = sp.center_frac * WORLD_W;
       float x0 = cx - sp.width * 0.5f;
       float x1 = cx + sp.width * 0.5f;
-      // Sample average height in region, then flatten
       float sum = 0.f;
       int n = 0;
-      int i0 = std::max(0, static_cast<int>(x0 / STEP));
-      int i1 = std::min(COUNT - 1, static_cast<int>(x1 / STEP));
+      int i0 = static_cast<int>(x0 / STEP);
+      int i1 = static_cast<int>(x1 / STEP);
       for (int i = i0; i <= i1; ++i) {
-        sum += h[i];
+        int idx = ((i % COUNT) + COUNT) % COUNT;
+        sum += h[idx];
         ++n;
       }
       float flat = (n > 0) ? sum / n : 500.f;
-      // Slightly raise pads so they read as platforms
       flat -= 8.f;
-      for (int i = i0; i <= i1; ++i)
-        h[i] = flat;
+      for (int i = i0; i <= i1; ++i) {
+        int idx = ((i % COUNT) + COUNT) % COUNT;
+        h[idx] = flat;
+      }
       pads.push_back({x0, x1});
     }
 
-    // Smooth once outside pads for less jaggy fractal edges
+    // Circular smooth (skip pads)
     std::vector<float> tmp = h;
-    for (int i = 1; i < COUNT - 1; ++i) {
+    for (int i = 0; i < COUNT; ++i) {
       float wx = x_at(i);
       if (on_pad(wx))
         continue;
-      tmp[i] = 0.25f * h[i - 1] + 0.5f * h[i] + 0.25f * h[i + 1];
+      int im = (i - 1 + COUNT) % COUNT;
+      int ip = (i + 1) % COUNT;
+      tmp[i] = 0.25f * h[im] + 0.5f * h[i] + 0.25f * h[ip];
     }
     h.swap(tmp);
   }
@@ -299,16 +330,8 @@ struct Ship {
     while (angle < -PI)
       angle += 2.f * PI;
 
-    // Soft left/right world bounds
-    const float margin = 60.f;
-    if (pos.x < margin) {
-      pos.x = margin;
-      vel.x = std::abs(vel.x) * 0.3f;
-    }
-    if (pos.x > Terrain::WORLD_W - margin) {
-      pos.x = Terrain::WORLD_W - margin;
-      vel.x = -std::abs(vel.x) * 0.3f;
-    }
+    // Toroidal X: wrap around the world
+    pos.x = Terrain::wrap_x(pos.x);
   }
 
   // Probe points along the belly / engine line for collision
@@ -376,21 +399,42 @@ struct Ship {
 struct Camera {
   float x = 0.f;
   float y = 0.f;
+  float prev_ship_x = 0.f;
+  bool have_prev = false;
 
   void follow(const Ship& ship, float dt) {
+    // When the ship wraps across the seam, shift the camera by the same amount
+    // so the view does not jump.
+    if (have_prev) {
+      float d = ship.pos.x - prev_ship_x;
+      if (d > Terrain::WORLD_W * 0.5f)
+        x -= Terrain::WORLD_W;
+      else if (d < -Terrain::WORLD_W * 0.5f)
+        x += Terrain::WORLD_W;
+    }
+    prev_ship_x = ship.pos.x;
+    have_prev = true;
+
     float target_x = ship.pos.x - WINDOW_W * 0.5f;
-    float target_y = ship.pos.y - WINDOW_H * 0.55f;  // bias slightly upward view
-    // Smooth follow
+    float target_y = ship.pos.y - WINDOW_H * 0.55f;
     float k = 1.f - std::exp(-6.f * dt);
+    // Seam already corrected above; smooth toward the continuous target.
     x += (target_x - x) * k;
     y += (target_y - y) * k;
-    x = clampf(x, 0.f, std::max(0.f, Terrain::WORLD_W - WINDOW_W));
-    // Vertical: allow looking above terrain, clamp loosely
     y = clampf(y, -200.f, 900.f);
   }
 
+  // Map a world X (already on the ring) into the continuous camera frame
+  // so objects near the seam still appear beside the ship.
+  float continuous_x(float wx) const {
+    float cam_center = x + WINDOW_W * 0.5f;
+    float d = Terrain::wrap_delta(cam_center, Terrain::wrap_x(wx));
+    return cam_center + d;
+  }
+
   SDL_Point to_screen(float wx, float wy) const {
-    return {static_cast<int>(wx - x + 0.5f), static_cast<int>(wy - y + 0.5f)};
+    float sx = continuous_x(wx) - x;
+    return {static_cast<int>(sx + 0.5f), static_cast<int>(wy - y + 0.5f)};
   }
 };
 
@@ -422,39 +466,61 @@ void draw_scanlines(SDL_Renderer* ren) {
 }
 
 void draw_terrain(SDL_Renderer* ren, const Terrain& t, const Camera& cam) {
-  // Only samples visible in view (+ margin)
-  int i0 = std::max(0, static_cast<int>((cam.x - 40.f) / Terrain::STEP));
-  int i1 = std::min(Terrain::COUNT - 1, static_cast<int>((cam.x + WINDOW_W + 40.f) / Terrain::STEP));
+  // Walk a continuous X range covering the view; sample heights on the ring.
+  float x_lo = cam.x - 40.f;
+  float x_hi = cam.x + WINDOW_W + 40.f;
+  int i0 = static_cast<int>(std::floor(x_lo / Terrain::STEP));
+  int i1 = static_cast<int>(std::ceil(x_hi / Terrain::STEP));
 
-  // Filled ground silhouette (dim)
   set_color(ren, CRT_DIM, 180);
   for (int i = i0; i < i1; ++i) {
-    SDL_Point a = cam.to_screen(t.x_at(i), t.h[i]);
-    SDL_Point b = cam.to_screen(t.x_at(i + 1), t.h[i + 1]);
-    // vertical fill to bottom of screen
+    float wx0 = static_cast<float>(i) * Terrain::STEP;
+    float wx1 = static_cast<float>(i + 1) * Terrain::STEP;
+    float h0 = t.height_at(wx0);
+    float h1 = t.height_at(wx1);
+    // Screen positions use continuous mapping via camera
+    SDL_Point a = cam.to_screen(Terrain::wrap_x(wx0), h0);
+    // Prefer continuous x for segment neighbour to avoid seam flip mid-segment
+    float sx0 = cam.continuous_x(Terrain::wrap_x(wx0));
+    float sx1 = sx0 + Terrain::STEP;  // consecutive sample in camera space
+    int ax = static_cast<int>(sx0 - cam.x + 0.5f);
+    int bx = static_cast<int>(sx1 - cam.x + 0.5f);
+    int ay = static_cast<int>(h0 - cam.y + 0.5f);
+    int by = static_cast<int>(h1 - cam.y + 0.5f);
     int y_bot = WINDOW_H + 2;
-    // simple trap fill via lines
-    int steps = std::max(1, std::abs(b.x - a.x));
+    int steps = std::max(1, std::abs(bx - ax));
     for (int s = 0; s <= steps; ++s) {
       float u = static_cast<float>(s) / steps;
-      int x = static_cast<int>(lerpf(static_cast<float>(a.x), static_cast<float>(b.x), u));
-      int y = static_cast<int>(lerpf(static_cast<float>(a.y), static_cast<float>(b.y), u));
+      int x = static_cast<int>(lerpf(static_cast<float>(ax), static_cast<float>(bx), u));
+      int y = static_cast<int>(lerpf(static_cast<float>(ay), static_cast<float>(by), u));
       SDL_RenderDrawLine(ren, x, y, x, y_bot);
     }
+    (void)a;
   }
 
-  // Bright surface polyline
   for (int i = i0; i < i1; ++i) {
-    bool pad = t.on_pad(t.x_at(i));
-    draw_line_w(ren, cam, t.x_at(i), t.h[i], t.x_at(i + 1), t.h[i + 1], pad ? CRT_PAD : CRT_BRIGHT);
+    float wx0 = static_cast<float>(i) * Terrain::STEP;
+    float wx1 = static_cast<float>(i + 1) * Terrain::STEP;
+    float h0 = t.height_at(wx0);
+    float h1 = t.height_at(wx1);
+    bool pad = t.on_pad(wx0);
+    float sx0 = cam.continuous_x(Terrain::wrap_x(wx0));
+    float sx1 = sx0 + Terrain::STEP;
+    SDL_Color col = pad ? CRT_PAD : CRT_BRIGHT;
+    set_color(ren, col);
+    int ax = static_cast<int>(sx0 - cam.x + 0.5f);
+    int bx = static_cast<int>(sx1 - cam.x + 0.5f);
+    int ay = static_cast<int>(h0 - cam.y + 0.5f);
+    int by = static_cast<int>(h1 - cam.y + 0.5f);
+    SDL_RenderDrawLine(ren, ax, ay, bx, by);
+    set_color(ren, col, 60);
+    SDL_RenderDrawLine(ren, ax + 1, ay, bx + 1, by);
   }
 
-  // Pad markers (ticks)
   for (const auto& p : t.pads) {
     float y = t.height_at(0.5f * (p.x0 + p.x1));
     draw_line_w(ren, cam, p.x0, y + 1.f, p.x0, y + 14.f, CRT_PAD);
     draw_line_w(ren, cam, p.x1, y + 1.f, p.x1, y + 14.f, CRT_PAD);
-    // center cross
     float cx = 0.5f * (p.x0 + p.x1);
     draw_line_w(ren, cam, cx - 8.f, y + 6.f, cx + 8.f, y + 6.f, CRT_MID);
   }
@@ -685,8 +751,13 @@ int main(int argc, char** argv) {
   ship.spawn(terrain, Terrain::WORLD_W * 0.45f);
 
   Camera cam;
-  cam.x = ship.pos.x - WINDOW_W * 0.5f;
-  cam.y = ship.pos.y - WINDOW_H * 0.55f;
+  auto snap_camera = [&]() {
+    cam.x = ship.pos.x - WINDOW_W * 0.5f;
+    cam.y = ship.pos.y - WINDOW_H * 0.55f;
+    cam.prev_ship_x = ship.pos.x;
+    cam.have_prev = true;
+  };
+  snap_camera();
 
   SDL_GameController* pad = nullptr;
   for (int i = 0; i < SDL_NumJoysticks(); ++i) {
@@ -716,10 +787,10 @@ int main(int argc, char** argv) {
       ship.vel.y = -30.f;  // gentle hop
       std::printf("Relight\n");
     } else {
-      // Respawn near a random pad
       int pi = static_cast<int>(SDL_GetTicks() % terrain.pads.size());
       float cx = 0.5f * (terrain.pads[pi].x0 + terrain.pads[pi].x1);
       ship.spawn(terrain, cx);
+      snap_camera();
       std::printf("Reset above pad %d\n", pi);
     }
   };
@@ -751,6 +822,7 @@ int main(int argc, char** argv) {
         if (ev.key.keysym.sym == SDLK_g) {
           terrain.generate(SDL_GetTicks());
           ship.spawn(terrain, Terrain::WORLD_W * 0.45f);
+          snap_camera();
           std::printf("New terrain seed\n");
         }
       }
@@ -774,6 +846,7 @@ int main(int argc, char** argv) {
         if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_Y) {
           terrain.generate(SDL_GetTicks());
           ship.spawn(terrain, Terrain::WORLD_W * 0.45f);
+          snap_camera();
         }
       }
 

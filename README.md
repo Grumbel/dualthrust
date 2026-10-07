@@ -17,7 +17,7 @@ Dual-engine lander with a green CRT / oscilloscope look. Triggers only for thrus
 | `Tab` / `[` / `]` | Preset (keyboard) |
 | `X` | Swap engines (keyboard) |
 
-Landing lights (HUD top-right): **PAD OK**, **SPEED OK**, **ATT OK** — all three green for a safe touchdown.
+World is 24000px wide and wraps horizontally. Landing lights (HUD top-right): **PAD OK**, **SPEED OK**, **ATT OK** — all three green for a safe touchdown.
 
 ## Build
 
