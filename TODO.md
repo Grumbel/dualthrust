@@ -2,9 +2,9 @@
 
 ## Current tip
 
-`4b0d187` — Richer pads, dual-stick thrust, CLI, man page, startup banner
+`abb8357` — Fix broken startup printf string literals
 
-Bundle: `dualthrust-015.1-pads-cli-man-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-015.2-fix-printf-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
