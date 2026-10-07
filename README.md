@@ -56,3 +56,5 @@ dualthrust --fullscreen --ship 2 --seed 42
 Man page: `man dualthrust` after install.
 
 Controls: triggers **or** analog stick up (left stick → left engine, right stick → right engine).
+
+Ship presets include **Topdog** and **Canopy** with engines mounted on top (still thrust ground-ward for lift).

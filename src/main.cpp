@@ -77,17 +77,20 @@ inline float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 struct ShipConfig {
   const char* name;
   float half_w, half_h;
-  float engine_offset_x, engine_offset_y;
+  float engine_offset_x, engine_offset_y;  // offset magnitudes
   float mass, inertia, max_thrust;
+  bool engines_top;  // true: engines on nose/top (-y); false: aft/bottom (+y)
 };
 
-// half_w, half_h, engine_offset_x, engine_offset_y (aft/+y = bottom when upright)
+// Local +y = ground-side when upright. engines_top places thrusters at -engine_offset_y.
 constexpr ShipConfig SHIP_CONFIGS[] = {
-    {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f},
-    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f},
-    {"Wide", 48.f, 28.f, 36.f, 26.f, 1.25f, 1600.f, 420.f},
-    {"Barge", 64.f, 26.f, 52.f, 24.f, 1.6f, 2800.f, 440.f},
-    {"Long", 26.f, 42.f, 14.f, 36.f, 1.1f, 1100.f, 390.f},
+    {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f, false},
+    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false},
+    {"Wide", 48.f, 28.f, 36.f, 26.f, 1.25f, 1600.f, 420.f, false},
+    {"Barge", 64.f, 26.f, 52.f, 24.f, 1.6f, 2800.f, 440.f, false},
+    {"Long", 26.f, 42.f, 14.f, 36.f, 1.1f, 1100.f, 390.f, false},
+    {"Topdog", 28.f, 34.f, 16.f, 30.f, 1.05f, 950.f, 410.f, true},
+    {"Canopy", 44.f, 30.f, 30.f, 28.f, 1.35f, 1700.f, 430.f, true},
 };
 constexpr int SHIP_CONFIG_COUNT = static_cast<int>(sizeof(SHIP_CONFIGS) / sizeof(SHIP_CONFIGS[0]));
 
@@ -467,6 +470,13 @@ struct Ship {
   }
   void cycle_config(int d) { set_config(config_index + d); }
 
+  // Signed local Y of engine mounts
+  float eng_y() const {
+    return cfg->engines_top ? -cfg->engine_offset_y : cfg->engine_offset_y;
+  }
+  // Bottom of hull / feet (always +y when upright) for landing probes
+  float foot_y() const { return cfg->half_h * 0.95f; }
+
   void spawn(const Cave& cave, float wx) {
     // Always prefer a real landing pad with a cleared shaft.
     const float need_w = std::max(cfg->half_w, cfg->engine_offset_x) + 8.f;
@@ -529,24 +539,26 @@ struct Ship {
 
   void update_physics(float dt) {
     if (state != FlightState::Flying) return;
-    const float ox = cfg->engine_offset_x, oy = cfg->engine_offset_y;
+    const float ox = cfg->engine_offset_x;
+    const float ey = eng_y();
     auto rotate = [this](Vec2 v) {
       float c = std::cos(angle), s = std::sin(angle);
       return Vec2{c * v.x - s * v.y, s * v.x + c * v.y};
     };
     Vec2 force{};
     float torque = 0.f;
+    // Force toward nose (up when upright); exhaust is opposite
     Vec2 thrust_dir{0.f, -1.f};
     if (left_thrust > 0.f) {
       Vec2 f = rotate(thrust_dir) * (cfg->max_thrust * left_thrust);
       force += f;
-      Vec2 r = rotate({-ox, oy});
+      Vec2 r = rotate({-ox, ey});
       torque += r.x * f.y - r.y * f.x;
     }
     if (right_thrust > 0.f) {
       Vec2 f = rotate(thrust_dir) * (cfg->max_thrust * right_thrust);
       force += f;
-      Vec2 r = rotate({ox, oy});
+      Vec2 r = rotate({ox, ey});
       torque += r.x * f.y - r.y * f.x;
     }
     force.y += GRAVITY * cfg->mass;
@@ -565,10 +577,16 @@ struct Ship {
   void collide(const Cave& cave) {
     if (state != FlightState::Flying) return;
 
-    const float ox = cfg->engine_offset_x, oy = cfg->engine_offset_y;
+    const float ox = cfg->engine_offset_x;
+    const float ey = eng_y();
+    const float fy = foot_y();
     Vec2 probes[] = {
-        {-ox, oy + 4.f}, {0.f, oy + 6.f}, {ox, oy + 4.f},
-        {-ox * 0.5f, oy + 2.f}, {ox * 0.5f, oy + 2.f},
+        // Feet / belly (always ground-side)
+        {-ox * 0.6f, fy}, {0.f, fy + 4.f}, {ox * 0.6f, fy},
+        {-cfg->half_w * 0.7f, fy - 2.f}, {cfg->half_w * 0.7f, fy - 2.f},
+        // Engines
+        {-ox, ey}, {ox, ey},
+        // Nose / sides
         {0.f, -cfg->half_h * 0.85f},
         {-cfg->half_w * 0.55f, 0.f}, {cfg->half_w * 0.55f, 0.f},
     };
@@ -642,7 +660,7 @@ struct Ship {
     float contact_x = Cave::wrap_x(contact.x);
     float contact_y = contact.y;
     const bool pad = cave.on_pad(contact_x, contact_y + Cave::CELL) ||
-                     cave.on_pad(pos.x, pos.y + oy + 8.f);
+                     cave.on_pad(pos.x, pos.y + foot_y() + 8.f);
     const bool gentle = vel.y < LAND_MAX_VY && std::abs(vel.x) < LAND_MAX_VX &&
                         std::abs(angle) < LAND_MAX_ANGLE && std::abs(ang_vel) < LAND_MAX_ANGVEL;
 
@@ -1007,12 +1025,12 @@ void draw_cave(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
 }
 
 void draw_ship_vector(SDL_Renderer* ren, const Ship& ship, const Camera& cam) {
-  // Local frame: +y = aft (toward ground when upright), -y = nose (sky).
-  // Engines must sit at +engine_offset_y (bottom of the silhouette).
+  // Local: -y nose (sky), +y feet (ground) when upright.
   const float hw = ship.cfg->half_w * 0.85f;
   const float hh = ship.cfg->half_h * 0.9f;
   const float ox = ship.cfg->engine_offset_x;
-  const float oy = ship.cfg->engine_offset_y;
+  const float ey = ship.eng_y();
+  const bool top = ship.cfg->engines_top;
   auto W = [&](Vec2 l) {
     Vec2 w = ship.to_world(l);
     return cam.to_screen(w.x, w.y);
@@ -1028,42 +1046,50 @@ void draw_ship_vector(SDL_Renderer* ren, const Ship& ship, const Camera& cam) {
     SDL_RenderDrawLine(ren, pa.x + 1, pa.y, pb.x + 1, pb.y);
   };
 
-  // Cabin / nose (top)
   float nose_y = -hh;
   float cabin_y = -hh * 0.35f;
+  float foot = hh * 0.85f;
+
+  // Cabin / nose
   line({-hw * 0.25f, cabin_y}, {0.f, nose_y});
   line({hw * 0.25f, cabin_y}, {0.f, nose_y});
   line({-hw * 0.25f, cabin_y}, {hw * 0.25f, cabin_y});
-  // cockpit window
   line({-hw * 0.12f, cabin_y + 4.f}, {hw * 0.12f, cabin_y + 4.f});
 
-  // Main hull (mid)
-  float belly = std::min(oy - 6.f, hh * 0.45f);
+  // Hull
+  float belly = top ? hh * 0.35f : std::min(std::abs(ey) - 6.f, hh * 0.45f);
+  if (belly < cabin_y + 8.f)
+    belly = cabin_y + 12.f;
   line({-hw * 0.45f, cabin_y}, {-hw * 0.55f, belly});
   line({hw * 0.45f, cabin_y}, {hw * 0.55f, belly});
   line({-hw * 0.55f, belly}, {hw * 0.55f, belly});
 
-  // Landing legs toward bottom corners
-  line({-hw * 0.55f, belly}, {-hw * 0.9f, oy + 6.f});
-  line({hw * 0.55f, belly}, {hw * 0.9f, oy + 6.f});
-  line({-hw * 0.9f, oy + 6.f}, {-hw * 0.7f, oy + 6.f});
-  line({hw * 0.7f, oy + 6.f}, {hw * 0.9f, oy + 6.f});
+  // Landing feet at bottom
+  line({-hw * 0.55f, belly}, {-hw * 0.9f, foot});
+  line({hw * 0.55f, belly}, {hw * 0.9f, foot});
+  line({-hw * 0.9f, foot}, {-hw * 0.7f, foot});
+  line({hw * 0.7f, foot}, {hw * 0.9f, foot});
 
-  // Engine bells at aft (+y) — open end points further aft (down when upright)
+  // Engine bells: open end points in exhaust direction (toward +y / ground)
+  // so top mounts still fire "down" for lift.
   auto engine = [&](float side) {
     float ex = side * ox;
-    // bell top (toward hull)
-    line({ex - 7.f, oy - 2.f}, {ex + 7.f, oy - 2.f});
-    // sides flaring outward toward +y
-    line({ex - 7.f, oy - 2.f}, {ex - 10.f, oy + 12.f});
-    line({ex + 7.f, oy - 2.f}, {ex + 10.f, oy + 12.f});
-    // nozzle rim (bottom)
-    line({ex - 10.f, oy + 12.f}, {ex + 10.f, oy + 12.f});
+    if (!top) {
+      line({ex - 7.f, ey - 2.f}, {ex + 7.f, ey - 2.f});
+      line({ex - 7.f, ey - 2.f}, {ex - 10.f, ey + 12.f});
+      line({ex + 7.f, ey - 2.f}, {ex + 10.f, ey + 12.f});
+      line({ex - 10.f, ey + 12.f}, {ex + 10.f, ey + 12.f});
+    } else {
+      // Mounted above cabin; nozzle rim further toward ground (+y) under the bell
+      line({ex - 8.f, ey + 2.f}, {ex + 8.f, ey + 2.f});  // backplate toward sky
+      line({ex - 8.f, ey + 2.f}, {ex - 11.f, ey + 16.f});
+      line({ex + 8.f, ey + 2.f}, {ex + 11.f, ey + 16.f});
+      line({ex - 11.f, ey + 16.f}, {ex + 11.f, ey + 16.f});
+    }
   };
   engine(-1.f);
   engine(+1.f);
 
-  // Small nose tick (heading), not a long line through the hull
   if (ship.state == FlightState::Flying) {
     line({0.f, nose_y}, {0.f, nose_y - 10.f});
     line({-4.f, nose_y - 6.f}, {0.f, nose_y - 10.f});
@@ -1076,10 +1102,11 @@ void draw_exhaust(SDL_Renderer* ren, const Ship& ship, const Camera& cam, bool l
   float t = left ? ship.left_thrust : ship.right_thrust;
   if (t < 0.05f) return;
   float lx = left ? -ship.cfg->engine_offset_x : ship.cfg->engine_offset_x;
-  // Nozzle rim is at ~engine_offset_y+12; exhaust continues aft (+local y)
-  Vec2 base = ship.to_world({lx, ship.cfg->engine_offset_y + 14.f});
+  // Exhaust goes ground-ward (+local y), opposite of lift force
+  float rim = ship.eng_y() + (ship.cfg->engines_top ? 16.f : 14.f);
+  Vec2 base = ship.to_world({lx, rim});
   float c = std::cos(ship.angle), s = std::sin(ship.angle);
-  float ex = -s, ey = c;  // rotate(0,1) = aft
+  float ex = -s, ey = c;  // rotate(0,1) = ground-side
   int len = static_cast<int>(10 + t * 36);
   for (int i = 0; i < len; i += 2) {
     SDL_Point p = cam.to_screen(base.x + ex * i, base.y + ey * i);
@@ -1103,7 +1130,11 @@ void draw_hud(SDL_Renderer* ren, const Ship& ship, const Cave& cave) {
   y += 14;
   bar(20, y, ship.right_thrust);
   y += 18;
-  draw_text(ren, 20, y, ship.cfg->name, CRT_BRIGHT);
+  {
+    char nm[32];
+    std::snprintf(nm, sizeof(nm), "%s%s", ship.cfg->name, ship.cfg->engines_top ? " TOP" : "");
+    draw_text(ren, 20, y, nm, CRT_BRIGHT);
+  }
   y += lh;
   draw_text(ren, 20, y, ship.swap_engines ? "ENGINES SWAPPED" : "START MENU",
             ship.swap_engines ? CRT_WARN : CRT_DIM);
@@ -1281,7 +1312,7 @@ static void print_help(const char* argv0) {
       "  -V, --version        Show version\n"
       "  -f, --fullscreen     Start fullscreen\n"
       "  -w, --window W x H   Window size (e.g. 1280x720)\n"
-      "  -s, --ship N         Ship preset index 0..4\n"
+      "  -s, --ship N         Ship preset index 0..6 (5=Topdog, 6=Canopy)\n"
       "  -S, --seed N         Cave generation seed (unsigned)\n"
       "  -x, --swap-engines   Swap left/right engine mapping\n"
       "  --config-dir PATH    Override XDG config directory\n"
@@ -1439,6 +1470,8 @@ int main(int argc, char** argv) {
   UserConfig user_cfg = load_config();
   if (cli_ship >= 0)
     user_cfg.ship = cli_ship;
+  if (user_cfg.ship < 0 || user_cfg.ship >= SHIP_CONFIG_COUNT)
+    user_cfg.ship = 1;
   if (cli_swap_set)
     user_cfg.swap_engines = cli_swap;
   if (cli_fullscreen_set)
