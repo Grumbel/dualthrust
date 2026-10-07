@@ -2,9 +2,9 @@
 
 ## Current tip
 
-`5b744fa` — Make background motion dots larger and brighter
+`bcc6fbf` — Clear lander silhouette with engines at the bottom
 
-Bundle: `dualthrust-016.1-bigger-dots-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-017.1-engines-bottom-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
