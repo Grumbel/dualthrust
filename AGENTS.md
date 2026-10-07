@@ -1,50 +1,39 @@
 # dualthrust
 
-A small 2D dual-engine lander in a green CRT / oscilloscope look. Mildly inspired by Space Taxi and Lunar Lander. The player controls a ship with two engines using only the gamepad triggers; differential thrust provides translation and rotation.
+CRT dual-engine cave lander. Triggers control left/right engines; differential thrust rotates and translates.
 
 ## Stack
 
-- C++17
-- SDL2 (video, events, gamecontroller, render)
-- CMake + Ninja
-- Nix flake for reproducible build and develop shell
+- C++17, SDL2, CMake + Ninja, Nix flake
 
-## Build / run (Nix)
+## Build / run
 
 ```sh
 nix develop
-dualthrust-configure
-dualthrust-build
-dualthrust-run
+dualthrust-configure && dualthrust-build && dualthrust-run
+# or: nix run
 ```
-
-Or: `nix run`
 
 ## Controls
 
-- Left / right triggers: engine thrust
-- Select / Back: cycle ship preset (Narrow / Medium / Wide / Barge / Long)
-- Start: swap left/right engine mapping
-- A / B (or keyboard R): reset after crash, or relight after landing
-- Y (or keyboard G): regenerate fractal terrain
-- Escape: quit
+- Triggers: engines
+- Start: open/close menu
+- Menu: D-pad/Up-Down, A/Enter select — Resume, Fullscreen, New Cave, Ship, Swap Engines, Quit
+- A/B or R: reset after crash / relight after land
+- Y or G: new cave
+- F: fullscreen
+- Escape: menu (or quit from menu)
 
-Keyboard fallback: A/D or arrows = engines; Tab / [ / ] = preset; X = swap.
+## World
 
-## Gameplay
-
-- World is **24000px** wide and **wraps in X** (fly off one side, appear on the other).
-
-
-- Fractal (midpoint-displacement) ground with flat landing pads
-- Camera scrolls with the ship across an 8000px-wide world
-- Soft landing requires: on a pad, low horizontal/vertical speed, near-upright attitude
-- Otherwise contact = crash; reset to spawn above a pad
-
-## License
-
-GPLv3-or-later. REUSE compliant.
+- Toroidal X (24000px), tall cave Y (4800px)
+- 2D cellular cave: main tunnel, branches, stalactites/mites, pillars, pads
+- Camera scrolls freely; background star dots for motion reference
 
 ## Packaging
 
-CMake installs the binary, `.desktop` file, hicolor icons (SVG + PNG), and AppStream metainfo under standard GNUInstallDirs paths.
+CMake installs binary, `.desktop`, hicolor icons, AppStream metainfo.
+
+## License
+
+GPLv3-or-later.
