@@ -157,17 +157,17 @@ struct Cave {
       return lo + static_cast<int>(rnd() * (hi - lo + 1));
     };
 
-    // --- Main meandering tunnel (floor + ceiling) ---
+    // --- Main meandering tunnel (wide gallery) ---
     float cy = WORLD_H * 0.55f;
-    float half = 140.f;
+    float half = 320.f;  // half-height in world px — wide open cave
     for (int gx = 0; gx < GW; ++gx) {
-      cy += (rnd() - 0.5f) * 18.f;
-      cy = clampf(cy, WORLD_H * 0.25f, WORLD_H * 0.85f);
-      half += (rnd() - 0.5f) * 12.f;
-      half = clampf(half, 70.f, 220.f);
-      // occasional chambers
-      if (rnd() < 0.02f) half = clampf(half + 80.f, 70.f, 280.f);
-      if (rnd() < 0.015f) half = clampf(half - 50.f, 50.f, 280.f);
+      cy += (rnd() - 0.5f) * 22.f;
+      cy = clampf(cy, WORLD_H * 0.30f, WORLD_H * 0.75f);
+      half += (rnd() - 0.5f) * 20.f;
+      half = clampf(half, 220.f, 520.f);
+      // occasional huge chambers / mild squeezes
+      if (rnd() < 0.018f) half = clampf(half + 160.f, 220.f, 700.f);
+      if (rnd() < 0.012f) half = clampf(half - 80.f, 160.f, 700.f);
 
       int y0 = static_cast<int>((cy - half) / CELL);
       int y1 = static_cast<int>((cy + half) / CELL);
@@ -178,11 +178,11 @@ struct Cave {
     }
 
     // --- Branch tunnels (random walks) ---
-    for (int b = 0; b < 48; ++b) {
+    for (int b = 0; b < 36; ++b) {
       int gx = rnd_i(0, GW - 1);
       int gy = rnd_i(GH / 5, GH * 4 / 5);
-      int len = rnd_i(40, 180);
-      int rad = rnd_i(2, 5);
+      int len = rnd_i(60, 220);
+      int rad = rnd_i(4, 9);
       float dir = rnd() * 2.f * PI;
       for (int sstep = 0; sstep < len; ++sstep) {
         dir += (rnd() - 0.5f) * 0.5f;
@@ -202,11 +202,11 @@ struct Cave {
       }
     }
 
-    // --- Stalactites / stalagmites ---
-    for (int n = 0; n < 400; ++n) {
+    // --- Stalactites / stalagmites (decorative, not choking) ---
+    for (int n = 0; n < 220; ++n) {
       int gx = rnd_i(0, GW - 1);
       bool down = rnd() < 0.5f;
-      int len = rnd_i(3, 14);
+      int len = rnd_i(2, 8);
       // find surface
       if (down) {
         for (int gy = 1; gy < GH - 2; ++gy) {
@@ -227,10 +227,10 @@ struct Cave {
       }
     }
 
-    // --- Pillars (vertical solid bridges) ---
-    for (int n = 0; n < 60; ++n) {
+    // --- Pillars (sparse vertical solid bridges) ---
+    for (int n = 0; n < 28; ++n) {
       int gx = rnd_i(0, GW - 1);
-      int width = rnd_i(1, 3);
+      int width = rnd_i(1, 2);
       for (int gy = 2; gy < GH - 2; ++gy) {
         for (int dx = 0; dx < width; ++dx) {
           int xx = (gx + dx) % GW;
@@ -246,10 +246,35 @@ struct Cave {
       }
     }
 
-    // Keep a solid crust at top and bottom
+    // Cellular smooth + slight open dilation so walls are less stair-stepped
+    // and corridors stay wide after decorations.
+    for (int pass = 0; pass < 3; ++pass) {
+      std::vector<uint8_t> next = solid;
+      for (int gy = 2; gy < GH - 2; ++gy) {
+        for (int gx = 0; gx < GW; ++gx) {
+          int n = 0;
+          for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+              if (dx == 0 && dy == 0) continue;
+              int xx = ((gx + dx) % GW + GW) % GW;
+              n += solid[(gy + dy) * GW + xx] ? 1 : 0;
+            }
+          // Erode isolated rock into open space; keep thick walls
+          if (solid[gy * GW + gx] && n < 4)
+            next[gy * GW + gx] = 0;
+          else if (!solid[gy * GW + gx] && n >= 7)
+            next[gy * GW + gx] = 1;  // fill tiny holes
+        }
+      }
+      solid.swap(next);
+    }
+
+    // Keep a solid crust at top and bottom (cave roof + deep floor)
     for (int gx = 0; gx < GW; ++gx) {
       solid[0 * GW + gx] = 1;
       solid[1 * GW + gx] = 1;
+      solid[2 * GW + gx] = 1;
+      solid[(GH - 3) * GW + gx] = 1;
       solid[(GH - 2) * GW + gx] = 1;
       solid[(GH - 1) * GW + gx] = 1;
     }
@@ -590,49 +615,108 @@ void draw_stars(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
 }
 
 void draw_cave(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
-  int gx0 = static_cast<int>(std::floor(cam.x / Cave::CELL)) - 1;
-  int gx1 = static_cast<int>(std::ceil((cam.x + WINDOW_W) / Cave::CELL)) + 1;
-  int gy0 = std::max(0, static_cast<int>(std::floor(cam.y / Cave::CELL)) - 1);
-  int gy1 = std::min(Cave::GH - 1, static_cast<int>(std::ceil((cam.y + WINDOW_H) / Cave::CELL)) + 1);
+  // Vector contour via marching squares on the solid grid (no fat pixel blocks).
+  const float C = Cave::CELL;
+  int gx0 = static_cast<int>(std::floor(cam.x / C)) - 1;
+  int gx1 = static_cast<int>(std::ceil((cam.x + WINDOW_W) / C)) + 1;
+  int gy0 = std::max(0, static_cast<int>(std::floor(cam.y / C)) - 1);
+  int gy1 = std::min(Cave::GH - 2, static_cast<int>(std::ceil((cam.y + WINDOW_H) / C)) + 1);
 
-  // Fill solid cells
+  auto corner = [&](int gx, int gy) -> float {
+    return cave.is_solid_cell(gx, gy) ? 1.f : 0.f;
+  };
+
+  // Screen X for a continuous grid column relative to gx0
+  auto screen_xy = [&](float wx, float wy, int gx_ref, float sx_ref) -> SDL_Point {
+    float sx = sx_ref + (wx - static_cast<float>(gx_ref) * C);
+    float sy = wy - cam.y;
+    return {static_cast<int>(sx + 0.5f), static_cast<int>(sy + 0.5f)};
+  };
+
+  float sx_ref = cam.continuous_x(Cave::wrap_x(static_cast<float>(gx0) * C)) - cam.x;
+
+  auto lerp_pt = [](float ax, float ay, float bx, float by, float va, float vb, float iso) {
+    float t = (std::abs(vb - va) < 1e-6f) ? 0.5f : (iso - va) / (vb - va);
+    t = clampf(t, 0.f, 1.f);
+    return std::pair<float, float>{ax + (bx - ax) * t, ay + (by - ay) * t};
+  };
+
+  auto seg = [&](float x0, float y0, float x1, float y1, SDL_Color col) {
+    SDL_Point a = screen_xy(x0, y0, gx0, sx_ref);
+    SDL_Point b = screen_xy(x1, y1, gx0, sx_ref);
+    set_color(ren, col);
+    SDL_RenderDrawLine(ren, a.x, a.y, b.x, b.y);
+    set_color(ren, col, 70);
+    SDL_RenderDrawLine(ren, a.x + 1, a.y, b.x + 1, b.y);
+  };
+
+  const float iso = 0.5f;
   for (int gy = gy0; gy <= gy1; ++gy) {
     for (int gx = gx0; gx <= gx1; ++gx) {
+      // Corner values (TL, TR, BR, BL) in world coords of cell (gx,gy)
+      float v0 = corner(gx, gy);
+      float v1 = corner(gx + 1, gy);
+      float v2 = corner(gx + 1, gy + 1);
+      float v3 = corner(gx, gy + 1);
+      int mask = (v0 >= iso ? 1 : 0) | (v1 >= iso ? 2 : 0) | (v2 >= iso ? 4 : 0) | (v3 >= iso ? 8 : 0);
+      if (mask == 0 || mask == 15)
+        continue;
+
+      float x0 = static_cast<float>(gx) * C;
+      float y0 = static_cast<float>(gy) * C;
+      float x1 = x0 + C;
+      float y1 = y0 + C;
+
+      // Edge midpoints via linear interp
+      auto top = lerp_pt(x0, y0, x1, y0, v0, v1, iso);
+      auto right = lerp_pt(x1, y0, x1, y1, v1, v2, iso);
+      auto bottom = lerp_pt(x0, y1, x1, y1, v3, v2, iso);
+      auto left = lerp_pt(x0, y0, x0, y1, v0, v3, iso);
+
+      // Standard marching-squares edge connections
+      auto connect = [&](std::pair<float, float> a, std::pair<float, float> b) {
+        seg(a.first, a.second, b.first, b.second, CRT_BRIGHT);
+      };
+      switch (mask) {
+        case 1: case 14: connect(left, top); break;
+        case 2: case 13: connect(top, right); break;
+        case 3: case 12: connect(left, right); break;
+        case 4: case 11: connect(right, bottom); break;
+        case 5:
+          connect(left, top);
+          connect(right, bottom);
+          break;
+        case 6: case 9: connect(top, bottom); break;
+        case 7: case 8: connect(left, bottom); break;
+        case 10:
+          connect(top, right);
+          connect(left, bottom);
+          break;
+        default: break;
+      }
+    }
+  }
+
+  // Sparse depth hatch inside solid (every few cells, short ticks) — still vector
+  set_color(ren, CRT_DIM, 90);
+  for (int gy = gy0; gy <= gy1; gy += 2) {
+    for (int gx = gx0; gx <= gx1; gx += 2) {
       if (!cave.is_solid_cell(gx, gy)) continue;
-      float wx = static_cast<float>(gx) * Cave::CELL;
-      float wy = static_cast<float>(gy) * Cave::CELL;
-      float sx = cam.continuous_x(Cave::wrap_x(wx)) - cam.x;
-      // keep consecutive cells aligned
-      float sx0 = (static_cast<float>(gx) * Cave::CELL) - cam.x;
-      // Use continuous from first column of view
-      sx0 = cam.continuous_x(Cave::wrap_x(static_cast<float>(gx0) * Cave::CELL)) - cam.x
-            + static_cast<float>(gx - gx0) * Cave::CELL;
-      int ix = static_cast<int>(sx0);
-      int iy = static_cast<int>(wy - cam.y);
-      // edge highlight vs fill
-      bool edge = false;
+      // only interior solid
       if (!cave.is_solid_cell(gx - 1, gy) || !cave.is_solid_cell(gx + 1, gy) ||
           !cave.is_solid_cell(gx, gy - 1) || !cave.is_solid_cell(gx, gy + 1))
-        edge = true;
-      if (edge) {
-        set_color(ren, CRT_BRIGHT, 220);
-        SDL_Rect r{ix, iy, static_cast<int>(Cave::CELL), static_cast<int>(Cave::CELL)};
-        SDL_RenderDrawRect(ren, &r);
-      } else {
-        set_color(ren, CRT_DIM, 120);
-        SDL_Rect r{ix, iy, static_cast<int>(Cave::CELL), static_cast<int>(Cave::CELL)};
-        SDL_RenderFillRect(ren, &r);
-      }
-      (void)sx;
+        continue;
+      float wx = static_cast<float>(gx) * C + C * 0.5f;
+      float wy = static_cast<float>(gy) * C + C * 0.5f;
+      SDL_Point p = screen_xy(wx, wy, gx0, sx_ref);
+      SDL_RenderDrawPoint(ren, p.x, p.y);
     }
   }
 
   // Pad markers
   for (const auto& p : cave.pads) {
     float sx0 = cam.continuous_x(p.x0) - cam.x;
-    float sx1 = cam.continuous_x(p.x1) - cam.x;
-    // if pad wraps awkwardly, draw via continuous from x0
-    sx1 = sx0 + (p.x1 - p.x0);
+    float sx1 = sx0 + (p.x1 - p.x0);
     int y = static_cast<int>(p.y - cam.y);
     set_color(ren, CRT_PAD);
     SDL_RenderDrawLine(ren, static_cast<int>(sx0), y, static_cast<int>(sx1), y);
