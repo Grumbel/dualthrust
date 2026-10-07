@@ -2,14 +2,16 @@
 
 ## Current tip
 
-Cave world + menu (pending commit).
+`f0ee806` — Cave world with roof, vertical scroll, stars, and Start menu
+
+Bundle: `dualthrust-009.1-cave-menu-375fc76.bundle` (base 375fc76)
 
 ## Done recently
 
 - 2D cave (tunnel, branches, stalactites, pillars, pads), 24000×4800
 - Vertical camera scroll, background star dots
 - Start menu: Resume, Fullscreen, New Cave, Ship, Swap, Quit
-- Desktop integration (prior)
+- Desktop integration
 
 ## Open work
 
@@ -23,3 +25,4 @@ Cave world + menu (pending commit).
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
+- Apply: `git pull path/to/dualthrust-009.1-cave-menu-375fc76.bundle HEAD`
