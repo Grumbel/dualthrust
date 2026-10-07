@@ -376,11 +376,32 @@ struct Cave {
 
     // --- Landing pads with tall cleared shafts for safe spawn ---
     constexpr int PAD_CLEARANCE = 18;  // cells of open air above pad (~288px)
-    for (int attempt = 0; attempt < 80 && static_cast<int>(pads.size()) < 18; ++attempt) {
+    constexpr float PAD_MIN_DX = 480.f;   // min horizontal separation (world)
+    constexpr float PAD_MIN_DY = 220.f;   // min vertical separation if near in X
+    auto pads_overlap = [&](float x0, float x1, float y) -> bool {
+      float cx = 0.5f * (x0 + x1);
+      float half = 0.5f * (x1 - x0);
+      for (const auto& p : pads) {
+        float pcx = 0.5f * (p.x0 + p.x1);
+        float ph = 0.5f * (p.x1 - p.x0);
+        float dx = std::abs(wrap_delta(cx, pcx));
+        float dy = std::abs(y - p.y);
+        // Reject if intervals overlap (or nearly) in X, or centers too close
+        float min_gap = half + ph + 80.f;  // extra margin beyond pad widths
+        if (dx < std::max(min_gap, PAD_MIN_DX) && dy < PAD_MIN_DY)
+          return true;
+        if (dx < min_gap)
+          return true;  // same horizontal slot even if Y differs a lot
+      }
+      return false;
+    };
+
+    for (int attempt = 0; attempt < 200 && static_cast<int>(pads.size()) < 14; ++attempt) {
       int gx0 = rnd_i(20, GW - 50);
       int width = rnd_i(10, 18);
       int mid = gx0 + width / 2;
       int floor_gy = -1;
+      // Prefer floors with a decent open run; skip if already claimed
       for (int gy = 5; gy < GH - 6; ++gy) {
         if (!solid[gy * GW + (mid % GW)] && solid[(gy + 1) * GW + (mid % GW)]) {
           floor_gy = gy + 1;
@@ -389,7 +410,6 @@ struct Cave {
       }
       if (floor_gy < 0 || floor_gy < PAD_CLEARANCE + 5)
         continue;
-      // require some open air already
       int open_count = 0;
       for (int uy = 1; uy <= 6; ++uy)
         if (!solid[(floor_gy - uy) * GW + (mid % GW)])
@@ -397,10 +417,13 @@ struct Cave {
       if (open_count < 3)
         continue;
 
-      clear_shaft(gx0, gx0 + width - 1, floor_gy, PAD_CLEARANCE);
       float x0 = static_cast<float>(gx0) * CELL;
       float x1 = static_cast<float>(gx0 + width) * CELL;
       float y = static_cast<float>(floor_gy) * CELL;
+      if (pads_overlap(x0, x1, y))
+        continue;
+
+      clear_shaft(gx0, gx0 + width - 1, floor_gy, PAD_CLEARANCE);
       pads.push_back({x0, x1, y});
     }
     if (pads.empty()) {
