@@ -2,7 +2,9 @@
 
 ## Current tip
 
-Bigger world + X wrap (pending commit).
+`d6e029d` — Bigger toroidal world: wrap in X, WORLD_W 24000
+
+Bundle: `dualthrust-007.1-wrap-x-375fc76.bundle` (base 375fc76)
 
 ## Done recently
 
@@ -23,3 +25,4 @@ Bigger world + X wrap (pending commit).
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
+- Apply: `git pull path/to/dualthrust-007.1-wrap-x-375fc76.bundle HEAD`
