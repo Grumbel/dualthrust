@@ -2,9 +2,9 @@
 
 ## Current tip
 
-`698b80d` — Safer spawns, much wider caves, heavier wall smoothing
+`c50f5de` — Remove stray cave pixels, fill rock, XDG config dir
 
-Bundle: `dualthrust-012.1-wide-spawn-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-013.1-cleanup-xdg-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
