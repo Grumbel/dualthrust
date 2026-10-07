@@ -2,13 +2,12 @@
 
 ## Current tip
 
-`8336611` — Toggle fullscreen with Alt+Enter
+`fdb3550` — Add top-mounted engine ship presets (Topdog, Canopy)
 
-Bundle: `dualthrust-019.1-alt-enter-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-020.1-top-engines-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
-- [ ] Ships with engines at the top (requested)
 - [ ] Polish landing / bounce feel
 - [ ] Fuel / score / sound
 - [ ] Full official GPL-3.0 text in LICENSES/
