@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright 2026 Ingo Ruhnke <grumbel@gmail.com>
+-->
+<component type="desktop-application">
+  <id>dualthrust</id>
+  <name>dualthrust</name>
+  <summary>CRT dual-engine lander controlled by gamepad triggers</summary>
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer_name>Ingo Ruhnke</developer_name>
+  <description>
+    <p>
+      A small 2D dual-engine lander with a green CRT look. The left and right
+      gamepad triggers drive the two engines; differential thrust rotates and
+      translates the ship. Land gently on pads across a large wrapping world.
+    </p>
+  </description>
+  <launchable type="desktop-id">dualthrust.desktop</launchable>
+  <provides>
+    <binary>dualthrust</binary>
+  </provides>
+  <categories>
+    <category>Game</category>
+    <category>ArcadeGame</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-07"/>
+  </releases>
+</component>

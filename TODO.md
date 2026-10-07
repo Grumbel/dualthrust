@@ -2,19 +2,17 @@
 
 ## Current tip
 
-`d6e029d` — Bigger toroidal world: wrap in X, WORLD_W 24000
-
-Bundle: `dualthrust-007.1-wrap-x-375fc76.bundle` (base 375fc76)
+Linux desktop integration (pending commit).
 
 ## Done recently
 
-- WORLD_W 24000, seamless ring terrain, ship/camera wrap in X
-- 12 landing pads, circular midpoint displacement
+- .desktop entry, hicolor icons (SVG + 48/256 PNG), AppStream metainfo
+- CMake GNUInstallDirs install targets for binary + desktop files
 
 ## Open work
 
-- [ ] Menu / fullscreen / quit (requested)
-- [ ] Full 2D cave landscape (requested)
+- [ ] Menu / fullscreen / quit
+- [ ] Full 2D cave landscape, vertical scroll, roof, starfield
 - [ ] Polish landing thresholds per ship preset
 - [ ] Fuel / score / sound
 - [ ] Full official GPL-3.0 text in LICENSES/
@@ -25,4 +23,3 @@ Bundle: `dualthrust-007.1-wrap-x-375fc76.bundle` (base 375fc76)
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
-- Apply: `git pull path/to/dualthrust-007.1-wrap-x-375fc76.bundle HEAD`

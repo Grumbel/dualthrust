@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 {
-  description = "dualthrust — dual-engine spaceship controlled by gamepad triggers (SDL2)";
+  description = "dualthrust — CRT dual-engine lander (SDL2), Linux desktop integration";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -29,7 +29,7 @@
           ];
 
           meta = with pkgs.lib; {
-            description = "Dual-engine spaceship game controlled by gamepad triggers";
+            description = "CRT dual-engine lander controlled by gamepad triggers";
             license = licenses.gpl3Plus;
             platforms = platforms.linux;
             mainProgram = "dualthrust";

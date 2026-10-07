@@ -6,3 +6,7 @@ Source: local
 Files: *
 Copyright: 2026 Ingo Ruhnke <grumbel@gmail.com>
 License: GPL-3.0-or-later
+
+Files: data/icons/hicolor/*/apps/dualthrust.png
+Copyright: 2026 Ingo Ruhnke <grumbel@gmail.com>
+License: GPL-3.0-or-later

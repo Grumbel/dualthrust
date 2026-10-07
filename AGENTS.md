@@ -44,3 +44,7 @@ Keyboard fallback: A/D or arrows = engines; Tab / [ / ] = preset; X = swap.
 ## License
 
 GPLv3-or-later. REUSE compliant.
+
+## Packaging
+
+CMake installs the binary, `.desktop` file, hicolor icons (SVG + PNG), and AppStream metainfo under standard GNUInstallDirs paths.

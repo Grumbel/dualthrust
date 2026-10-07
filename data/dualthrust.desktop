@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=dualthrust
+GenericName=Dual-engine lander
+Comment=CRT dual-engine lander — triggers control left and right engines
+Exec=dualthrust
+Icon=dualthrust
+Terminal=false
+Categories=Game;ArcadeGame;
+Keywords=lander;spaceship;sdl;crt;gamepad;
+StartupNotify=true

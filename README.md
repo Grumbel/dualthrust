@@ -31,3 +31,14 @@ nix run
 ## License
 
 GPL-3.0-or-later.
+
+## Desktop install (Linux)
+
+After `cmake --install` / `nix build`, the package provides:
+
+- `bin/dualthrust`
+- `share/applications/dualthrust.desktop`
+- `share/icons/hicolor/{scalable,48x48,256x256}/apps/dualthrust.*`
+- `share/metainfo/dualthrust.metainfo.xml` (AppStream)
+
+On NixOS, installing into a profile picks up the desktop entry from `share/applications`.
