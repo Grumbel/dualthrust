@@ -2,9 +2,9 @@
 
 ## Current tip
 
-`abb8357` — Fix broken startup printf string literals
+`03e1534` — Export global main: drop anonymous namespace wrapper
 
-Bundle: `dualthrust-015.2-fix-printf-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-015.3-fix-main-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
