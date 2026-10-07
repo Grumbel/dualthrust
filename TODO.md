@@ -2,9 +2,9 @@
 
 ## Current tip
 
-`bcc6fbf` — Clear lander silhouette with engines at the bottom
+`d76f506` — Reject overlapping landing pads during cave generation
 
-Bundle: `dualthrust-017.1-engines-bottom-375fc76.bundle` (base 375fc76)
+Bundle: `dualthrust-018.1-pad-spacing-375fc76.bundle` (base 375fc76)
 
 ## Open work
 
