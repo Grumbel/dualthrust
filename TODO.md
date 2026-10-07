@@ -2,7 +2,9 @@
 
 ## Current tip
 
-CRT lander: scrolling fractal terrain + collision (pending commit).
+`224b041` — Add scrolling fractal terrain, lander collision, and CRT look
+
+Bundle: `dualthrust-006.1-crt-lander-375fc76.bundle` (base 375fc76)
 
 ## Done recently
 
@@ -27,3 +29,4 @@ CRT lander: scrolling fractal terrain + collision (pending commit).
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
+- Apply: `git pull path/to/dualthrust-006.1-crt-lander-375fc76.bundle HEAD`
