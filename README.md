@@ -41,3 +41,7 @@ dualthrust-run
 ## License
 
 GPL-3.0-or-later.
+
+## Config
+
+Settings (fullscreen, ship preset, engine swap) are stored under `$XDG_CONFIG_HOME/dualthrust/config` (default `~/.config/dualthrust/config`).

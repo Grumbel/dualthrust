@@ -13,6 +13,11 @@
 #include <string>
 #include <vector>
 
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <cerrno>
+
 namespace {
 
 // Mutable viewport — updated on window resize / fullscreen
@@ -274,8 +279,8 @@ struct Cave {
       }
     }
 
-    // --- Heavy smooth + open dilation (widen corridors, round walls) ---
-    for (int pass = 0; pass < 6; ++pass) {
+    // --- Smooth + open dilation ---
+    for (int pass = 0; pass < 8; ++pass) {
       std::vector<uint8_t> next = solid;
       for (int gy = 3; gy < GH - 3; ++gy) {
         for (int gx = 0; gx < GW; ++gx) {
@@ -286,10 +291,8 @@ struct Cave {
               int xx = ((gx + dx) % GW + GW) % GW;
               n += solid[(gy + dy) * GW + xx] ? 1 : 0;
             }
-          // Erode rock with few solid neighbours (opens and smooths)
           if (solid[gy * GW + gx] && n <= 4)
             next[gy * GW + gx] = 0;
-          // Fill only tiny isolated holes deep in rock
           else if (!solid[gy * GW + gx] && n >= 8)
             next[gy * GW + gx] = 1;
         }
@@ -297,8 +300,8 @@ struct Cave {
       solid.swap(next);
     }
 
-    // Extra open dilation: any rock adjacent to open becomes open (1 pass)
-    {
+    // Open dilation (erode rock that touches open)
+    for (int pass = 0; pass < 2; ++pass) {
       std::vector<uint8_t> next = solid;
       for (int gy = 3; gy < GH - 3; ++gy) {
         for (int gx = 0; gx < GW; ++gx) {
@@ -309,8 +312,50 @@ struct Cave {
               int xx = ((gx + dx) % GW + GW) % GW;
               if (!solid[(gy + dy) * GW + xx]) { touch_open = true; break; }
             }
-          if (touch_open && rnd() < 0.65f)
+          if (touch_open)
             next[gy * GW + gx] = 0;
+        }
+      }
+      solid.swap(next);
+    }
+
+    // Remove stray single pixels / tiny blobs (solid islands and open holes)
+    for (int pass = 0; pass < 4; ++pass) {
+      std::vector<uint8_t> next = solid;
+      for (int gy = 3; gy < GH - 3; ++gy) {
+        for (int gx = 0; gx < GW; ++gx) {
+          int n4 = 0;  // orthogonal neighbours
+          const int ox[4] = {1, -1, 0, 0};
+          const int oy[4] = {0, 0, 1, -1};
+          for (int k = 0; k < 4; ++k) {
+            int xx = ((gx + ox[k]) % GW + GW) % GW;
+            int yy = gy + oy[k];
+            n4 += solid[yy * GW + xx] ? 1 : 0;
+          }
+          // Lone solid pixel or thin spur → open
+          if (solid[gy * GW + gx] && n4 <= 1)
+            next[gy * GW + gx] = 0;
+          // Lone open hole inside rock → solid
+          else if (!solid[gy * GW + gx] && n4 >= 3)
+            next[gy * GW + gx] = 1;
+        }
+      }
+      solid.swap(next);
+    }
+
+    // Final 2 smooth passes
+    for (int pass = 0; pass < 2; ++pass) {
+      std::vector<uint8_t> next = solid;
+      for (int gy = 3; gy < GH - 3; ++gy) {
+        for (int gx = 0; gx < GW; ++gx) {
+          int n = 0;
+          for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+              if (dx == 0 && dy == 0) continue;
+              int xx = ((gx + dx) % GW + GW) % GW;
+              n += solid[(gy + dy) * GW + xx] ? 1 : 0;
+            }
+          next[gy * GW + gx] = (n >= 5) ? 1 : 0;
         }
       }
       solid.swap(next);
@@ -725,6 +770,35 @@ void draw_cave(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
     SDL_RenderDrawLine(ren, a.x + 1, a.y, b.x + 1, b.y);
   };
 
+  // Filled rock body: green hatch so solid ground reads differently from void
+  for (int gy = gy0; gy <= gy1; ++gy) {
+    for (int gx = gx0; gx <= gx1; ++gx) {
+      if (!cave.is_solid_cell(gx, gy))
+        continue;
+      float x0 = static_cast<float>(gx) * C;
+      float y0 = static_cast<float>(gy) * C;
+      SDL_Point a = screen_xy(x0, y0, gx0, sx_ref);
+      SDL_Point b = screen_xy(x0 + C, y0 + C, gx0, sx_ref);
+      int ix0 = a.x, iy0 = a.y, ix1 = b.x, iy1 = b.y;
+      if (ix1 < ix0) std::swap(ix0, ix1);
+      if (iy1 < iy0) std::swap(iy0, iy1);
+      // Base fill (dim phosphor green)
+      set_color(ren, CRT_DIM, 160);
+      SDL_Rect cell{ix0, iy0, std::max(1, ix1 - ix0), std::max(1, iy1 - iy0)};
+      SDL_RenderFillRect(ren, &cell);
+      // Diagonal hatch pattern
+      set_color(ren, CRT_MID, 100);
+      for (int t = -cell.h; t <= cell.w; t += 4) {
+        int x0s = cell.x + t;
+        int y0s = cell.y;
+        int x1s = cell.x + t + cell.h;
+        int y1s = cell.y + cell.h;
+        // clip roughly to cell
+        SDL_RenderDrawLine(ren, x0s, y0s, x1s, y1s);
+      }
+    }
+  }
+
   const float iso = 0.5f;
   for (int gy = gy0; gy <= gy1; ++gy) {
     for (int gx = gx0; gx <= gx1; ++gx) {
@@ -772,21 +846,6 @@ void draw_cave(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
     }
   }
 
-  // Sparse depth hatch inside solid (every few cells, short ticks) — still vector
-  set_color(ren, CRT_DIM, 90);
-  for (int gy = gy0; gy <= gy1; gy += 2) {
-    for (int gx = gx0; gx <= gx1; gx += 2) {
-      if (!cave.is_solid_cell(gx, gy)) continue;
-      // only interior solid
-      if (!cave.is_solid_cell(gx - 1, gy) || !cave.is_solid_cell(gx + 1, gy) ||
-          !cave.is_solid_cell(gx, gy - 1) || !cave.is_solid_cell(gx, gy + 1))
-        continue;
-      float wx = static_cast<float>(gx) * C + C * 0.5f;
-      float wy = static_cast<float>(gy) * C + C * 0.5f;
-      SDL_Point p = screen_xy(wx, wy, gx0, sx_ref);
-      SDL_RenderDrawPoint(ren, p.x, p.y);
-    }
-  }
 
   // Pad markers
   for (const auto& p : cave.pads) {
@@ -956,6 +1015,82 @@ void draw_scanlines(SDL_Renderer* ren) {
 
 }  // namespace
 
+
+// ---------------------------------------------------------------------------
+// XDG config (~/.config/dualthrust/ or $XDG_CONFIG_HOME/dualthrust/)
+// ---------------------------------------------------------------------------
+std::string config_dir_path() {
+  const char* xdg = std::getenv("XDG_CONFIG_HOME");
+  if (xdg && xdg[0] != '\0')
+    return std::string(xdg) + "/dualthrust";
+  const char* home = std::getenv("HOME");
+  if (home && home[0] != '\0')
+    return std::string(home) + "/.config/dualthrust";
+  return "dualthrust-config";
+}
+
+std::string config_file_path() { return config_dir_path() + "/config"; }
+
+bool ensure_config_dir() {
+  std::string dir = config_dir_path();
+  // mkdir -p style: create .config then dualthrust if needed
+  // simplistic: try mkdir once for leaf; if fail try parent
+  if (mkdir(dir.c_str(), 0755) == 0 || errno == EEXIST)
+    return true;
+  // try creating parent ~/.config
+  auto slash = dir.find_last_of('/');
+  if (slash != std::string::npos) {
+    std::string parent = dir.substr(0, slash);
+    mkdir(parent.c_str(), 0755);
+    if (mkdir(dir.c_str(), 0755) == 0 || errno == EEXIST)
+      return true;
+  }
+  return false;
+}
+
+struct UserConfig {
+  bool fullscreen = false;
+  bool swap_engines = false;
+  int ship = 1;
+};
+
+UserConfig load_config() {
+  UserConfig c;
+  std::FILE* f = std::fopen(config_file_path().c_str(), "r");
+  if (!f)
+    return c;
+  char line[256];
+  while (std::fgets(line, sizeof(line), f)) {
+    if (line[0] == '#' || line[0] == '\n')
+      continue;
+    char key[64];
+    int val = 0;
+    if (std::sscanf(line, "%63[^=]=%d", key, &val) == 2) {
+      if (std::strcmp(key, "fullscreen") == 0)
+        c.fullscreen = val != 0;
+      else if (std::strcmp(key, "swap_engines") == 0)
+        c.swap_engines = val != 0;
+      else if (std::strcmp(key, "ship") == 0)
+        c.ship = val;
+    }
+  }
+  std::fclose(f);
+  return c;
+}
+
+void save_config(const UserConfig& c) {
+  if (!ensure_config_dir())
+    return;
+  std::FILE* f = std::fopen(config_file_path().c_str(), "w");
+  if (!f)
+    return;
+  std::fprintf(f, "# dualthrust config (XDG)\n");
+  std::fprintf(f, "fullscreen=%d\n", c.fullscreen ? 1 : 0);
+  std::fprintf(f, "swap_engines=%d\n", c.swap_engines ? 1 : 0);
+  std::fprintf(f, "ship=%d\n", c.ship);
+  std::fclose(f);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -997,7 +1132,9 @@ int main(int argc, char** argv) {
   std::printf("Cave ready (%d pads)\n", (int)cave.pads.size());
 
   Ship ship;
-  ship.set_config(1);
+  UserConfig user_cfg = load_config();
+  ship.set_config(user_cfg.ship);
+  ship.swap_engines = user_cfg.swap_engines;
   float start_x = 0.5f * (cave.pads[0].x0 + cave.pads[0].x1);
   ship.spawn(cave, start_x);
 
@@ -1012,8 +1149,19 @@ int main(int argc, char** argv) {
 
   AppMode mode = AppMode::Menu;  // start in menu
   Menu menu;
-  bool fullscreen = false;
+  bool fullscreen = user_cfg.fullscreen;
   bool running = true;
+
+  if (fullscreen)
+    SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+
+  auto persist_config = [&]() {
+    UserConfig c;
+    c.fullscreen = fullscreen;
+    c.swap_engines = ship.swap_engines;
+    c.ship = ship.config_index;
+    save_config(c);
+  };
 
   SDL_GameController* pad = nullptr;
   for (int i = 0; i < SDL_NumJoysticks(); ++i) {
@@ -1030,9 +1178,9 @@ int main(int argc, char** argv) {
   auto toggle_fullscreen = [&]() {
     fullscreen = !fullscreen;
     SDL_SetWindowFullscreen(window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-    // Output size updates asynchronously; force a query next frame.
     SDL_PumpEvents();
     sync_viewport();
+    persist_config();
   };
 
   auto reset_or_relight = [&]() {
@@ -1057,9 +1205,18 @@ int main(int argc, char** argv) {
         snap_camera();
         mode = AppMode::Playing;
         break;
-      case 3: ship.cycle_config(+1); break;
-      case 4: ship.swap_engines = !ship.swap_engines; break;
-      case 5: running = false; break;
+      case 3:
+        ship.cycle_config(+1);
+        persist_config();
+        break;
+      case 4:
+        ship.swap_engines = !ship.swap_engines;
+        persist_config();
+        break;
+      case 5:
+        persist_config();
+        running = false;
+        break;
     }
   };
 
@@ -1090,8 +1247,14 @@ int main(int argc, char** argv) {
         } else {
           if (ev.key.keysym.sym == SDLK_a || ev.key.keysym.sym == SDLK_LEFT) key_left = true;
           if (ev.key.keysym.sym == SDLK_d || ev.key.keysym.sym == SDLK_RIGHT) key_right = true;
-          if (ev.key.keysym.sym == SDLK_TAB) ship.cycle_config(+1);
-          if (ev.key.keysym.sym == SDLK_x) ship.swap_engines = !ship.swap_engines;
+          if (ev.key.keysym.sym == SDLK_TAB) {
+            ship.cycle_config(+1);
+            persist_config();
+          }
+          if (ev.key.keysym.sym == SDLK_x) {
+            ship.swap_engines = !ship.swap_engines;
+            persist_config();
+          }
           if (ev.key.keysym.sym == SDLK_r) reset_or_relight();
           if (ev.key.keysym.sym == SDLK_f) toggle_fullscreen();
           if (ev.key.keysym.sym == SDLK_g) {
@@ -1193,6 +1356,7 @@ int main(int argc, char** argv) {
     SDL_RenderPresent(ren);
   }
 
+  persist_config();
   if (pad) SDL_GameControllerClose(pad);
   SDL_DestroyRenderer(ren);
   SDL_DestroyWindow(window);
