@@ -2,7 +2,9 @@
 
 ## Current tip
 
-Orientation / heading clarity fix (pending commit on top of fc6bec5).
+`c0b0cce` — Fix ship orientation: clockwise angle, exhaust, clearer nose
+
+Bundle: `dualthrust-003.1-fix-orientation-375fc76.bundle` (base 375fc76)
 
 ## Done in this tip
 
@@ -26,3 +28,4 @@ Orientation / heading clarity fix (pending commit on top of fc6bec5).
 - Original base short: 375fc76
 - Author: Ingo Ruhnke <grumbel@gmail.com>
 - Co-authored-by: Grok <grok@x.ai>
+- Apply: `git pull path/to/dualthrust-003.1-fix-orientation-375fc76.bundle HEAD`
