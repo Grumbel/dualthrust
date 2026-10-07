@@ -130,6 +130,31 @@ struct Cave {
     return is_solid_cell(gx, gy);
   }
 
+  // True if axis-aligned box centered at (wx,wy) is entirely open
+  bool is_open_box(float wx, float wy, float half_w, float half_h) const {
+    const float step = CELL * 0.5f;
+    for (float dy = -half_h; dy <= half_h; dy += step) {
+      for (float dx = -half_w; dx <= half_w; dx += step) {
+        if (is_solid_world(wx + dx, wy + dy))
+          return false;
+      }
+    }
+    return true;
+  }
+
+  // Clear a vertical shaft of open air above a floor cell (for pads / spawn)
+  void clear_shaft(int gx0, int gx1, int floor_gy, int clearance_cells) {
+    for (int gx = gx0; gx <= gx1; ++gx) {
+      int xx = ((gx % GW) + GW) % GW;
+      solid[floor_gy * GW + xx] = 1;  // keep floor
+      for (int uy = 1; uy <= clearance_cells; ++uy) {
+        int yy = floor_gy - uy;
+        if (yy > 2)
+          solid[yy * GW + xx] = 0;
+      }
+    }
+  }
+
   // Nearest solid surface below a free point (for ALT readout)
   float floor_below(float wx, float wy) const {
     wx = wrap_x(wx);
@@ -166,69 +191,68 @@ struct Cave {
       return lo + static_cast<int>(rnd() * (hi - lo + 1));
     };
 
-    // --- Main meandering tunnel (wide gallery) ---
+    // --- Main meandering tunnel (very wide gallery) ---
     float cy = WORLD_H * 0.55f;
-    float half = 320.f;  // half-height in world px — wide open cave
+    float half = 520.f;  // half-height world px
     for (int gx = 0; gx < GW; ++gx) {
-      cy += (rnd() - 0.5f) * 22.f;
-      cy = clampf(cy, WORLD_H * 0.30f, WORLD_H * 0.75f);
-      half += (rnd() - 0.5f) * 20.f;
-      half = clampf(half, 220.f, 520.f);
-      // occasional huge chambers / mild squeezes
-      if (rnd() < 0.018f) half = clampf(half + 160.f, 220.f, 700.f);
-      if (rnd() < 0.012f) half = clampf(half - 80.f, 160.f, 700.f);
+      cy += (rnd() - 0.5f) * 16.f;
+      cy = clampf(cy, WORLD_H * 0.35f, WORLD_H * 0.70f);
+      half += (rnd() - 0.5f) * 14.f;
+      half = clampf(half, 380.f, 900.f);
+      if (rnd() < 0.012f) half = clampf(half + 200.f, 380.f, 1100.f);
+      // rare mild squeeze, still wide
+      if (rnd() < 0.008f) half = clampf(half - 60.f, 300.f, 1100.f);
 
       int y0 = static_cast<int>((cy - half) / CELL);
       int y1 = static_cast<int>((cy + half) / CELL);
-      y0 = std::max(2, y0);
-      y1 = std::min(GH - 3, y1);
+      y0 = std::max(3, y0);
+      y1 = std::min(GH - 4, y1);
       for (int gy = y0; gy <= y1; ++gy)
         solid[gy * GW + gx] = 0;
     }
 
-    // --- Branch tunnels (random walks) ---
-    for (int b = 0; b < 36; ++b) {
+    // --- Branch tunnels ---
+    for (int b = 0; b < 28; ++b) {
       int gx = rnd_i(0, GW - 1);
-      int gy = rnd_i(GH / 5, GH * 4 / 5);
-      int len = rnd_i(60, 220);
-      int rad = rnd_i(4, 9);
+      int gy = rnd_i(GH / 4, GH * 3 / 4);
+      int len = rnd_i(80, 260);
+      int rad = rnd_i(6, 14);
       float dir = rnd() * 2.f * PI;
       for (int sstep = 0; sstep < len; ++sstep) {
-        dir += (rnd() - 0.5f) * 0.5f;
-        gx = static_cast<int>(gx + std::cos(dir) * 1.2f);
-        gy = static_cast<int>(gy + std::sin(dir) * 1.2f);
+        dir += (rnd() - 0.5f) * 0.4f;
+        gx = static_cast<int>(gx + std::cos(dir) * 1.4f);
+        gy = static_cast<int>(gy + std::sin(dir) * 1.4f);
         gx = ((gx % GW) + GW) % GW;
-        gy = clampf(static_cast<float>(gy), 2.f, static_cast<float>(GH - 3));
+        gy = static_cast<int>(clampf(static_cast<float>(gy), 4.f, static_cast<float>(GH - 5)));
         for (int dy = -rad; dy <= rad; ++dy)
           for (int dx = -rad; dx <= rad; ++dx) {
             if (dx * dx + dy * dy <= rad * rad) {
               int xx = ((gx + dx) % GW + GW) % GW;
               int yy = gy + dy;
-              if (yy >= 1 && yy < GH - 1)
+              if (yy >= 3 && yy < GH - 3)
                 solid[yy * GW + xx] = 0;
             }
           }
       }
     }
 
-    // --- Stalactites / stalagmites (decorative, not choking) ---
-    for (int n = 0; n < 220; ++n) {
+    // --- Light stalactites / stalagmites ---
+    for (int n = 0; n < 120; ++n) {
       int gx = rnd_i(0, GW - 1);
       bool down = rnd() < 0.5f;
-      int len = rnd_i(2, 8);
-      // find surface
+      int len = rnd_i(2, 6);
       if (down) {
-        for (int gy = 1; gy < GH - 2; ++gy) {
+        for (int gy = 3; gy < GH - 4; ++gy) {
           if (solid[gy * GW + gx] && !solid[(gy + 1) * GW + gx]) {
-            for (int k = 1; k <= len && gy + k < GH - 1; ++k)
+            for (int k = 1; k <= len && gy + k < GH - 3; ++k)
               solid[(gy + k) * GW + gx] = 1;
             break;
           }
         }
       } else {
-        for (int gy = GH - 2; gy > 1; --gy) {
+        for (int gy = GH - 4; gy > 3; --gy) {
           if (solid[gy * GW + gx] && !solid[(gy - 1) * GW + gx]) {
-            for (int k = 1; k <= len && gy - k > 0; ++k)
+            for (int k = 1; k <= len && gy - k > 3; ++k)
               solid[(gy - k) * GW + gx] = 1;
             break;
           }
@@ -236,30 +260,24 @@ struct Cave {
       }
     }
 
-    // --- Pillars (sparse vertical solid bridges) ---
-    for (int n = 0; n < 28; ++n) {
+    // --- Sparse thin pillars ---
+    for (int n = 0; n < 16; ++n) {
       int gx = rnd_i(0, GW - 1);
-      int width = rnd_i(1, 2);
-      for (int gy = 2; gy < GH - 2; ++gy) {
-        for (int dx = 0; dx < width; ++dx) {
-          int xx = (gx + dx) % GW;
-          // only fill if nearby open space (keep as obstruction inside cave)
-          bool near_open = false;
-          for (int o = -3; o <= 3; ++o) {
-            int yy = gy + o;
-            if (yy >= 0 && yy < GH && !solid[yy * GW + xx]) near_open = true;
-          }
-          if (near_open && rnd() < 0.7f)
-            solid[gy * GW + xx] = 1;
+      for (int gy = 4; gy < GH - 4; ++gy) {
+        bool near_open = false;
+        for (int o = -4; o <= 4; ++o) {
+          int yy = gy + o;
+          if (yy >= 0 && yy < GH && !solid[yy * GW + gx]) near_open = true;
         }
+        if (near_open && rnd() < 0.55f)
+          solid[gy * GW + gx] = 1;
       }
     }
 
-    // Cellular smooth + slight open dilation so walls are less stair-stepped
-    // and corridors stay wide after decorations.
-    for (int pass = 0; pass < 3; ++pass) {
+    // --- Heavy smooth + open dilation (widen corridors, round walls) ---
+    for (int pass = 0; pass < 6; ++pass) {
       std::vector<uint8_t> next = solid;
-      for (int gy = 2; gy < GH - 2; ++gy) {
+      for (int gy = 3; gy < GH - 3; ++gy) {
         for (int gx = 0; gx < GW; ++gx) {
           int n = 0;
           for (int dy = -1; dy <= 1; ++dy)
@@ -268,73 +286,78 @@ struct Cave {
               int xx = ((gx + dx) % GW + GW) % GW;
               n += solid[(gy + dy) * GW + xx] ? 1 : 0;
             }
-          // Erode isolated rock into open space; keep thick walls
-          if (solid[gy * GW + gx] && n < 4)
+          // Erode rock with few solid neighbours (opens and smooths)
+          if (solid[gy * GW + gx] && n <= 4)
             next[gy * GW + gx] = 0;
-          else if (!solid[gy * GW + gx] && n >= 7)
-            next[gy * GW + gx] = 1;  // fill tiny holes
+          // Fill only tiny isolated holes deep in rock
+          else if (!solid[gy * GW + gx] && n >= 8)
+            next[gy * GW + gx] = 1;
         }
       }
       solid.swap(next);
     }
 
-    // Keep a solid crust at top and bottom (cave roof + deep floor)
-    for (int gx = 0; gx < GW; ++gx) {
-      solid[0 * GW + gx] = 1;
-      solid[1 * GW + gx] = 1;
-      solid[2 * GW + gx] = 1;
-      solid[(GH - 3) * GW + gx] = 1;
-      solid[(GH - 2) * GW + gx] = 1;
-      solid[(GH - 1) * GW + gx] = 1;
+    // Extra open dilation: any rock adjacent to open becomes open (1 pass)
+    {
+      std::vector<uint8_t> next = solid;
+      for (int gy = 3; gy < GH - 3; ++gy) {
+        for (int gx = 0; gx < GW; ++gx) {
+          if (!solid[gy * GW + gx]) continue;
+          bool touch_open = false;
+          for (int dy = -1; dy <= 1 && !touch_open; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+              int xx = ((gx + dx) % GW + GW) % GW;
+              if (!solid[(gy + dy) * GW + xx]) { touch_open = true; break; }
+            }
+          if (touch_open && rnd() < 0.65f)
+            next[gy * GW + gx] = 0;
+        }
+      }
+      solid.swap(next);
     }
 
-    // --- Landing pads: flatten floor segments in open areas ---
-    for (int attempt = 0; attempt < 40 && pads.size() < 16; ++attempt) {
-      int gx0 = rnd_i(10, GW - 40);
-      int width = rnd_i(8, 16);  // cells
-      // find floor: first solid below open
-      int floor_gy = -1;
+    // Solid crust (roof + deep floor)
+    for (int gx = 0; gx < GW; ++gx) {
+      for (int gy = 0; gy < 4; ++gy)
+        solid[gy * GW + gx] = 1;
+      for (int gy = GH - 4; gy < GH; ++gy)
+        solid[gy * GW + gx] = 1;
+    }
+
+    // --- Landing pads with tall cleared shafts for safe spawn ---
+    constexpr int PAD_CLEARANCE = 18;  // cells of open air above pad (~288px)
+    for (int attempt = 0; attempt < 80 && static_cast<int>(pads.size()) < 18; ++attempt) {
+      int gx0 = rnd_i(20, GW - 50);
+      int width = rnd_i(10, 18);
       int mid = gx0 + width / 2;
-      for (int gy = 2; gy < GH - 2; ++gy) {
-        if (!solid[gy * GW + mid] && solid[(gy + 1) * GW + mid]) {
+      int floor_gy = -1;
+      for (int gy = 5; gy < GH - 6; ++gy) {
+        if (!solid[gy * GW + (mid % GW)] && solid[(gy + 1) * GW + (mid % GW)]) {
           floor_gy = gy + 1;
           break;
         }
       }
-      if (floor_gy < 0) continue;
-      // need open air above
-      bool ok = true;
-      for (int dx = 0; dx < width; ++dx) {
-        int xx = (gx0 + dx) % GW;
-        if (solid[(floor_gy - 1) * GW + xx] || solid[(floor_gy - 2) * GW + xx])
-          ok = false;
-      }
-      if (!ok) continue;
-      for (int dx = 0; dx < width; ++dx) {
-        int xx = (gx0 + dx) % GW;
-        solid[floor_gy * GW + xx] = 1;
-        // clear a few cells above
-        for (int uy = 1; uy <= 6; ++uy) {
-          int yy = floor_gy - uy;
-          if (yy > 1) solid[yy * GW + xx] = 0;
-        }
-      }
+      if (floor_gy < 0 || floor_gy < PAD_CLEARANCE + 5)
+        continue;
+      // require some open air already
+      int open_count = 0;
+      for (int uy = 1; uy <= 6; ++uy)
+        if (!solid[(floor_gy - uy) * GW + (mid % GW)])
+          ++open_count;
+      if (open_count < 3)
+        continue;
+
+      clear_shaft(gx0, gx0 + width - 1, floor_gy, PAD_CLEARANCE);
       float x0 = static_cast<float>(gx0) * CELL;
       float x1 = static_cast<float>(gx0 + width) * CELL;
       float y = static_cast<float>(floor_gy) * CELL;
       pads.push_back({x0, x1, y});
     }
     if (pads.empty()) {
-      // emergency pad
       int gx0 = GW / 2;
       int floor_gy = GH * 2 / 3;
-      for (int dx = 0; dx < 12; ++dx) {
-        int xx = (gx0 + dx) % GW;
-        solid[floor_gy * GW + xx] = 1;
-        for (int uy = 1; uy <= 8; ++uy)
-          solid[(floor_gy - uy) * GW + xx] = 0;
-      }
-      pads.push_back({gx0 * CELL, (gx0 + 12) * CELL, floor_gy * CELL});
+      clear_shaft(gx0, gx0 + 16, floor_gy, PAD_CLEARANCE);
+      pads.push_back({gx0 * CELL, (gx0 + 16) * CELL, floor_gy * CELL});
     }
 
     // Background stars (dots) scattered in open space + some in rock (dim depth)
@@ -372,20 +395,52 @@ struct Ship {
   void cycle_config(int d) { set_config(config_index + d); }
 
   void spawn(const Cave& cave, float wx) {
-    wx = Cave::wrap_x(wx);
-    float ground = cave.floor_below(wx, 0.f);
-    // Prefer pad center if near one
-    for (const auto& p : cave.pads) {
-      if (std::abs(Cave::wrap_delta(wx, 0.5f * (p.x0 + p.x1))) < 200.f) {
-        wx = 0.5f * (p.x0 + p.x1);
-        ground = p.y;
-        break;
+    // Always prefer a real landing pad with a cleared shaft.
+    const float need_w = std::max(cfg->half_w, cfg->engine_offset_x) + 8.f;
+    const float need_h = cfg->half_h + cfg->engine_offset_y + 12.f;
+
+    auto try_pad = [&](const LandingPad& p) -> bool {
+      float cx = Cave::wrap_x(0.5f * (p.x0 + p.x1));
+      // Search upward from just above the pad for an open box
+      for (float y = p.y - need_h - 10.f; y > p.y - 320.f; y -= 8.f) {
+        if (cave.is_open_box(cx, y, need_w, need_h)) {
+          pos = {cx, y};
+          return true;
+        }
+      }
+      return false;
+    };
+
+    bool ok = false;
+    // Prefer pad nearest requested wx
+    int best = -1;
+    float best_d = 1e12f;
+    for (int i = 0; i < static_cast<int>(cave.pads.size()); ++i) {
+      float cx = 0.5f * (cave.pads[i].x0 + cave.pads[i].x1);
+      float d = std::abs(Cave::wrap_delta(wx, cx));
+      if (d < best_d) { best_d = d; best = i; }
+    }
+    if (best >= 0 && try_pad(cave.pads[best]))
+      ok = true;
+    if (!ok) {
+      for (const auto& p : cave.pads) {
+        if (try_pad(p)) { ok = true; break; }
       }
     }
-    pos = {wx, ground - 200.f};
-    // Ensure spawn is in open air
-    for (int tries = 0; tries < 50 && cave.is_solid_world(pos.x, pos.y); ++tries)
-      pos.y -= Cave::CELL;
+    if (!ok) {
+      // Last resort: scan world near wx for any open box
+      float cx = Cave::wrap_x(wx);
+      for (float y = Cave::WORLD_H * 0.2f; y < Cave::WORLD_H * 0.8f && !ok; y += 16.f) {
+        if (cave.is_open_box(cx, y, need_w, need_h)) {
+          pos = {cx, y};
+          ok = true;
+        }
+      }
+    }
+    if (!ok) {
+      pos = {Cave::wrap_x(wx), Cave::WORLD_H * 0.4f};
+    }
+
     vel = {};
     angle = 0.f;
     ang_vel = 0.f;
