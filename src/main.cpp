@@ -15,8 +15,17 @@
 
 namespace {
 
-constexpr int WINDOW_W = 1280;
-constexpr int WINDOW_H = 720;
+// Mutable viewport — updated on window resize / fullscreen
+int WINDOW_W = 1280;
+int WINDOW_H = 720;
+constexpr int WINDOW_W_DEFAULT = 1280;
+constexpr int WINDOW_H_DEFAULT = 720;
+
+// Pixel font scale (3x5 glyph cells become FONT_SCALE×FONT_SCALE pixels)
+constexpr int FONT_SCALE = 3;
+constexpr int FONT_CELL_W = 3 * FONT_SCALE + FONT_SCALE;  // glyph width + gap
+constexpr int FONT_CELL_H = 5 * FONT_SCALE;
+
 constexpr float PI = 3.14159265358979323846f;
 constexpr float TIME_SCALE = 0.62f;
 
@@ -585,15 +594,26 @@ void draw_char(SDL_Renderer* ren, int x, int y, char ch, SDL_Color col) {
     default: break;
   }
   set_color(ren, col);
-  for (int row = 0; row < 5; ++row)
-    for (int colx = 0; colx < 3; ++colx)
-      if (map[row * 3 + colx] == '1')
-        SDL_RenderDrawPoint(ren, x + colx, y + row);
+  for (int row = 0; row < 5; ++row) {
+    for (int colx = 0; colx < 3; ++colx) {
+      if (map[row * 3 + colx] != '1')
+        continue;
+      SDL_Rect px{x + colx * FONT_SCALE, y + row * FONT_SCALE, FONT_SCALE, FONT_SCALE};
+      SDL_RenderFillRect(ren, &px);
+    }
+  }
 }
 
 void draw_text(SDL_Renderer* ren, int x, int y, const char* s, SDL_Color col) {
   for (int i = 0; s[i]; ++i)
-    draw_char(ren, x + i * 4, y, s[i], col);
+    draw_char(ren, x + i * FONT_CELL_W, y, s[i], col);
+}
+
+int text_width(const char* s) {
+  int n = 0;
+  while (s[n])
+    ++n;
+  return n * FONT_CELL_W;
 }
 
 void draw_stars(SDL_Renderer* ren, const Cave& cave, const Camera& cam) {
@@ -777,26 +797,33 @@ void draw_exhaust(SDL_Renderer* ren, const Ship& ship, const Camera& cam, bool l
 }
 
 void draw_hud(SDL_Renderer* ren, const Ship& ship, const Cave& cave) {
+  const int lh = FONT_CELL_H + 4;
   auto bar = [&](int x, int y, float v) {
     set_color(ren, CRT_DIM);
-    SDL_Rect bg{x, y, 100, 8};
+    SDL_Rect bg{x, y, 120, 10};
     SDL_RenderFillRect(ren, &bg);
     set_color(ren, CRT_MID);
-    SDL_Rect fg{x, y, static_cast<int>(100 * clampf(v, 0.f, 1.f)), 8};
+    SDL_Rect fg{x, y, static_cast<int>(120 * clampf(v, 0.f, 1.f)), 10};
     SDL_RenderFillRect(ren, &fg);
   };
-  bar(20, 20, ship.left_thrust);
-  bar(20, 32, ship.right_thrust);
-  draw_text(ren, 20, 46, ship.cfg->name, CRT_BRIGHT);
-  draw_text(ren, 20, 54, ship.swap_engines ? "ENGINES SWAPPED" : "START MENU",
+  int y = 16;
+  bar(20, y, ship.left_thrust);
+  y += 14;
+  bar(20, y, ship.right_thrust);
+  y += 18;
+  draw_text(ren, 20, y, ship.cfg->name, CRT_BRIGHT);
+  y += lh;
+  draw_text(ren, 20, y, ship.swap_engines ? "ENGINES SWAPPED" : "START MENU",
             ship.swap_engines ? CRT_WARN : CRT_DIM);
+  y += lh + 4;
 
   char buf[64];
   float alt = cave.floor_below(ship.pos.x, ship.pos.y) - ship.pos.y;
   std::snprintf(buf, sizeof(buf), "ALT %.0f", alt);
-  draw_text(ren, 20, 72, buf, CRT_BRIGHT);
+  draw_text(ren, 20, y, buf, CRT_BRIGHT);
+  y += lh;
   std::snprintf(buf, sizeof(buf), "VX %.0f VY %.0f", ship.vel.x, ship.vel.y);
-  draw_text(ren, 20, 80, buf, CRT_MID);
+  draw_text(ren, 20, y, buf, CRT_MID);
 
   bool pad = false;
   for (const auto& p : cave.pads) {
@@ -806,29 +833,45 @@ void draw_hud(SDL_Renderer* ren, const Ship& ship, const Cave& cave) {
   }
   bool ok_v = ship.vel.y < LAND_MAX_VY && std::abs(ship.vel.x) < LAND_MAX_VX;
   bool ok_a = std::abs(ship.angle) < LAND_MAX_ANGLE;
-  draw_text(ren, WINDOW_W - 120, 20, pad ? "PAD OK" : "NO PAD", pad ? CRT_PAD : CRT_HOT);
-  draw_text(ren, WINDOW_W - 120, 28, ok_v ? "SPEED OK" : "SPEED HI", ok_v ? CRT_PAD : CRT_HOT);
-  draw_text(ren, WINDOW_W - 120, 36, ok_a ? "ATT OK" : "ATT BAD", ok_a ? CRT_PAD : CRT_HOT);
+  const char* t0 = pad ? "PAD OK" : "NO PAD";
+  const char* t1 = ok_v ? "SPEED OK" : "SPEED HI";
+  const char* t2 = ok_a ? "ATT OK" : "ATT BAD";
+  int rx = WINDOW_W - text_width(t1) - 24;
+  draw_text(ren, rx, 16, t0, pad ? CRT_PAD : CRT_HOT);
+  draw_text(ren, rx, 16 + lh, t1, ok_v ? CRT_PAD : CRT_HOT);
+  draw_text(ren, rx, 16 + lh * 2, t2, ok_a ? CRT_PAD : CRT_HOT);
 
   if (ship.state == FlightState::Landed) {
-    draw_text(ren, WINDOW_W / 2 - 40, 40, "LANDED", CRT_PAD);
-    draw_text(ren, WINDOW_W / 2 - 70, 50, "A TO RELIGHT", CRT_MID);
+    const char* a = "LANDED";
+    const char* b = "A TO RELIGHT";
+    draw_text(ren, WINDOW_W / 2 - text_width(a) / 2, 48, a, CRT_PAD);
+    draw_text(ren, WINDOW_W / 2 - text_width(b) / 2, 48 + lh, b, CRT_MID);
   } else if (ship.state == FlightState::Crashed) {
-    draw_text(ren, WINDOW_W / 2 - 40, 40, "CRASH", CRT_HOT);
-    draw_text(ren, WINDOW_W / 2 - 70, 50, "A TO RESET", CRT_MID);
+    const char* a = "CRASH";
+    const char* b = "A TO RESET";
+    draw_text(ren, WINDOW_W / 2 - text_width(a) / 2, 48, a, CRT_HOT);
+    draw_text(ren, WINDOW_W / 2 - text_width(b) / 2, 48 + lh, b, CRT_MID);
   }
 }
 
 void draw_menu(SDL_Renderer* ren, const Menu& menu, const Ship& ship, bool fullscreen) {
+  const int lh = FONT_CELL_H + 8;
+  const int panel_w = 420;
+  const int panel_h = 80 + Menu::N * lh + 40;
+  int px = WINDOW_W / 2 - panel_w / 2;
+  int py = WINDOW_H / 2 - panel_h / 2;
   set_color(ren, CRT_MENU);
-  SDL_Rect panel{WINDOW_W / 2 - 160, WINDOW_H / 2 - 120, 320, 240};
+  SDL_Rect panel{px, py, panel_w, panel_h};
   SDL_RenderFillRect(ren, &panel);
   set_color(ren, CRT_BRIGHT);
   SDL_RenderDrawRect(ren, &panel);
 
-  draw_text(ren, WINDOW_W / 2 - 50, WINDOW_H / 2 - 108, "DUALTHRUST", CRT_BRIGHT);
-  draw_text(ren, WINDOW_W / 2 - 70, WINDOW_H / 2 - 96, "CRT CAVE LANDER", CRT_DIM);
+  const char* title = "DUALTHRUST";
+  const char* sub = "CRT CAVE LANDER";
+  draw_text(ren, WINDOW_W / 2 - text_width(title) / 2, py + 16, title, CRT_BRIGHT);
+  draw_text(ren, WINDOW_W / 2 - text_width(sub) / 2, py + 16 + lh, sub, CRT_DIM);
 
+  int row_y = py + 16 + lh * 2 + 8;
   for (int i = 0; i < Menu::N; ++i) {
     char line[48];
     if (i == 1)
@@ -840,11 +883,13 @@ void draw_menu(SDL_Renderer* ren, const Menu& menu, const Ship& ship, bool fulls
     else
       std::snprintf(line, sizeof(line), "%s", menu.labels[i]);
     SDL_Color col = (i == menu.cursor) ? CRT_WARN : CRT_MID;
+    int lx = px + 40;
     if (i == menu.cursor)
-      draw_text(ren, WINDOW_W / 2 - 90, WINDOW_H / 2 - 70 + i * 16, ">", CRT_WARN);
-    draw_text(ren, WINDOW_W / 2 - 80, WINDOW_H / 2 - 70 + i * 16, line, col);
+      draw_text(ren, lx - FONT_CELL_W - 4, row_y + i * lh, ">", CRT_WARN);
+    draw_text(ren, lx, row_y + i * lh, line, col);
   }
-  draw_text(ren, WINDOW_W / 2 - 100, WINDOW_H / 2 + 100, "UP DOWN MOVE  A SELECT", CRT_DIM);
+  const char* hint = "UP DOWN MOVE  A SELECT";
+  draw_text(ren, WINDOW_W / 2 - text_width(hint) / 2, py + panel_h - lh - 8, hint, CRT_DIM);
 }
 
 void draw_scanlines(SDL_Renderer* ren) {
@@ -866,8 +911,8 @@ int main(int argc, char** argv) {
   }
 
   SDL_Window* window = SDL_CreateWindow(
-      "dualthrust", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_W, WINDOW_H,
-      SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+      "dualthrust", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_W_DEFAULT,
+      WINDOW_H_DEFAULT, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   if (!window) {
     SDL_Quit();
     return 1;
@@ -880,6 +925,16 @@ int main(int argc, char** argv) {
     return 1;
   }
   SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+  auto sync_viewport = [&]() {
+    int w = 0, h = 0;
+    SDL_GetRendererOutputSize(ren, &w, &h);
+    if (w < 320) w = 320;
+    if (h < 240) h = 240;
+    WINDOW_W = w;
+    WINDOW_H = h;
+  };
+  sync_viewport();
 
   Cave cave;
   std::printf("Generating cave...\n");
@@ -920,6 +975,9 @@ int main(int argc, char** argv) {
   auto toggle_fullscreen = [&]() {
     fullscreen = !fullscreen;
     SDL_SetWindowFullscreen(window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    // Output size updates asynchronously; force a query next frame.
+    SDL_PumpEvents();
+    sync_viewport();
   };
 
   auto reset_or_relight = [&]() {
@@ -954,6 +1012,13 @@ int main(int argc, char** argv) {
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
       if (ev.type == SDL_QUIT) running = false;
+      if (ev.type == SDL_WINDOWEVENT) {
+        if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+            ev.window.event == SDL_WINDOWEVENT_RESIZED ||
+            ev.window.event == SDL_WINDOWEVENT_EXPOSED) {
+          sync_viewport();
+        }
+      }
       if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE) {
         if (mode == AppMode::Playing) mode = AppMode::Menu;
         else running = false;
