@@ -42,7 +42,7 @@ Small sparse-set ECS plus data tables; all tuning/art data lives in `defs.hpp`.
 - `game.hpp` — components (`Transform`, `Motion`, `Hull`, `Thrusters`, `Flight`, `Particle`), `Camera`, `Game`
 - `systems.cpp` — flight, collision, exhaust, particles, events, camera; fixed 120 Hz step from `main.cpp`
 - `cave.cpp` — generation stages + baked per-cell `depth` / `contour` (rendering reads these, never recomputes)
-- `render.cpp` — `Gfx`: glyph atlas, rock-tile atlas, CRT overlay, minimap, flames, HUD, menu
+- `render.cpp` — `Gfx`: cached world chunk textures, CRT overlay, minimap, flames, batched text/polygons, HUD, menu
 - `audio.cpp` — synthesised sound (no assets): engine rumble, landing/bounce/crash effects, generative Am-F-C-G music with echo; mixed in the SDL callback, fed from `Game::fired`
 - `ui.hpp` — `MENU_ITEMS` table; `config.cpp` — XDG config; `main.cpp` — args, input, loop
 
@@ -68,11 +68,12 @@ nix build .#dualthrust-r36s-portmaster-zip  # PortMaster autoinstall zip
   call): the static world is baked into cached CPU-rasterised chunk textures, polygons/text/particles go
   through `SDL_RenderFillRects` batches. Measured on device: 16 ms/frame in play (was 33 ms). Check with
   `./dualthrust --play --frames 300` (prints per-frame sim/draw/present ms). Avoid per-glyph/per-line calls.
-- Keep to SDL ≤ 2.0.10 API (headers in the sysroot; no `SDL_RenderGeometry` — see `Gfx::triangle`).
+- Keep to SDL ≤ 2.0.10 API (headers in the sysroot; no `SDL_RenderGeometry` — see `Gfx::gradient_triangle`).
 - `mk/r36s/cxxabi_shim.cpp` shims GCC 15 → old libstdc++/glibc symbols (`-DDUALTHRUST_CXXABI_SHIM`).
 - Launcher exports `XDG_CONFIG_HOME` into the port dir, so ship/sound settings persist there.
-- Verified: aarch64 ELF, needs only GLIBC ≤ 2.17 / GLIBCXX 3.4 / CXXABI 1.3.9, loads and reaches `SDL_Init`
-  under qemu. Not yet run on real hardware.
+- Verified: aarch64 ELF, needs only GLIBC ≤ 2.17 / GLIBCXX 3.4 / CXXABI 1.3.9. Runs on a real R36S (ArkOS,
+  SDL 2.0.10, KMSDRM + opengles2) at 60 fps in play. Not yet tested through the PortMaster launcher or with
+  the real controller mapping.
 
 ## Packaging
 

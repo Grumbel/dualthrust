@@ -8,10 +8,10 @@ dualthrust \- CRT dual-engine cave lander
 .SH DESCRIPTION
 .B dualthrust
 is a small 2D cave lander with a green CRT look. The left and right
-engines are driven by the gamepad triggers and/or by pushing the
-corresponding analog stick up. Differential thrust translates and rotates
+engines are driven by the gamepad triggers, the shoulder buttons and/or by
+pushing the corresponding analog stick up. Differential thrust translates and rotates
 the ship. Land gently on marked pads; bounce off walls at low speed;
-crash only on hard impacts.
+crash only on hard impacts. Sound and music are synthesised at runtime.
 .SH OPTIONS
 .TP
 .BR \-h ", " \-\-help
@@ -35,12 +35,15 @@ Unsigned seed for cave generation.
 .BR \-x ", " \-\-swap\-engines
 Swap left/right engine mapping.
 .TP
+.BR \-m ", " \-\-mute
+Start with sound off.
+.TP
 .B \-\-config\-dir \fIPATH\fR
 Override XDG config directory (default
 \fI$XDG_CONFIG_HOME/dualthrust\fR or \fI~/.config/dualthrust\fR).
 .SH CONTROLS
 .TP
-Triggers / stick up
+Triggers / L1 R1 / stick up
 Left and right engine thrust.
 .TP
 Start
@@ -52,15 +55,24 @@ Reset after crash, or relight after landing.
 Y / G
 Generate a new cave.
 .TP
-F
+Select / Tab
+Next ship preset.
+.TP
+X
+Swap left and right engines.
+.TP
+F / Alt+Enter
 Toggle fullscreen.
+.TP
+M
+Sound on or off.
 .TP
 Escape
 Menu, or quit from the menu.
 .SH FILES
 .TP
 .I $XDG_CONFIG_HOME/dualthrust/config
-Saved settings (fullscreen, ship, engine swap).
+Saved settings (fullscreen, ship, engine swap, sound).
 .SH SEE ALSO
 .BR sdl2-config (1)
 .SH AUTHOR
