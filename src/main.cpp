@@ -1383,14 +1383,10 @@ int main(int argc, char** argv) {
   ship.swap_engines = user_cfg.swap_engines;
   float start_x = 0.5f * (cave.pads[0].x0 + cave.pads[0].x1);
   ship.spawn(cave, start_x);
-  std::printf("  ship:       %s (%d)
-", ship.cfg->name, ship.config_index);
-  std::printf("  swap L/R:   %s
-", ship.swap_engines ? "yes" : "no");
-  std::printf("  fullscreen: %s
-", user_cfg.fullscreen ? "yes" : "no");
-  std::printf("Ready.
-");
+  std::printf("  ship:       %s (%d)\n", ship.cfg->name, ship.config_index);
+  std::printf("  swap L/R:   %s\n", ship.swap_engines ? "yes" : "no");
+  std::printf("  fullscreen: %s\n", user_cfg.fullscreen ? "yes" : "no");
+  std::printf("Ready.\n");
   std::fflush(stdout);
 
   Camera cam;
