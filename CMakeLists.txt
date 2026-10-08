@@ -67,6 +67,16 @@ if(TARGET SDL2::SDL2main)
   target_link_libraries(dualthrust PRIVATE SDL2::SDL2main)
 endif()
 
+# GL backend regression test (needs a display; headless: xvfb-run, see the test source)
+option(DUALTHRUST_BUILD_TESTS "Build the GLES2 backend regression test" OFF)
+if(DUALTHRUST_BUILD_TESTS AND NOT EMSCRIPTEN)
+  enable_testing()
+  add_executable(gles2_texture_rebind tests/gles2_texture_rebind.cpp src/backend_gles2.cpp src/backend_sdl.cpp)
+  target_link_libraries(gles2_texture_rebind PRIVATE SDL2::SDL2)
+  add_test(NAME gles2_texture_rebind COMMAND gles2_texture_rebind)
+  set_tests_properties(gles2_texture_rebind PROPERTIES SKIP_RETURN_CODE 2)
+endif()
+
 if(EMSCRIPTEN)
   # The web page: dualthrust.html (also as index.html) with its .js and .wasm, installed at the top of
   # the prefix, ready to serve as a static site. The shell carries the version and source revision

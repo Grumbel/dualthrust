@@ -192,6 +192,9 @@ class Gles2Backend : public Backend {
   void output_size(int& w, int& h) const override { SDL_GL_GetDrawableSize(win_, &w, &h); }
 
   Texture* create_texture(int w, int h, const uint8_t* rgba, bool linear) override {
+    // Quads already queued belong to the texture bound now; draw them before the upload below rebinds
+    // (a chunk baked in the middle of a frame otherwise made the previous chunk's quad use the new texture).
+    flush();
     auto* t = new Texture{0, w, h};
     gl_.GenTextures(1, &t->id);
     gl_.ActiveTexture(GL_TEXTURE0);

@@ -59,6 +59,8 @@ Small sparse-set ECS plus data tables; all tuning/art data lives in `defs.hpp`.
 Debug flags: `--play`, `--screen title|pause|options`, `--renderer auto|gles2|sdl`, `--thrust L,R`, `--frames N`, `--screenshot FILE.bmp` (works headless with
 `SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software`).
 
+GL backend regression test: `cmake -DDUALTHRUST_BUILD_TESTS=ON`, then `xvfb-run -a env SDL_VIDEODRIVER=x11 ctest` (skips without GLES2).
+
 New `.cpp` files must be listed in `CMakeLists.txt` and `git add`ed (flake builds only see tracked files).
 
 ## R36S / ArkOS handheld port
