@@ -33,16 +33,40 @@ bool make_dirs(const std::string& dir) {
 
 void set_config_dir_override(const std::string& dir) { g_dir_override = dir; }
 
-std::string config_dir_path() {
-  if (!g_dir_override.empty()) return g_dir_override;
-  const char* xdg = std::getenv("XDG_CONFIG_HOME");
-  if (xdg && xdg[0]) return std::string(xdg) + "/dualthrust";
+namespace {
+
+// $<var>/dualthrust when the XDG variable is set, else $HOME/<fallback>/dualthrust.
+// No guessing: a set-but-relative variable, or no usable base at all, gives "".
+std::string xdg_dir(const char* var, const char* fallback) {
+  const char* v = std::getenv(var);
+  if (v && v[0]) return v[0] == '/' ? std::string(v) + "/dualthrust" : std::string();
   const char* home = std::getenv("HOME");
-  if (home && home[0]) return std::string(home) + "/.config/dualthrust";
-  return "dualthrust-config";
+  if (home && home[0] == '/') return std::string(home) + "/" + fallback + "/dualthrust";
+  return {};
 }
 
+}  // namespace
+
+std::string config_dir_path() {
+  return g_dir_override.empty() ? xdg_dir("XDG_CONFIG_HOME", ".config") : g_dir_override;
+}
+
+std::string state_dir_path() { return xdg_dir("XDG_STATE_HOME", ".local/state"); }
+
 std::string config_file_path() { return config_dir_path() + "/config"; }
+
+bool check_user_dirs() {
+  bool ok = true;
+  if (config_dir_path().empty()) {
+    std::fprintf(stderr, "dualthrust: no config directory: XDG_CONFIG_HOME must be an absolute path (or unset with an absolute HOME)\n");
+    ok = false;
+  }
+  if (state_dir_path().empty()) {
+    std::fprintf(stderr, "dualthrust: no state directory: XDG_STATE_HOME must be an absolute path (or unset with an absolute HOME)\n");
+    ok = false;
+  }
+  return ok;
+}
 
 UserConfig load_config() {
   UserConfig c;
@@ -67,9 +91,15 @@ UserConfig load_config() {
 }
 
 void save_config(const UserConfig& c) {
-  if (!make_dirs(config_dir_path())) return;
+  if (!make_dirs(config_dir_path())) {
+    std::fprintf(stderr, "dualthrust: cannot create %s: %s\n", config_dir_path().c_str(), std::strerror(errno));
+    return;
+  }
   std::FILE* f = std::fopen(config_file_path().c_str(), "w");
-  if (!f) return;
+  if (!f) {
+    std::fprintf(stderr, "dualthrust: cannot write %s: %s\n", config_file_path().c_str(), std::strerror(errno));
+    return;
+  }
   std::fprintf(f, "# dualthrust config (XDG)\nfullscreen=%d\nswap_engines=%d\nsound=%d\nship=%d\nzoom=%d\ncrt=%d\nmusic=%d\nsfx=%d\n",
                c.fullscreen ? 1 : 0, c.swap_engines ? 1 : 0, c.sound ? 1 : 0, c.ship, c.zoom, c.crt ? 1 : 0, c.music, c.sfx);
   std::fclose(f);

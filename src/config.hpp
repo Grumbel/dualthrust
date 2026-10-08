@@ -16,7 +16,13 @@ struct UserConfig {
 };
 
 void set_config_dir_override(const std::string& dir);
+// Settings: $XDG_CONFIG_HOME/dualthrust (else ~/.config/dualthrust); saves/statistics:
+// $XDG_STATE_HOME/dualthrust (else ~/.local/state/dualthrust). "" when no absolute path can be
+// derived (e.g. a relative XDG variable): nothing is ever written to a guessed location.
 std::string config_dir_path();
+std::string state_dir_path();
+// Prints an error and returns false if either directory is unresolvable; main exits then.
+bool check_user_dirs();
 std::string config_file_path();
 UserConfig load_config();
 void save_config(const UserConfig& c);

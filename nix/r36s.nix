@@ -321,7 +321,7 @@ get_controls
 GAMEDIR="/$directory/ports/dualthrust"
 CONFDIR="$GAMEDIR/conf"
 
-mkdir -p "$CONFDIR"
+mkdir -p "$CONFDIR" || { echo "cannot create $CONFDIR"; exit 1; }
 chmod -R u+rwX "$GAMEDIR" 2>/dev/null || true
 cd "$GAMEDIR" || exit 1
 
@@ -329,8 +329,10 @@ if [ -w "$GAMEDIR" ]; then
   > "$GAMEDIR/log.txt" 2>/dev/null && exec > >(tee -a "$GAMEDIR/log.txt") 2>&1 || true
 fi
 
-# Config (ship, sound, …) lives next to the port: $CONFDIR/dualthrust/config
+# Settings and saves live in the port's conf/ dir ($CONFDIR/dualthrust/), never in $HOME.
+# The game refuses to start if these are not absolute paths.
 export XDG_CONFIG_HOME="$CONFDIR"
+export XDG_STATE_HOME="$CONFDIR"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 
 pm_platform_helper "$GAMEDIR/dualthrust" 2>/dev/null || true

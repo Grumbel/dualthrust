@@ -168,8 +168,10 @@ void print_diagnostics(const char* argv0, const Options& o) {
 #endif
   const char* home = std::getenv("HOME");
   const char* xdg = std::getenv("XDG_CONFIG_HOME");
-  std::printf("  HOME:       %s\n  XDG_CONFIG_HOME: %s\n", home ? home : "(unset)", xdg ? xdg : "(unset)");
-  std::printf("  config:     %s\n", config_file_path().c_str());
+  const char* xst = std::getenv("XDG_STATE_HOME");
+  std::printf("  HOME:       %s\n  XDG_CONFIG_HOME: %s\n  XDG_STATE_HOME:  %s\n", home ? home : "(unset)",
+              xdg ? xdg : "(unset)", xst ? xst : "(unset)");
+  std::printf("  config:     %s\n  state:      %s\n", config_file_path().c_str(), state_dir_path().c_str());
   char cwd[4096];
   if (getcwd(cwd, sizeof cwd)) std::printf("  cwd:        %s\n", cwd);
   std::printf("  window:     %dx%d\n  cave seed:  0x%08x (%u)\n", o.win_w, o.win_h, o.seed, o.seed);
@@ -211,6 +213,7 @@ void read_thrust(SDL_GameController* pad, float out[2]) {
 int main(int argc, char** argv) {
   Options opt;
   if (int rc = parse_args(argc, argv, opt); rc >= 0) return rc;
+  if (!check_user_dirs()) return 1;
   print_diagnostics(argv[0], opt);
 
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) != 0) {

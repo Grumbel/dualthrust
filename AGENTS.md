@@ -83,7 +83,9 @@ nix build .#dualthrust-r36s-portmaster-zip  # PortMaster autoinstall zip
   the GL draw count; `--renderer sdl` compares).
 - Keep to SDL ≤ 2.0.10 API (headers in the sysroot; no `SDL_RenderGeometry` — see `Gfx::gradient_triangle`).
 - `mk/r36s/cxxabi_shim.cpp` shims GCC 15 → old libstdc++/glibc symbols (`-DDUALTHRUST_CXXABI_SHIM`).
-- Launcher exports `XDG_CONFIG_HOME` into the port dir, so ship/sound settings persist there.
+- Launcher exports `XDG_CONFIG_HOME` and `XDG_STATE_HOME` = `<port>/conf`, so settings persist in `conf/dualthrust/`, not `$HOME`.
+  The game never guesses: settings = `$XDG_CONFIG_HOME/dualthrust`, saves/stats = `$XDG_STATE_HOME/dualthrust`, each falling back to
+  `$HOME/.config` / `$HOME/.local/state` only when the variable is unset; a relative path or no usable base → error, exit 1.
 - Verified: aarch64 ELF, needs only GLIBC ≤ 2.17 / GLIBCXX 3.4 / CXXABI 1.3.9. Runs on a real R36S (ArkOS,
   SDL 2.0.10, KMSDRM + opengles2) at 60 fps in play. Not yet tested through the PortMaster launcher or with
   the real controller mapping.
