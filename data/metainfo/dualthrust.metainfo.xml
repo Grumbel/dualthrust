@@ -6,15 +6,19 @@ Copyright 2026 Ingo Ruhnke <grumbel@gmail.com>
 <component type="desktop-application">
   <id>dualthrust</id>
   <name>dualthrust</name>
-  <summary>CRT dual-engine lander controlled by gamepad triggers</summary>
+  <summary>CRT dual-engine cave lander</summary>
   <metadata_license>FSFAP</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <developer_name>Ingo Ruhnke</developer_name>
   <description>
     <p>
       A small 2D dual-engine lander with a green CRT look. The left and right
-      gamepad triggers drive the two engines; differential thrust rotates and
-      translates the ship. Land gently on pads across a large wrapping world.
+      engines (gamepad triggers, or the keyboard) rotate and thrust the ship.
+      Fly through a large wrapping cave and land gently on the pads.
+    </p>
+    <p>
+      Three zoom levels, seven ships, music and effects, a title screen and
+      options. Runs on desktop Linux, in the browser and on handhelds.
     </p>
   </description>
   <launchable type="desktop-id">dualthrust.desktop</launchable>
@@ -27,6 +31,12 @@ Copyright 2026 Ingo Ruhnke <grumbel@gmail.com>
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.1.0" date="2026-10-07"/>
+    <release version="0.1.0" date="2026-10-08">
+      <description>
+        <p>First release: dual-engine flight, wrapping caves with landing pads, springless
+        bounce physics, three zoom levels, seven ships, title screen and options, synthesised
+        sound and music, a GLES2 renderer, and builds for the web and the R36S.</p>
+      </description>
+    </release>
   </releases>
 </component>
