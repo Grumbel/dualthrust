@@ -22,16 +22,35 @@ inline constexpr float LINEAR_DRAG = 0.08f;
 inline constexpr float ANGULAR_DRAG = 1.2f;
 inline constexpr float MAX_ANGULAR_VEL = 8.f;
 
+// HUD guides for a gentle touchdown (the physics decides what actually happens)
 inline constexpr float LAND_MAX_VY = 55.f;
 inline constexpr float LAND_MAX_VX = 40.f;
 inline constexpr float LAND_MAX_ANGLE = 0.22f;
-inline constexpr float LAND_MAX_ANGVEL = 1.2f;
 
-// Impact speed along the surface normal; above → crash, below → bounce
-inline constexpr float CRASH_IMPACT_SPEED = 200.f;
-inline constexpr float BOUNCE_RESTITUTION = 0.42f;
-inline constexpr float BOUNCE_FRICTION = 0.85f;
-inline constexpr float BOUNCE_ANG_DAMP = 0.55f;
+// Impacts (normal speed, px/s): hull or engine bells above CRASH_HULL_SPEED, feet above CRASH_FOOT_SPEED destroy
+// the ship; anything above HIT_MIN_SPEED makes a bounce effect.
+inline constexpr float CRASH_HULL_SPEED = 120.f;
+inline constexpr float CRASH_FOOT_SPEED = 260.f;
+inline constexpr float HIT_MIN_SPEED = 30.f;
+
+// Landed = touching rock, almost still and without thrust for SETTLE_TIME (sim seconds). Hysteresis: a ship
+// that slides faster than UNSETTLE_SPEED (e.g. down a slope) counts as flying again.
+inline constexpr float SETTLE_SPEED = 10.f;
+inline constexpr float SETTLE_ANGVEL = 0.25f;
+inline constexpr float SETTLE_MAX_ANGLE = 1.2f;  // rad: leaning more than this is toppled, not landed
+inline constexpr float UNSETTLE_SPEED = 30.f;
+inline constexpr float SETTLE_TIME = 0.5f;
+
+// Landing legs: spring along the strut (Hz, damping ratio), leg body mass as a fraction of the ship's
+inline constexpr float LEG_HERTZ = 1.0f;
+inline constexpr float LEG_DAMPING = 0.3f;
+inline constexpr float LEG_MASS_FRACTION = 0.06f;
+
+// Friction coefficients (mixed as sqrt(a * b) by Box2D)
+inline constexpr float ROCK_FRICTION = 0.6f;
+inline constexpr float PAD_FRICTION = 1.0f;
+inline constexpr float HULL_FRICTION = 0.4f;
+inline constexpr float FOOT_FRICTION = 0.6f;
 
 inline constexpr size_t MAX_PARTICLES = 1500;
 inline constexpr float EXHAUST_RATE = 150.f;  // particles / sec / engine at full thrust
@@ -50,7 +69,30 @@ inline constexpr Rgba MENU{20, 40, 24, 230};
 inline constexpr Rgba HULL_FILL{4, 26, 12, 255};
 inline constexpr Rgba FLAME_CORE{255, 245, 210, 255};
 inline constexpr Rgba FLAME_EDGE{255, 90, 20, 255};
+inline constexpr Rgba CARGO{90, 205, 255, 255};   // crates, their minimap dots (cyan stands out from the green and amber)
+inline constexpr Rgba ROPE{150, 215, 170, 255};
 }  // namespace pal
+
+// Cosmetic / structural extras of a ship (drawn; tanks also collide)
+enum ShipStyle : unsigned {
+  STYLE_FINS = 1,     // tail fins at the belly
+  STYLE_TANKS = 2,    // fuel tanks beside the cabin
+  STYLE_DOME = 4,     // glass canopy
+  STYLE_DISH = 8,     // radar dish on a stalk
+  STYLE_STRIPES = 16, // hazard stripes along the belly
+  STYLE_DECK = 32     // a wide flat deck across the belly (collides): big ships with outboard thrusters
+};
+
+// One thruster of a ship with its own control channel. Ships without a list have the classic pair (see
+// thruster_pose): left and right engines on the channels 0 and 1.
+//   channel 0 = left trigger / left shoulder, 1 = right trigger / right shoulder, 2 = left stick up, 3 = right stick up
+//   angle: direction of the push in radians off the nose (0 = toward the nose, +90° = to the right, 180° = down)
+struct ThrusterDef {
+  float x, y;     // hull-local mount
+  float angle;
+  float power;    // fraction of the ship's max_thrust
+  int channel;    // 0..3
+};
 
 struct ShipDef {
   const char* name;
@@ -58,6 +100,9 @@ struct ShipDef {
   float engine_offset_x, engine_offset_y;  // offset magnitudes
   float mass, inertia, max_thrust;
   bool engines_top;  // true: engines on nose/top (-y); false: aft/bottom (+y)
+  unsigned style = 0;
+  const ThrusterDef* thrusters = nullptr;  // null: the classic left/right pair
+  int thruster_n = 0;
 
   // Signed local Y of the engine mounts (local +y = ground side when upright)
   float eng_y() const { return engines_top ? -engine_offset_y : engine_offset_y; }
@@ -66,14 +111,126 @@ struct ShipDef {
   float foot_y() const { return half_h * 0.95f; }
 };
 
+// A thruster as the simulation and the renderer need it, hull-local
+struct ThrusterPose {
+  Vec2 pos;         // mount
+  Vec2 push;        // unit direction of the force on the ship
+  Vec2 flame;       // unit direction the exhaust leaves in
+  Vec2 nozzle;      // where the exhaust starts
+  float power;
+  int channel;
+};
+inline int thruster_count(const ShipDef& d) { return d.thruster_n ? d.thruster_n : 2; }
+inline int channel_count(const ShipDef& d) { return d.thruster_n ? 4 : 2; }  // controls the ship uses
+inline ThrusterPose thruster_pose(const ShipDef& d, int i) {
+  ThrusterPose p;
+  if (d.thruster_n) {
+    const ThrusterDef& t = d.thrusters[i];
+    p.pos = {t.x, t.y};
+    p.push = {std::sin(t.angle), -std::cos(t.angle)};
+    p.flame = {-p.push.x, -p.push.y};
+    p.nozzle = p.pos + p.flame * 12.f;
+    p.power = t.power;
+    p.channel = t.channel;
+  } else {  // classic pair; top-mounted engines still fire "down" visually
+    p.pos = {i == 0 ? -d.engine_offset_x : d.engine_offset_x, d.eng_y()};
+    p.push = {0.f, -1.f};
+    p.flame = {0.f, 1.f};
+    p.nozzle = {p.pos.x, d.nozzle_y()};
+    p.power = 1.f;
+    p.channel = i;
+  }
+  return p;
+}
+
+// Hull outline, in ship-local px (+y = ground side when upright). Shared by drawing and physics.
+struct HullGeom {
+  float hw, hh;                      // half extents of the drawn body
+  float nose_y, cabin_y, belly_y;
+  float cabin_hw() const { return hw * 0.45f; }
+  float belly_hw() const { return hw * 0.55f; }
+};
+inline HullGeom hull_geom(const ShipDef& d) {
+  HullGeom g;
+  g.hw = d.half_w * 0.85f;
+  g.hh = d.half_h * 0.9f;
+  g.nose_y = -g.hh;
+  g.cabin_y = -g.hh * 0.35f;
+  g.belly_y = d.engines_top ? g.hh * 0.35f : std::min(std::abs(d.eng_y()) - 6.f, g.hh * 0.45f);
+  if (g.belly_y < g.cabin_y + 8.f) g.belly_y = g.cabin_y + 12.f;
+  return g;
+}
+
+// Where the winch cable leaves the hull (hull-local y; x = 0)
+inline float winch_y(const ShipDef& d) { return hull_geom(d).belly_y + 6.f; }
+
+// Landing legs: a strut from the hull (attach) out to the foot, which slides along `axis` (unit, out of the hull).
+// Legs stand outside the engines and reach past the nozzle rims so the bells never touch the ground first.
+struct LegGeom {
+  float attach_x, attach_y;  // hull-local, for the right leg (mirror x for the left)
+  float foot_x, foot_y;      // foot centre when fully extended
+  float length;              // attach -> foot
+  float axis_x, axis_y;      // unit vector attach -> foot
+  float travel;              // how far the foot can be pushed in (retracted foot sits at the attach point)
+  float foot_half_w;         // landing plate
+};
+inline LegGeom leg_geom(const ShipDef& d) {
+  const HullGeom h = hull_geom(d);
+  LegGeom g;
+  g.attach_x = h.belly_hw();
+  g.attach_y = h.belly_y;
+  g.foot_x = d.engines_top ? h.hw * 0.9f : std::max(h.hw * 0.9f, d.engine_offset_x + 12.f);
+  g.foot_y = d.engines_top ? h.hh * 0.85f + 6.f : std::max(h.hh * 0.85f, d.nozzle_y() + 8.f);
+  const float dx = g.foot_x - g.attach_x, dy = g.foot_y - g.attach_y;
+  g.length = std::sqrt(dx * dx + dy * dy);
+  g.axis_x = dx / g.length;
+  g.axis_y = dy / g.length;
+  g.travel = g.length - 4.f;
+  g.foot_half_w = 7.f;
+  return g;
+}
+
+// Centre of mass, hull-local y: well below the hull centre (engines and gear are heavy), so the ship stands
+// stably on its legs, even on a slope. Thrust acts along the ship's axis, so this does not change how it flies.
+inline float com_y(const ShipDef& d) { return 0.45f * leg_geom(d).foot_y; }
+
+// Big ships with four thrusters, two on the triggers and two on the sticks
+inline constexpr ThrusterDef FRIGATE_T[] = {
+    {-62.f, 34.f, 0.f, 1.f, 0},   {62.f, 34.f, 0.f, 1.f, 1},                    // main engines: triggers
+    {-70.f, 26.f, 1.5708f, 0.5f, 2}, {70.f, 26.f, -1.5708f, 0.5f, 3},          // side thrusters: sticks strafe
+};
+inline constexpr ThrusterDef ATLAS_T[] = {
+    {-56.f, 40.f, 0.f, 1.f, 0},   {56.f, 40.f, 0.f, 1.f, 1},                    // main engines: triggers
+    {-44.f, -2.f, 3.1416f, 0.6f, 2}, {44.f, -2.f, 3.1416f, 0.6f, 3},         // top boosters push down: sticks brake / steer
+};
+inline constexpr ThrusterDef DRAGONFLY_T[] = {
+    {-50.f, 24.f, 0.f, 1.f, 0},   {50.f, 24.f, 0.f, 1.f, 1},
+    {-22.f, 26.f, 0.61f, 0.6f, 2}, {22.f, 26.f, -0.61f, 0.6f, 3},              // crossed at 35°: together lift, alone strafe
+};
+inline constexpr ThrusterDef COLOSSUS_T[] = {
+    {-90.f, 44.f, 0.f, 1.f, 0},   {90.f, 44.f, 0.f, 1.f, 1},
+    {-44.f, 24.f, 0.f, 0.8f, 2},  {44.f, 24.f, 0.f, 0.8f, 3},                  // inboard engines: fine attitude control
+};
+
 inline constexpr ShipDef SHIP_DEFS[] = {
-    {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f, false},
-    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false},
-    {"Wide", 48.f, 28.f, 36.f, 26.f, 1.25f, 1600.f, 420.f, false},
-    {"Barge", 64.f, 26.f, 52.f, 24.f, 1.6f, 2800.f, 440.f, false},
-    {"Long", 26.f, 42.f, 14.f, 36.f, 1.1f, 1100.f, 390.f, false},
-    {"Topdog", 28.f, 34.f, 16.f, 30.f, 1.05f, 950.f, 410.f, true},
-    {"Canopy", 44.f, 30.f, 30.f, 28.f, 1.35f, 1700.f, 430.f, true},
+    {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f, false, STYLE_FINS},
+    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false, STYLE_DOME | STYLE_STRIPES},
+    {"Wide", 48.f, 28.f, 36.f, 26.f, 1.25f, 1600.f, 420.f, false, STYLE_TANKS},
+    {"Barge", 64.f, 26.f, 52.f, 24.f, 1.6f, 2800.f, 440.f, false, STYLE_TANKS | STYLE_STRIPES | STYLE_DISH},
+    {"Long", 26.f, 42.f, 14.f, 36.f, 1.1f, 1100.f, 390.f, false, STYLE_FINS | STYLE_DISH},
+    {"Topdog", 28.f, 34.f, 16.f, 30.f, 1.05f, 950.f, 410.f, true, STYLE_DOME | STYLE_FINS},
+    {"Canopy", 44.f, 30.f, 30.f, 28.f, 1.35f, 1700.f, 430.f, true, STYLE_DOME | STYLE_TANKS},
+    {"Dart", 18.f, 34.f, 10.f, 30.f, 0.7f, 330.f, 470.f, false, STYLE_FINS | STYLE_DOME},
+    {"Hauler", 56.f, 34.f, 44.f, 28.f, 1.9f, 3600.f, 450.f, false, STYLE_TANKS | STYLE_STRIPES},
+    {"Spire", 20.f, 50.f, 12.f, 44.f, 1.0f, 1300.f, 400.f, false, STYLE_FINS | STYLE_DISH},
+    {"Crab", 52.f, 24.f, 40.f, 22.f, 1.4f, 2000.f, 430.f, true, STYLE_TANKS | STYLE_DOME},
+    {"Gnat", 14.f, 22.f, 8.f, 20.f, 0.5f, 170.f, 400.f, false, STYLE_DOME},
+    {"Orca", 40.f, 44.f, 26.f, 38.f, 2.0f, 3300.f, 460.f, false, STYLE_TANKS | STYLE_DISH | STYLE_STRIPES},
+    {"Moth", 60.f, 22.f, 48.f, 20.f, 0.9f, 1500.f, 380.f, false, STYLE_FINS | STYLE_DOME | STYLE_STRIPES},
+    {"Frigate", 80.f, 38.f, 62.f, 34.f, 3.0f, 9500.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, FRIGATE_T, 4},
+    {"Atlas", 70.f, 46.f, 56.f, 40.f, 3.6f, 12500.f, 410.f, false, STYLE_DECK | STYLE_TANKS | STYLE_DOME, ATLAS_T, 4},
+    {"Dragonfly", 66.f, 30.f, 50.f, 24.f, 2.4f, 6000.f, 430.f, false, STYLE_DECK | STYLE_FINS | STYLE_DOME, DRAGONFLY_T, 4},
+    {"Colossus", 100.f, 52.f, 90.f, 44.f, 5.0f, 22000.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, COLOSSUS_T, 4},
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;
@@ -90,3 +247,33 @@ inline constexpr int DEFAULT_ZOOM = 1;
 // First start without a saved zoom: small displays (the R36S panel) start Near, everything else Medium.
 // Near is 1:1 on a 480 px high screen, which is also the cheapest path for weak GPUs.
 inline int auto_zoom_for_height(int display_h) { return display_h <= 480 ? 0 : DEFAULT_ZOOM; }
+
+// Cargo crates: half extents (px) and mass (the same units as the ships')
+struct CargoDef {
+  const char* name;
+  float half_w, half_h, mass;
+};
+inline constexpr CargoDef CARGO_DEFS[] = {
+    {"Parcel", 12.f, 12.f, 0.15f},
+    {"Crate", 18.f, 14.f, 0.35f},
+    {"Barrel", 11.f, 18.f, 0.30f},
+    {"Container", 26.f, 18.f, 0.70f},
+    {"Heavy", 30.f, 22.f, 1.20f},
+};
+inline constexpr int CARGO_DEF_COUNT = static_cast<int>(sizeof(CARGO_DEFS) / sizeof(CARGO_DEFS[0]));
+
+// Rope and hook (px, px/s)
+namespace rope {
+inline constexpr float MIN_LEN = 16.f;   // hook tucked under the belly
+inline constexpr float OUT_LEN = 300.f;  // cable fully deployed
+inline constexpr float REEL_SPEED = 130.f;
+inline constexpr float REEL_SPEED_LOADED = 70.f;
+inline constexpr float HOOK_MASS_FRACTION = 0.12f;  // of the ship's mass
+inline constexpr float GRAB_REACH = 22.f;           // hook centre to the crate's edge
+inline constexpr int CARGO_COUNT = 12;
+// A crate on the hook is calmed so it hangs instead of flailing: air drag, friction in the pivot, and it no longer
+// collides with the ship (a swinging crate would otherwise snag legs and engines and yank the ship around)
+inline constexpr float HELD_LINEAR_DAMPING = 0.3f;
+inline constexpr float HELD_ANGULAR_DAMPING = 2.5f;
+inline constexpr float GRIP_FRICTION = 0.8f;  // pivot friction torque per unit of crate mass
+}  // namespace rope
