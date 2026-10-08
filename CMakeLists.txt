@@ -47,6 +47,8 @@ endif()
 add_executable(dualthrust
   src/main.cpp
   src/audio.cpp
+  src/backend_gles2.cpp
+  src/backend_sdl.cpp
   src/cave.cpp
   src/config.cpp
   src/render.cpp

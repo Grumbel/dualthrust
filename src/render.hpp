@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "backend.hpp"
 #include "game.hpp"
 #include "ui.hpp"
 
@@ -13,7 +14,10 @@
 // so a frame is a few hundred batched draw calls instead of tens of thousands of lines.
 class Gfx {
  public:
-  bool init(SDL_Renderer* ren);
+  bool init(std::unique_ptr<Backend> backend);
+  const char* renderer_name() const { return be_->name(); }
+  int draw_calls() const { return be_->draw_calls(); }  // of the last presented frame, -1 if unknown
+  void present() { be_->end_frame(); }                 // after draw() and any save_screenshot()
   void shutdown();
   void resize();  // call after window size / fullscreen changes
   int width() const { return w_; }
@@ -28,15 +32,14 @@ class Gfx {
   void build_overlay();
   void build_minimap(const Cave& cave);
 
-  void color(Rgba c) const;
   void line(int x0, int y0, int x1, int y1, Rgba c) const;
-  void polygon(const SDL_Point* pts, int n, Rgba c) const;
-  void gradient_triangle(SDL_Point a, SDL_Point b, SDL_Point apex, Rgba base, Rgba tip) const;
   void fill(int x, int y, int w, int h, Rgba c) const;
   void outline(int x, int y, int w, int h, Rgba c) const;
-  void text(int x, int y, const char* s, Rgba c) const;
-  int text_width(const char* s) const;
-  void text_centered(int cx, int y, const char* s, Rgba c) const { text(cx - text_width(s) / 2, y, s, c); }
+  void text(int x, int y, const char* s, Rgba c, int scale = 1) const;
+  int text_width(const char* s, int scale = 1) const;
+  void text_centered(int cx, int y, const char* s, Rgba c, int scale = 1) const {
+    text(cx - text_width(s, scale) / 2, y, s, c, scale);
+  }
   int sx(const Camera& cam, float wx) const;  // world -> screen px (zoom applied)
   int sy(float wy) const;
   int Z(float world_len) const;               // a world length in screen px, at least 1
@@ -51,20 +54,20 @@ class Gfx {
   void draw_minimap(const Game& g, double t);
   void draw_menu(const Game& g, const UiState& ui) const;
 
-  SDL_Renderer* ren_ = nullptr;
+  std::unique_ptr<Backend> be_;
   int w_ = 1280, h_ = 720;           // screen (output) size in px
   float scale_ = 1.f;                // screen px per world px (animates while zooming)
   float bake_scale_ = 1.f;           // scale the cached chunk textures were rasterised at (the zoom level's)
   View view_{0, 0};
   const char* glyph_bits_[95] = {};  // 3x5 bit strings per printable ASCII char
-  SDL_Texture* overlay_ = nullptr;
-  SDL_Texture* minimap_ = nullptr;
+  Texture* overlay_ = nullptr;
+  Texture* minimap_ = nullptr;
   unsigned minimap_generation_ = 0;
 
   // Static world art (stars, rock, contour) is rasterised on the CPU into CHUNK x CHUNK textures and
   // cached, so the world costs a handful of draw calls per frame instead of thousands.
   struct Chunk {
-    SDL_Texture* tex = nullptr;
+    Texture* tex = nullptr;
     unsigned last_used = 0;
   };
   std::vector<Chunk> chunks_;

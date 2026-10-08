@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <functional>
 #include <string>
 
@@ -44,6 +45,7 @@ struct Options {
   bool swap = false, swap_set = false;
   bool mute = false;
   int zoom = -1;  // ZOOM_LEVELS index, -1 = saved / automatic
+  std::string renderer = "auto";  // auto, gles2 or sdl
   int ship = -1;
   unsigned seed = 0xC0FFEE;
   int win_w = WINDOW_W_DEFAULT, win_h = WINDOW_H_DEFAULT;
@@ -70,6 +72,7 @@ void print_help(const char* argv0) {
       "  -x, --swap-engines   Swap left/right engine mapping\n"
       "  -z, --zoom LEVEL     View zoom: near, medium or far (0..2); Tab / D-pad change it in game\n"
       "  -m, --mute           Start with sound off\n"
+      "  --renderer MODE      auto (default: GLES2, else SDL), gles2 or sdl\n"
       "  --config-dir PATH    Override XDG config directory\n"
       "\n"
       "Debug:\n"
@@ -109,6 +112,13 @@ int parse_args(int argc, char** argv, Options& o) {
       }
       if (o.zoom < 0) {
         std::fprintf(stderr, "dualthrust: bad zoom '%s' (near, medium, far)\n", v.c_str());
+        return 2;
+      }
+    }
+    else if (a == "--renderer") {
+      o.renderer = need("--renderer");
+      if (o.renderer != "auto" && o.renderer != "gles2" && o.renderer != "sdl") {
+        std::fprintf(stderr, "dualthrust: bad renderer '%s' (auto, gles2, sdl)\n", o.renderer.c_str());
         return 2;
       }
     }
@@ -209,31 +219,42 @@ int main(int argc, char** argv) {
     std::fflush(stdout);
   }
 
-  SDL_Window* window = SDL_CreateWindow("dualthrust", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, opt.win_w,
-                                        opt.win_h, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
-  if (!window) {
-    std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
-    SDL_Quit();
-    return 1;
+  // Window + renderer: our GLES2 batcher when a context can be made, else SDL's renderer (software,
+  // headless drivers). The GL window needs its flag and attributes before it is created.
+  SDL_Window* window = nullptr;
+  std::unique_ptr<Backend> backend;
+  const char* flavour = "";
+  auto make_window = [&](bool gl) {
+    if (window) SDL_DestroyWindow(window);
+    if (gl) prepare_gles2_attributes();
+    window = SDL_CreateWindow("dualthrust", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, opt.win_w, opt.win_h,
+                              SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | (gl ? SDL_WINDOW_OPENGL : 0));
+    if (!window) std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+    return window != nullptr;
+  };
+  if (opt.renderer != "sdl" && make_window(true)) {
+    backend = create_gles2_backend(window);
+    if (!backend) std::fprintf(stderr, "GLES2 unavailable, using the SDL renderer\n");
   }
-  SDL_Renderer* ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-  if (!ren) ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+  if (!backend) {
+    if (opt.renderer == "gles2") {
+      std::fprintf(stderr, "dualthrust: --renderer gles2 requested but unavailable\n");
+      if (window) SDL_DestroyWindow(window);
+      SDL_Quit();
+      return 1;
+    }
+    if (make_window(false)) backend = create_sdl_backend(window);
+  }
   Gfx gfx;
-  if (!ren || !gfx.init(ren)) {
+  if (!backend || !gfx.init(std::move(backend))) {
     std::fprintf(stderr, "renderer setup failed: %s\n", SDL_GetError());
     gfx.shutdown();
-    if (ren) SDL_DestroyRenderer(ren);
-    SDL_DestroyWindow(window);
+    if (window) SDL_DestroyWindow(window);
     SDL_Quit();
     return 1;
   }
-
-  {
-    SDL_RendererInfo info;
-    if (SDL_GetRendererInfo(ren, &info) == 0)
-      std::printf("  renderer:   %s (%s)\n", info.name, (info.flags & SDL_RENDERER_ACCELERATED) ? "accelerated" : "software");
-    std::printf("  video:      %s\n", SDL_GetCurrentVideoDriver());
-  }
+  (void)flavour;
+  std::printf("  renderer:   %s\n  video:      %s\n", gfx.renderer_name(), SDL_GetCurrentVideoDriver());
 
   // --- World ---
   Game game;
@@ -471,17 +492,20 @@ int main(int argc, char** argv) {
     const double t1 = stamp();
     gfx.draw(game, ui);
     const double t2 = stamp();
-    SDL_RenderPresent(ren);
+    const bool last_frame = opt.frames > 0 && frame + 1 >= opt.frames;
+    if (last_frame && opt.screenshot && !gfx.save_screenshot(opt.screenshot))  // before the buffer swap
+      std::fprintf(stderr, "screenshot failed: %s\n", SDL_GetError());
+    gfx.present();
     const double t3 = stamp();
     t_sim += t1 - t0;
     t_draw += t2 - t1;
     t_present += t3 - t2;
 
     if (opt.frames > 0 && ++frame >= opt.frames) {
-      std::printf("timing: %d frames, per frame: sim %.2f ms, draw %.2f ms, present %.2f ms\n", frame,
+      std::printf("timing: %d frames, per frame: sim %.2f ms, draw %.2f ms, present %.2f ms", frame,
                   1000 * t_sim / frame, 1000 * t_draw / frame, 1000 * t_present / frame);
-      if (opt.screenshot && !gfx.save_screenshot(opt.screenshot))
-        std::fprintf(stderr, "screenshot failed: %s\n", SDL_GetError());
+      if (gfx.draw_calls() >= 0) std::printf(", %d GL draws in the last frame", gfx.draw_calls());
+      std::printf("\n");
       running = false;
     }
   };
@@ -503,7 +527,6 @@ int main(int argc, char** argv) {
   if (pad) SDL_GameControllerClose(pad);
   audio.shutdown();
   gfx.shutdown();
-  SDL_DestroyRenderer(ren);
   SDL_DestroyWindow(window);
   SDL_Quit();
   return 0;

@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "arkos-sysroot": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787339014,
+        "narHash": "sha256-vdc15JmtewgOwZPk8PfWZzM+t19P6YlRfe2Jp02+ycg=",
+        "owner": "grumnix",
+        "repo": "arkos-sysroot",
+        "rev": "3d2a98fe2fdff123fe4c6c7c7e9f6c0150c99a1c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "grumnix",
+        "repo": "arkos-sysroot",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1791260994,
@@ -18,7 +34,22 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "arkos-sysroot": "arkos-sysroot",
+        "nixpkgs": "nixpkgs",
+        "sdl2-src": "sdl2-src"
+      }
+    },
+    "sdl2-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1714580206,
+        "narHash": "sha256-49TNuKx5ec+rEK49rKjqrKStQzuhk8zdu8mRe/amUBk=",
+        "type": "tarball",
+        "url": "https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-2.30.3.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-2.30.3.tar.gz"
       }
     }
   },

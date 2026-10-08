@@ -50,14 +50,6 @@ constexpr int CHUNKS_X = static_cast<int>(Cave::WORLD_W) / CHUNK, CHUNKS_Y = sta
 constexpr int MM_DOWNSCALE = 4;
 constexpr int MM_W = Cave::GW / MM_DOWNSCALE, MM_H = Cave::GH / MM_DOWNSCALE;
 
-SDL_Texture* texture_from_pixels(SDL_Renderer* ren, const std::vector<uint32_t>& px, int w, int h) {
-  SDL_Texture* t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, w, h);
-  if (!t) return nullptr;
-  SDL_UpdateTexture(t, nullptr, px.data(), w * 4);
-  SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
-  return t;
-}
-
 uint32_t pack(Rgba c) {  // RGBA32 byte order is R,G,B,A in memory
   uint32_t v;
   const uint8_t b[4] = {c.r, c.g, c.b, c.a};
@@ -123,29 +115,26 @@ struct Canvas {
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
-bool Gfx::init(SDL_Renderer* ren) {
-  ren_ = ren;
-  SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_BLEND);
-  // Textures are sampled 1:1 (nearest = cheapest on weak GPUs); only the zoom target is created filtered
-  // Chunk textures are drawn 1:1 at rest, and slightly stretched while the zoom glides: filter them
-  SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+bool Gfx::init(std::unique_ptr<Backend> backend) {
+  be_ = std::move(backend);
   for (const Glyph& g : GLYPHS) glyph_bits_[g.ch - FIRST_CHAR] = g.bits;
   resize();
-  return true;
+  return be_ != nullptr;
 }
 
 void Gfx::shutdown() {
-  for (SDL_Texture** t : {&overlay_, &minimap_}) {
-    if (*t) SDL_DestroyTexture(*t);
+  if (!be_) return;
+  for (Texture** t : {&overlay_, &minimap_}) {
+    be_->destroy_texture(*t);
     *t = nullptr;
   }
-  for (Chunk& c : chunks_)
-    if (c.tex) SDL_DestroyTexture(c.tex);
+  drop_chunks();
   chunks_.clear();
+  be_.reset();
 }
 
 void Gfx::resize() {
-  SDL_GetRendererOutputSize(ren_, &w_, &h_);
+  be_->output_size(w_, h_);
   w_ = std::max(w_, 320);
   h_ = std::max(h_, 240);
   build_overlay();
@@ -153,7 +142,7 @@ void Gfx::resize() {
 
 // CRT look: scanlines + vignette in one screen-sized black overlay
 void Gfx::build_overlay() {
-  if (overlay_) SDL_DestroyTexture(overlay_);
+  be_->destroy_texture(overlay_);
   std::vector<uint32_t> px(static_cast<size_t>(w_) * h_);
   for (int y = 0; y < h_; ++y) {
     float ny = (y + 0.5f) / h_ * 2.f - 1.f;
@@ -166,11 +155,11 @@ void Gfx::build_overlay() {
       px[y * w_ + x] = pack({0, 0, 0, static_cast<uint8_t>(clampf(a, 0.f, 1.f) * 255.f)});
     }
   }
-  overlay_ = texture_from_pixels(ren_, px, w_, h_);
+  overlay_ = be_->create_texture(w_, h_, reinterpret_cast<const uint8_t*>(px.data()), false);
 }
 
 void Gfx::build_minimap(const Cave& cave) {
-  if (minimap_) SDL_DestroyTexture(minimap_);
+  be_->destroy_texture(minimap_);
   std::vector<uint32_t> px(static_cast<size_t>(MM_W) * MM_H);
   for (int my = 0; my < MM_H; ++my)
     for (int mx = 0; mx < MM_W; ++mx) {
@@ -180,86 +169,42 @@ void Gfx::build_minimap(const Cave& cave) {
           n += cave.solid[(my * MM_DOWNSCALE + dy) * Cave::GW + mx * MM_DOWNSCALE + dx];
       px[my * MM_W + mx] = pack(with_alpha(pal::MID, static_cast<uint8_t>(n * 150 / (MM_DOWNSCALE * MM_DOWNSCALE))));
     }
-  minimap_ = texture_from_pixels(ren_, px, MM_W, MM_H);
+  minimap_ = be_->create_texture(MM_W, MM_H, reinterpret_cast<const uint8_t*>(px.data()), false);
   minimap_generation_ = cave.generation;
 }
 
 // ---------------------------------------------------------------------------
 // Primitives
 // ---------------------------------------------------------------------------
-void Gfx::color(Rgba c) const { SDL_SetRenderDrawColor(ren_, c.r, c.g, c.b, c.a); }
-
 // Bright core with a faint halo on the minor axis — the phosphor glow
 void Gfx::line(int x0, int y0, int x1, int y1, Rgba c) const {
-  color(with_alpha(c, static_cast<uint8_t>(c.a * 70 / 255)));
+  const Rgba halo = with_alpha(c, static_cast<uint8_t>(c.a * 70 / 255));
   if (std::abs(x1 - x0) >= std::abs(y1 - y0)) {
-    SDL_RenderDrawLine(ren_, x0, y0 - 1, x1, y1 - 1);
-    SDL_RenderDrawLine(ren_, x0, y0 + 1, x1, y1 + 1);
+    be_->line(x0, y0 - 1, x1, y1 - 1, halo);
+    be_->line(x0, y0 + 1, x1, y1 + 1, halo);
   } else {
-    SDL_RenderDrawLine(ren_, x0 - 1, y0, x1 - 1, y1);
-    SDL_RenderDrawLine(ren_, x0 + 1, y0, x1 + 1, y1);
+    be_->line(x0 - 1, y0, x1 - 1, y1, halo);
+    be_->line(x0 + 1, y0, x1 + 1, y1, halo);
   }
-  color(c);
-  SDL_RenderDrawLine(ren_, x0, y0, x1, y1);
-}
-
-// Scanline fill of an (x-monotone per row) polygon, submitted as a single FillRects call.
-void Gfx::polygon(const SDL_Point* pts, int n, Rgba c) const {
-  static thread_local std::vector<SDL_Rect> rects;
-  rects.clear();
-  int ymin = pts[0].y, ymax = pts[0].y;
-  for (int i = 1; i < n; ++i) { ymin = std::min(ymin, pts[i].y); ymax = std::max(ymax, pts[i].y); }
-  for (int y = ymin; y <= ymax; ++y) {
-    const float fy = y + 0.5f;
-    float lo = 1e9f, hi = -1e9f;
-    for (int i = 0; i < n; ++i) {
-      const SDL_Point p = pts[i], q = pts[(i + 1) % n];
-      if ((fy < std::min(p.y, q.y)) || (fy >= std::max(p.y, q.y)) || p.y == q.y) continue;
-      const float x = p.x + (q.x - p.x) * (fy - p.y) / static_cast<float>(q.y - p.y);
-      lo = std::min(lo, x);
-      hi = std::max(hi, x);
-    }
-    if (lo <= hi) {
-      const int x0 = static_cast<int>(std::floor(lo + 0.5f)), x1 = static_cast<int>(std::floor(hi + 0.5f));
-      rects.push_back({x0, y, std::max(1, x1 - x0), 1});
-    }
-  }
-  if (rects.empty()) return;
-  color(c);
-  SDL_RenderFillRects(ren_, rects.data(), static_cast<int>(rects.size()));
-}
-
-// Triangle with a colour gradient base→apex, as a few flat slices (SDL_RenderGeometry needs SDL 2.0.18;
-// the R36S ships older).
-void Gfx::gradient_triangle(SDL_Point a, SDL_Point b, SDL_Point c, Rgba base, Rgba tip) const {
-  constexpr int SLICES = 5;
-  auto at = [](SDL_Point p, SDL_Point q, float t) {
-    return SDL_Point{static_cast<int>(std::lround(lerpf(p.x, q.x, t))), static_cast<int>(std::lround(lerpf(p.y, q.y, t)))};
-  };
-  for (int i = 0; i < SLICES; ++i) {
-    const float t0 = static_cast<float>(i) / SLICES, t1 = static_cast<float>(i + 1) / SLICES;
-    const SDL_Point quad[4] = {at(a, c, t0), at(b, c, t0), at(b, c, t1), at(a, c, t1)};
-    polygon(quad, 4, mix(base, tip, (t0 + t1) * 0.5f));
-  }
+  be_->line(x0, y0, x1, y1, c);
 }
 
 void Gfx::fill(int x, int y, int w, int h, Rgba c) const {
-  color(c);
-  SDL_Rect r{x, y, w, h};
-  SDL_RenderFillRect(ren_, &r);
+  const SDL_Rect r{x, y, w, h};
+  be_->fill_rects(&r, 1, c);
 }
 
 void Gfx::outline(int x, int y, int w, int h, Rgba c) const {
-  color(c);
-  SDL_Rect r{x, y, w, h};
-  SDL_RenderDrawRect(ren_, &r);
+  const SDL_Rect r[4] = {{x, y, w, 1}, {x, y + h - 1, w, 1}, {x, y + 1, 1, h - 2}, {x + w - 1, y + 1, 1, h - 2}};
+  be_->fill_rects(r, 4, c);
 }
 
-// One FillRects call per string (horizontal pixel runs merged): far fewer GL draws than a copy per glyph.
-void Gfx::text(int x, int y, const char* s, Rgba c) const {
+// Text as horizontal pixel runs; `scale` multiplies the font size (the title logo uses big letters)
+void Gfx::text(int x, int y, const char* s, Rgba c, int scale) const {
   static thread_local std::vector<SDL_Rect> rects;
   rects.clear();
-  for (; *s; ++s, x += FONT_CELL_W) {
+  const int fs = FONT_SCALE * scale;
+  for (; *s; ++s, x += (3 * fs + fs)) {
     int ch = *s;
     if (ch >= 'a' && ch <= 'z') ch -= 32;
     if (ch < FIRST_CHAR || ch >= FIRST_CHAR + CHAR_COUNT || !glyph_bits_[ch - FIRST_CHAR]) continue;
@@ -269,16 +214,14 @@ void Gfx::text(int x, int y, const char* s, Rgba c) const {
         if (bits[row * 3 + col] != '1') { ++col; continue; }
         int run = 1;
         while (col + run < 3 && bits[row * 3 + col + run] == '1') ++run;
-        rects.push_back({x + col * FONT_SCALE, y + row * FONT_SCALE, run * FONT_SCALE, FONT_SCALE});
+        rects.push_back({x + col * fs, y + row * fs, run * fs, fs});
         col += run;
       }
   }
-  if (rects.empty()) return;
-  color(c);
-  SDL_RenderFillRects(ren_, rects.data(), static_cast<int>(rects.size()));
+  be_->fill_rects(rects.data(), static_cast<int>(rects.size()), c);
 }
 
-int Gfx::text_width(const char* s) const { return static_cast<int>(std::strlen(s)) * FONT_CELL_W; }
+int Gfx::text_width(const char* s, int scale) const { return static_cast<int>(std::strlen(s)) * FONT_CELL_W * scale; }
 
 int Gfx::sx(const Camera& cam, float wx) const {
   return static_cast<int>(std::lround(static_cast<double>(cam.continuous_x(wx)) * scale_)) - view_.ox;
@@ -348,8 +291,7 @@ void Gfx::render_chunk(const Cave& cave, int cx, int cy, std::vector<uint8_t>& p
 }
 
 void Gfx::drop_chunks() {
-  for (Chunk& c : chunks_)
-    if (c.tex) SDL_DestroyTexture(c.tex);
+  for (Chunk& c : chunks_) be_->destroy_texture(c.tex);
   chunks_.assign(CHUNKS_X * CHUNKS_Y, Chunk{});
   chunk_count_ = 0;
 }
@@ -381,24 +323,22 @@ void Gfx::draw_world(const Game& g) {
       if (!ch.tex) {
         int tw = 0, th = 0;
         render_chunk(cave, cx, cy, chunk_px_, tw, th);
-        SDL_Texture* tex = nullptr;
         if (chunk_count_ >= max_cached) {  // evict the least recently used chunk not on screen
           Chunk* victim = nullptr;
           for (Chunk& c : chunks_)
             if (c.tex && c.last_used != frame_ && (!victim || c.last_used < victim->last_used)) victim = &c;
-          if (victim) { SDL_DestroyTexture(victim->tex); victim->tex = nullptr; --chunk_count_; }
+          if (victim) { be_->destroy_texture(victim->tex); victim->tex = nullptr; --chunk_count_; }
         }
-        tex = SDL_CreateTexture(ren_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, tw, th);
+        // Filtered: drawn 1:1 at rest, stretched a little while the zoom glides
+        Texture* tex = be_->create_texture(tw, th, chunk_px_.data(), true);
         if (!tex) continue;
-        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        SDL_UpdateTexture(tex, nullptr, chunk_px_.data(), tw * 4);
         ch.tex = tex;
         ++chunk_count_;
       }
       ch.last_used = frame_;
       const int dx = edge_x(ucx), dy = edge_y(cy);
       SDL_Rect dst{dx, dy, edge_x(ucx + 1) - dx, edge_y(cy + 1) - dy};
-      SDL_RenderCopy(ren_, ch.tex, nullptr, &dst);
+      be_->copy(ch.tex, dst, {255, 255, 255, 255});
     }
 }
 
@@ -416,23 +356,22 @@ void Gfx::draw_pads(const Game& g, double t) const {
     // Deck slab with cross-hatch
     fill(x0, y - z2, w, Z(5), with_alpha(pal::PAD, 200));
     outline(x0, y - z2, w, Z(5), pal::BRIGHT);
-    color(with_alpha(pal::MID, 180));
-    for (int i = 0; i < w - z4; i += z6) SDL_RenderDrawLine(ren_, x0 + i, y - z2, x0 + i + z4, y + z2);
+    for (int i = 0; i < w - z4; i += z6) be_->line(x0 + i, y - z2, x0 + i + z4, y + z2, with_alpha(pal::MID, 180));
 
     // Support struts into the rock
-    color(with_alpha(pal::PAD, 160));
-    SDL_RenderDrawLine(ren_, x0 + z4, y + Z(3), x0 + z4, y + Z(18));
-    SDL_RenderDrawLine(ren_, x1 - z4, y + Z(3), x1 - z4, y + Z(18));
-    SDL_RenderDrawLine(ren_, mid, y + Z(3), mid, y + Z(22));
-    SDL_RenderDrawLine(ren_, x0 + z4, y + Z(18), x1 - z4, y + Z(18));
+    const Rgba strut = with_alpha(pal::PAD, 160);
+    be_->line(x0 + z4, y + Z(3), x0 + z4, y + Z(18), strut);
+    be_->line(x1 - z4, y + Z(3), x1 - z4, y + Z(18), strut);
+    be_->line(mid, y + Z(3), mid, y + Z(22), strut);
+    be_->line(x0 + z4, y + Z(18), x1 - z4, y + Z(18), strut);
 
     // Approach chevrons, chasing upward
     const int chase = static_cast<int>(t * 3.0) % 3;
     for (int c = 0; c < 3; ++c) {
       const int cy = y - Z(14) - c * Z(10), inset = Z(8) + c * z6;
-      color(with_alpha(pal::WARN, c == chase ? 255 : 110));
-      SDL_RenderDrawLine(ren_, x0 + inset, cy, mid, cy + z6);
-      SDL_RenderDrawLine(ren_, x1 - inset, cy, mid, cy + z6);
+      const Rgba chev = with_alpha(pal::WARN, c == chase ? 255 : 110);
+      be_->line(x0 + inset, cy, mid, cy + z6, chev);
+      be_->line(x1 - inset, cy, mid, cy + z6, chev);
     }
 
     // Alternating end beacons with a soft halo
@@ -444,9 +383,8 @@ void Gfx::draw_pads(const Game& g, double t) const {
     }
 
     // Centre T-mark
-    color(pal::BRIGHT);
-    SDL_RenderDrawLine(ren_, mid - Z(8), y, mid + Z(8), y);
-    SDL_RenderDrawLine(ren_, mid, y - z6, mid, y + z2);
+    be_->line(mid - Z(8), y, mid + Z(8), y, pal::BRIGHT);
+    be_->line(mid, y - z6, mid, y + z2, pal::BRIGHT);
   }
 }
 
@@ -465,13 +403,10 @@ void Gfx::draw_particles(const Game& g) const {
     const int s = Z(p.size * (0.4f + 0.6f * (1.f - age)));
     rects[b].push_back({x - s / 2, y - s / 2, s, s});
   });
-  SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_ADD);
+  be_->set_blend(Blend::Add);
   for (int b = 0; b < BUCKETS; ++b)
-    if (!rects[b].empty()) {
-      color(colors[b]);
-      SDL_RenderFillRects(ren_, rects[b].data(), static_cast<int>(rects[b].size()));
-    }
-  SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_BLEND);
+    if (!rects[b].empty()) be_->fill_rects(rects[b].data(), static_cast<int>(rects[b].size()), colors[b]);
+  be_->set_blend(Blend::Alpha);
 }
 
 void Gfx::draw_ship(const Game& g, double t) const {
@@ -500,7 +435,7 @@ void Gfx::draw_ship(const Game& g, double t) const {
 
   // Flames first so the hull draws over them
   if (fl.state == FlightState::Flying) {
-    SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_ADD);
+    be_->set_blend(Blend::Add);
     for (int i = 0; i < 2; ++i) {
       float lvl = th.level[i];
       if (lvl < 0.05f) continue;
@@ -509,12 +444,12 @@ void Gfx::draw_ship(const Game& g, double t) const {
       const float wd = top ? 8.f : 7.f;
       float y0 = d.nozzle_y();
       auto tri = [&](float half_w, float length, Rgba base, Rgba tip) {
-        gradient_triangle(W({lx - half_w, y0}), W({lx + half_w, y0}), W({lx, y0 + length}), base, tip);
+        be_->gradient_triangle(W({lx - half_w, y0}), W({lx + half_w, y0}), W({lx, y0 + length}), base, tip);
       };
       tri(wd, len, with_alpha(pal::FLAME_EDGE, 220), with_alpha(pal::FLAME_EDGE, 0));
       tri(wd * 0.5f, len * 0.6f, with_alpha(pal::FLAME_CORE, 255), with_alpha(pal::FLAME_CORE, 0));
     }
-    SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_BLEND);
+    be_->set_blend(Blend::Alpha);
   }
 
   // Dark hull fill so rock and stars don't show through (convex fan around the nose)
@@ -524,7 +459,7 @@ void Gfx::draw_ship(const Game& g, double t) const {
     constexpr int N = sizeof(outline_pts) / sizeof(outline_pts[0]);
     SDL_Point p[N];
     for (int i = 0; i < N; ++i) p[i] = W(outline_pts[i]);
-    polygon(p, N, pal::HULL_FILL);
+    be_->polygon(p, N, pal::HULL_FILL);
   }
 
   // Cabin / nose
@@ -617,8 +552,7 @@ void Gfx::draw_minimap(const Game& g, double t) {
   if (!minimap_ || minimap_generation_ != g.cave.generation) build_minimap(g.cave);
   const int x = (w_ - MM_W) / 2, y = h_ - MM_H - 14;
   fill(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::BG, 170));
-  SDL_Rect dst{x, y, MM_W, MM_H};
-  SDL_RenderCopy(ren_, minimap_, nullptr, &dst);
+  be_->copy(minimap_, SDL_Rect{x, y, MM_W, MM_H}, {255, 255, 255, 255});
   outline(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::MID, 140));
 
   const float k = MM_W / Cave::WORLD_W;
@@ -683,8 +617,7 @@ void Gfx::draw(const Game& g, const UiState& ui) {
   view_.oy = static_cast<int>(std::lround(g.cam.y * static_cast<double>(scale_) + g.cam.shake_off.y * scale_));
   const double t = ui.time;
 
-  color(pal::BG);
-  SDL_RenderClear(ren_);
+  be_->begin_frame(pal::BG);
   ++frame_;
   draw_world(g);
   draw_pads(g, t);
@@ -705,15 +638,16 @@ void Gfx::draw(const Game& g, const UiState& ui) {
   draw_minimap(g, t);
   if (ui.menu_open) draw_menu(g, ui);
 
-  SDL_Rect full{0, 0, w_, h_};
-  SDL_RenderCopy(ren_, overlay_, nullptr, &full);
+  be_->copy(overlay_, SDL_Rect{0, 0, w_, h_}, {255, 255, 255, 255});
 }
 
 bool Gfx::save_screenshot(const char* path) const {
-  SDL_Surface* s = SDL_CreateRGBSurfaceWithFormat(0, w_, h_, 32, SDL_PIXELFORMAT_ARGB8888);
+  std::vector<uint8_t> rgba;
+  int w = 0, h = 0;
+  if (!be_->read_pixels(rgba, w, h)) return false;
+  SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(rgba.data(), w, h, 32, w * 4, SDL_PIXELFORMAT_RGBA32);
   if (!s) return false;
-  bool ok = SDL_RenderReadPixels(ren_, nullptr, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) == 0 &&
-            SDL_SaveBMP(s, path) == 0;
+  const bool ok = SDL_SaveBMP(s, path) == 0;
   SDL_FreeSurface(s);
   return ok;
 }
