@@ -47,8 +47,9 @@ constexpr int CHUNK_CELLS = 30;
 constexpr int CHUNK = CHUNK_CELLS * TILE;
 constexpr int CHUNKS_X = static_cast<int>(Cave::WORLD_W) / CHUNK, CHUNKS_Y = static_cast<int>(Cave::WORLD_H) / CHUNK;
 
-constexpr int MM_DOWNSCALE = 4;
-constexpr int MM_W = Cave::GW / MM_DOWNSCALE, MM_H = Cave::GH / MM_DOWNSCALE;
+// Minimap: one texel per cave cell (16 world px); the panel shows the stretch of the map around the ship
+constexpr int MM_W = 400, MM_H = 100;
+constexpr float MM_K = 1.f / Cave::CELL;  // screen px per world px
 
 uint32_t pack(Rgba c) {  // RGBA32 byte order is R,G,B,A in memory
   uint32_t v;
@@ -160,16 +161,9 @@ void Gfx::build_overlay() {
 
 void Gfx::build_minimap(const Cave& cave) {
   be_->destroy_texture(minimap_);
-  std::vector<uint32_t> px(static_cast<size_t>(MM_W) * MM_H);
-  for (int my = 0; my < MM_H; ++my)
-    for (int mx = 0; mx < MM_W; ++mx) {
-      int n = 0;
-      for (int dy = 0; dy < MM_DOWNSCALE; ++dy)
-        for (int dx = 0; dx < MM_DOWNSCALE; ++dx)
-          n += cave.solid[(my * MM_DOWNSCALE + dy) * Cave::GW + mx * MM_DOWNSCALE + dx];
-      px[my * MM_W + mx] = pack(with_alpha(pal::MID, static_cast<uint8_t>(n * 150 / (MM_DOWNSCALE * MM_DOWNSCALE))));
-    }
-  minimap_ = be_->create_texture(MM_W, MM_H, reinterpret_cast<const uint8_t*>(px.data()), false);
+  std::vector<uint32_t> px(static_cast<size_t>(Cave::GW) * Cave::GH);
+  for (int i = 0; i < Cave::GW * Cave::GH; ++i) px[i] = pack(with_alpha(pal::MID, cave.solid[i] ? 150 : 0));
+  minimap_ = be_->create_texture(Cave::GW, Cave::GH, reinterpret_cast<const uint8_t*>(px.data()), false);
   minimap_generation_ = cave.generation;
 }
 
@@ -223,8 +217,8 @@ void Gfx::text(int x, int y, const char* s, Rgba c, int scale) const {
 
 int Gfx::text_width(const char* s, int scale) const { return static_cast<int>(std::strlen(s)) * FONT_CELL_W * scale; }
 
-int Gfx::sx(const Camera& cam, float wx) const {
-  return static_cast<int>(std::lround(static_cast<double>(cam.continuous_x(wx)) * scale_)) - view_.ox;
+int Gfx::sx(const Camera&, float wx) const {
+  return static_cast<int>(std::lround(static_cast<double>(wx) * scale_)) - view_.ox;
 }
 int Gfx::sy(float wy) const { return static_cast<int>(std::lround(static_cast<double>(wy) * scale_)) - view_.oy; }
 int Gfx::Z(float world_len) const { return std::max(1, static_cast<int>(std::lround(world_len * scale_))); }
@@ -250,12 +244,10 @@ void Gfx::render_chunk(const Cave& cave, int cx, int cy, std::vector<uint8_t>& p
     const int sy = P(st.y) - y0;
     const int sz = std::max(1, static_cast<int>(std::lround(st.size * s)));
     if (sy < -sz || sy > tex_h + sz) continue;
-    for (float shift : {0.f, -Cave::WORLD_W, Cave::WORLD_W}) {  // stars straddling the X seam
-      const int sx = P(st.x + shift) - x0;
-      if (sx < -sz || sx > tex_w + sz) continue;
-      cv.rect(sx - sz / 2, sy - sz / 2, sz, sz, with_alpha(pal::STAR, 200));
-      if (sz >= 4) cv.rect(sx - sz / 2 + 1, sy - sz / 2 + 1, sz - 2, sz - 2, with_alpha(pal::BRIGHT, 180));
-    }
+    const int sx = P(st.x) - x0;
+    if (sx < -sz || sx > tex_w + sz) continue;
+    cv.rect(sx - sz / 2, sy - sz / 2, sz, sz, with_alpha(pal::STAR, 200));
+    if (sz >= 4) cv.rect(sx - sz / 2 + 1, sy - sz / 2 + 1, sz - 2, sz - 2, with_alpha(pal::BRIGHT, 180));
   }
 
   // Rock: translucent fill plus diagonal hatching whose pitch scales with the zoom (a hatch is 4 world px)
@@ -306,11 +298,11 @@ void Gfx::draw_world(const Game& g) {
   }
 
   const float vw_world = w_ / scale_, vh_world = h_ / scale_;
-  const int ucx0 = static_cast<int>(std::floor(g.cam.x / CHUNK));
-  const int ucx1 = static_cast<int>(std::floor((g.cam.x + vw_world) / CHUNK));
+  const int ucx0 = std::max(0, static_cast<int>(std::floor(g.cam.x / CHUNK)));
+  const int ucx1 = std::min(CHUNKS_X - 1, static_cast<int>(std::floor((g.cam.x + vw_world) / CHUNK)));
   const int cy0 = std::max(0, static_cast<int>(std::floor(g.cam.y / CHUNK)));
   const int cy1 = std::min(CHUNKS_Y - 1, static_cast<int>(std::floor((g.cam.y + vh_world) / CHUNK)));
-  const int visible = (ucx1 - ucx0 + 1) * std::max(0, cy1 - cy0 + 1);
+  const int visible = std::max(0, ucx1 - ucx0 + 1) * std::max(0, cy1 - cy0 + 1);
   const int max_cached = std::max(12, visible + 6);
 
   auto edge_x = [&](int u) { return static_cast<int>(std::lround(static_cast<double>(u) * CHUNK * scale_)) - view_.ox; };
@@ -318,7 +310,7 @@ void Gfx::draw_world(const Game& g) {
 
   for (int cy = cy0; cy <= cy1; ++cy)
     for (int ucx = ucx0; ucx <= ucx1; ++ucx) {
-      const int cx = ((ucx % CHUNKS_X) + CHUNKS_X) % CHUNKS_X;
+      const int cx = ucx;
       Chunk& ch = chunks_[cy * CHUNKS_X + cx];
       if (!ch.tex) {
         int tw = 0, th = 0;
@@ -414,7 +406,10 @@ void Gfx::draw_ship(const Game& g, double t) const {
   const ShipDef& d = *g.ecs.get<Hull>(g.ship).def;
   const Flight& fl = g.ecs.get<Flight>(g.ship);
   const Thrusters& th = g.ecs.get<Thrusters>(g.ship);
-  const float hw = d.half_w * 0.85f, hh = d.half_h * 0.9f, ox = d.engine_offset_x, ey = d.eng_y();
+  const Legs& legs = g.ecs.get<Legs>(g.ship);
+  const HullGeom hg = hull_geom(d);
+  const LegGeom lg = leg_geom(d);
+  const float hw = hg.hw, ox = d.engine_offset_x, ey = d.eng_y();
   const bool top = d.engines_top;
 
   auto W = [&](Vec2 l) {
@@ -429,22 +424,20 @@ void Gfx::draw_ship(const Game& g, double t) const {
     line(pa.x, pa.y, pb.x, pb.y, body);
   };
 
-  const float nose_y = -hh, cabin_y = -hh * 0.35f, foot = hh * 0.85f;
-  float belly = top ? hh * 0.35f : std::min(std::abs(ey) - 6.f, hh * 0.45f);
-  if (belly < cabin_y + 8.f) belly = cabin_y + 12.f;
+  const float nose_y = hg.nose_y, cabin_y = hg.cabin_y, belly = hg.belly_y;
 
   // Flames first so the hull draws over them
-  if (fl.state == FlightState::Flying) {
+  if (fl.state != FlightState::Crashed) {
     be_->set_blend(Blend::Add);
-    for (int i = 0; i < 2; ++i) {
-      float lvl = th.level[i];
+    for (int i = 0; i < thruster_count(d); ++i) {
+      const ThrusterPose tp = thruster_pose(d, i);
+      const float lvl = th.level[tp.channel] * tp.power;
       if (lvl < 0.05f) continue;
-      float lx = i == 0 ? -ox : ox;
-      float len = (10.f + 46.f * lvl) * (0.8f + 0.4f * flicker(t, i * 1.7f));
-      const float wd = top ? 8.f : 7.f;
-      float y0 = d.nozzle_y();
+      const float len = (10.f + 46.f * lvl) * (0.8f + 0.4f * flicker(t, i * 1.7f));
+      const float wd = d.thruster_n ? 4.f + 3.f * tp.power : (top ? 8.f : 7.f);
+      const Vec2 perp{-tp.flame.y, tp.flame.x};
       auto tri = [&](float half_w, float length, Rgba base, Rgba tip) {
-        be_->gradient_triangle(W({lx - half_w, y0}), W({lx + half_w, y0}), W({lx, y0 + length}), base, tip);
+        be_->gradient_triangle(W(tp.nozzle - perp * half_w), W(tp.nozzle + perp * half_w), W(tp.nozzle + tp.flame * length), base, tip);
       };
       tri(wd, len, with_alpha(pal::FLAME_EDGE, 220), with_alpha(pal::FLAME_EDGE, 0));
       tri(wd * 0.5f, len * 0.6f, with_alpha(pal::FLAME_CORE, 255), with_alpha(pal::FLAME_CORE, 0));
@@ -454,8 +447,8 @@ void Gfx::draw_ship(const Game& g, double t) const {
 
   // Dark hull fill so rock and stars don't show through (convex fan around the nose)
   {
-    const Vec2 outline_pts[] = {{0.f, nose_y}, {hw * 0.45f, cabin_y}, {hw * 0.55f, belly}, {hw * 0.9f, foot},
-                                {-hw * 0.9f, foot}, {-hw * 0.55f, belly}, {-hw * 0.45f, cabin_y}};
+    const Vec2 outline_pts[] = {{0.f, nose_y}, {hg.cabin_hw(), cabin_y}, {hg.belly_hw(), belly},
+                                {-hg.belly_hw(), belly}, {-hg.cabin_hw(), cabin_y}};
     constexpr int N = sizeof(outline_pts) / sizeof(outline_pts[0]);
     SDL_Point p[N];
     for (int i = 0; i < N; ++i) p[i] = W(outline_pts[i]);
@@ -468,23 +461,129 @@ void Gfx::draw_ship(const Game& g, double t) const {
   seg({-hw * 0.25f, cabin_y}, {hw * 0.25f, cabin_y});
   seg({-hw * 0.12f, cabin_y + 4.f}, {hw * 0.12f, cabin_y + 4.f});
   // Hull
-  seg({-hw * 0.45f, cabin_y}, {-hw * 0.55f, belly});
-  seg({hw * 0.45f, cabin_y}, {hw * 0.55f, belly});
-  seg({-hw * 0.55f, belly}, {hw * 0.55f, belly});
-  // Landing feet
-  seg({-hw * 0.55f, belly}, {-hw * 0.9f, foot});
-  seg({hw * 0.55f, belly}, {hw * 0.9f, foot});
-  seg({-hw * 0.9f, foot}, {-hw * 0.7f, foot});
-  seg({hw * 0.7f, foot}, {hw * 0.9f, foot});
-  // Engine bells: the open end points ground-ward so top mounts still fire "down"
-  for (float side : {-1.f, 1.f}) {
-    float ex = side * ox;
-    float back = top ? ey + 2.f : ey - 2.f, rim = top ? ey + 16.f : ey + 12.f;
-    float bw = top ? 8.f : 7.f, rw = top ? 11.f : 10.f;
-    seg({ex - bw, back}, {ex + bw, back});
-    seg({ex - bw, back}, {ex - rw, rim});
-    seg({ex + bw, back}, {ex + rw, rim});
-    seg({ex - rw, rim}, {ex + rw, rim});
+  seg({-hg.cabin_hw(), cabin_y}, {-hg.belly_hw(), belly});
+  seg({hg.cabin_hw(), cabin_y}, {hg.belly_hw(), belly});
+  seg({-hg.belly_hw(), belly}, {hg.belly_hw(), belly});
+  // Hull panel lines with a gap in the middle, like riveted plates
+  auto hull_half = [&](float y) { return lerpf(hg.cabin_hw(), hg.belly_hw(), (y - cabin_y) / (belly - cabin_y)); };
+  for (float f : {0.38f, 0.72f}) {
+    const float y = lerpf(cabin_y, belly, f), w = hull_half(y);
+    seg({-w, y}, {-w * 0.25f, y});
+    seg({w * 0.25f, y}, {w, y});
+  }
+  // Windows on the cabin; a canopy replaces them with a glass dome
+  if (d.style & STYLE_DOME) {
+    const float r = hw * 0.2f, cy = cabin_y + 5.f;
+    Vec2 prev{-r, cy};
+    for (int i = 1; i <= 6; ++i) {
+      const float a = PI - PI * i / 6.f;
+      const Vec2 p{r * std::cos(a), cy - r * 1.2f * std::sin(a)};
+      seg(prev, p);
+      prev = p;
+    }
+    seg({-r * 0.5f, cy - r * 0.55f}, {-r * 0.1f, cy - r * 0.95f});  // glint
+  } else {
+    for (float s : {-1.f, 1.f}) seg({s * hw * 0.08f, cabin_y + 8.f}, {s * hw * 0.2f, cabin_y + 8.f});
+  }
+  if (d.style & STYLE_FINS) {
+    for (float s : {-1.f, 1.f}) {
+      seg({s * hg.belly_hw(), belly - 11.f}, {s * (hg.belly_hw() + 11.f), belly + 3.f});
+      seg({s * (hg.belly_hw() + 11.f), belly + 3.f}, {s * hg.belly_hw(), belly});
+    }
+  }
+  if (d.style & STYLE_TANKS) {  // fuel tanks beside the cabin (they collide too)
+    const float th = std::max(6.f, 0.5f * (belly - cabin_y) - 2.f), cy = 0.5f * (belly + cabin_y);
+    for (float s : {-1.f, 1.f}) {
+      const float x0 = s * (hg.cabin_hw() + 3.f), x1 = s * (hg.cabin_hw() + 15.f);
+      seg({x0, cy - th}, {x1, cy - th});
+      seg({x1, cy - th}, {x1, cy + th});
+      seg({x1, cy + th}, {x0, cy + th});
+      seg({x0, cy + th}, {x0, cy - th});
+      seg({x0, cy - th * 0.3f}, {x1, cy - th * 0.3f});
+      seg({x0, cy + th * 0.4f}, {x1, cy + th * 0.4f});
+    }
+  }
+  if (d.style & STYLE_DISH) {  // radar dish on a stalk
+    seg({hw * 0.22f, cabin_y + 1.f}, {hw * 0.42f, cabin_y - 9.f});
+    seg({hw * 0.42f - 5.f, cabin_y - 12.f}, {hw * 0.42f, cabin_y - 9.f});
+    seg({hw * 0.42f + 5.f, cabin_y - 6.f}, {hw * 0.42f, cabin_y - 9.f});
+    seg({hw * 0.42f - 5.f, cabin_y - 12.f}, {hw * 0.42f + 5.f, cabin_y - 6.f});
+  }
+  if (d.style & STYLE_STRIPES) {  // hazard stripes along the belly
+    const float w = hg.belly_hw() - 3.f;
+    for (float x = -w; x < w - 3.f; x += 6.f) seg({x, belly}, {x + 3.f, belly - 4.f});
+  }
+  // Winch housing under the belly, with the cable eye
+  seg({-5.f, belly}, {-5.f, belly + 5.f});
+  seg({5.f, belly}, {5.f, belly + 5.f});
+  seg({-5.f, belly + 5.f}, {5.f, belly + 5.f});
+  // Landing legs: a hydraulic strut (sleeve on the hull, rod out to the foot plate) with a hinge and a foot
+  for (int i = 0; i < 2; ++i) {
+    const float side = i == 0 ? -1.f : 1.f;
+    const Vec2 attach{side * lg.attach_x, lg.attach_y};
+    const Vec2 ax{side * lg.axis_x, lg.axis_y}, nx{-ax.y, ax.x};
+    const float reach = lg.length + legs.trans[i];
+    const Vec2 foot = attach + ax * reach;
+    const float sleeve = lg.length * 0.5f;  // the sleeve is fixed to the hull, the rod slides in it
+    const Vec2 sleeve_end = attach + ax * sleeve;
+    seg(attach + nx * 1.8f, sleeve_end + nx * 1.8f);
+    seg(attach - nx * 1.8f, sleeve_end - nx * 1.8f);
+    seg(sleeve_end + nx * 1.8f, sleeve_end - nx * 1.8f);
+    seg(attach + ax * 2.f, foot);  // rod
+    seg({foot.x - lg.foot_half_w, foot.y}, {foot.x + lg.foot_half_w, foot.y});
+    seg({foot.x - lg.foot_half_w, foot.y}, {foot.x - lg.foot_half_w + 2.f, foot.y - 3.f});
+    seg({foot.x + lg.foot_half_w, foot.y}, {foot.x + lg.foot_half_w - 2.f, foot.y - 3.f});
+    seg(foot, {foot.x, foot.y - 4.f});
+    seg({attach.x - 1.5f, attach.y - 1.5f}, {attach.x + 1.5f, attach.y + 1.5f});  // hinge
+    seg({attach.x - 1.5f, attach.y + 1.5f}, {attach.x + 1.5f, attach.y - 1.5f});
+  }
+  if (d.style & STYLE_DECK) {  // the wide deck the outboard thrusters hang from
+    seg({-hw, belly - 1.f}, {hw, belly - 1.f});
+    seg({-hw, belly + 3.f}, {hw, belly + 3.f});
+    seg({-hw, belly - 1.f}, {-hw, belly + 3.f});
+    seg({hw, belly - 1.f}, {hw, belly + 3.f});
+    for (float x = -hw + 8.f; x < hw - 4.f; x += 14.f) seg({x, belly - 1.f}, {x, belly + 3.f});  // ribs
+  }
+  if (d.thruster_n == 0) {
+    // Engine bells: the open end points ground-ward so top mounts still fire "down"
+    for (float side : {-1.f, 1.f}) {
+      float ex = side * ox;
+      float back = top ? ey + 2.f : ey - 2.f, rim = top ? ey + 16.f : ey + 12.f;
+      float bw = top ? 8.f : 7.f, rw = top ? 11.f : 10.f;
+      seg({ex - bw, back}, {ex + bw, back});
+      seg({ex - bw, back}, {ex - rw, rim});
+      seg({ex + bw, back}, {ex + rw, rim});
+      seg({ex - rw, rim}, {ex + rw, rim});
+      const float mid = 0.5f * (back + rim), mw = 0.5f * (bw + rw);  // cooling rib and nozzle throat
+      seg({ex - mw, mid}, {ex + mw, mid});
+      seg({ex - rw * 0.55f, rim - 2.f}, {ex + rw * 0.55f, rim - 2.f});
+    }
+  } else {
+    for (int i = 0; i < d.thruster_n; ++i) {  // a bell along each thruster's exhaust
+      const ThrusterPose tp = thruster_pose(d, i);
+      const Vec2 f = tp.flame, p{-f.y, f.x};
+      const float w0 = 5.f + 2.f * tp.power, w1 = 8.f + 2.f * tp.power;
+      const Vec2 b0 = tp.pos - f * 2.f, b1 = tp.pos + f * 12.f, mid = tp.pos + f * 5.f;
+      seg(b0 - p * w0, b0 + p * w0);
+      seg(b0 - p * w0, b1 - p * w1);
+      seg(b0 + p * w0, b1 + p * w1);
+      seg(b1 - p * w1, b1 + p * w1);
+      seg(mid - p * (0.5f * (w0 + w1)), mid + p * (0.5f * (w0 + w1)));  // cooling rib
+      seg(b1 - p * w1 * 0.55f - f * 2.f, b1 + p * w1 * 0.55f - f * 2.f);
+      // mounting pylon to the nearest hull edge or deck, so no thruster floats free
+      {
+        const float ys = clampf(b0.y, cabin_y, belly);
+        Vec2 hull_pt{(b0.x < 0.f ? -1.f : 1.f) * hull_half(ys), ys};
+        if (d.style & STYLE_DECK) {
+          const Vec2 deck_pt{clampf(b0.x, -hw, hw), belly + 1.f};
+          const Vec2 a = b0 - hull_pt, b = b0 - deck_pt;
+          if (dot(b, b) < dot(a, a)) hull_pt = deck_pt;
+        }
+        if (length(b0 - hull_pt) > 3.f) seg(b0, hull_pt);
+      }
+      // control channel tick: one mark per stick-driven thruster so the pairs are told apart
+      if (tp.channel >= 2) seg(tp.pos, tp.pos + f * 5.f);
+    }
   }
   if (fl.state == FlightState::Flying) {  // nose marker
     seg({0.f, nose_y}, {0.f, nose_y - 10.f});
@@ -496,6 +595,75 @@ void Gfx::draw_ship(const Game& g, double t) const {
 // ---------------------------------------------------------------------------
 // HUD / UI
 // ---------------------------------------------------------------------------
+// Crates: outlined boxes with a strap and a cross, in the cargo colour
+void Gfx::draw_cargo(const Game& g, double t) const {
+  const float margin = 100.f;
+  g.ecs.view<Cargo, Transform>([&](Entity e, const Cargo& c, const Transform& tf) {
+    if (tf.pos.x < g.cam.x - margin || tf.pos.x > g.cam.x + g.cam.vw + margin || tf.pos.y < g.cam.y - margin ||
+        tf.pos.y > g.cam.y + g.cam.vh + margin)
+      return;
+    const bool held = g.ecs.get<Rope>(g.ship).held == e;
+    const float pulse = held ? 0.7f + 0.3f * std::sin(static_cast<float>(t) * 8.f) : 1.f;
+    const Rgba col = mix(pal::DIM, pal::CARGO, pulse);
+    const float hw = c.def->half_w, hh = c.def->half_h;
+    auto W = [&](float lx, float ly) {
+      const Vec2 w = tf.pos + rotate({lx, ly}, tf.angle);
+      return SDL_Point{sx(g.cam, w.x), sy(w.y)};
+    };
+    const SDL_Point q[4] = {W(-hw, -hh), W(hw, -hh), W(hw, hh), W(-hw, hh)};
+    be_->polygon(q, 4, pal::HULL_FILL);
+    auto seg = [&](SDL_Point a, SDL_Point b, Rgba cc) { line(a.x, a.y, b.x, b.y, cc); };
+    for (int i = 0; i < 4; ++i) seg(q[i], q[(i + 1) % 4], col);
+    const Rgba dim = with_alpha(col, 150);
+    seg(W(-hw, -hh), W(hw, hh), dim);
+    seg(W(hw, -hh), W(-hw, hh), dim);
+    seg(W(-hw * 0.5f, -hh), W(-hw * 0.5f, hh), dim);  // straps
+    seg(W(hw * 0.5f, -hh), W(hw * 0.5f, hh), dim);
+  });
+}
+
+// The cable (a chain of ticked links, sagging when slack) and the hook
+void Gfx::draw_rope(const Game& g, double t) const {
+  const Rope& r = g.ecs.get<Rope>(g.ship);
+  const Flight& fl = g.ecs.get<Flight>(g.ship);
+  const Rgba col = fl.state == FlightState::Crashed ? pal::HOT : pal::ROPE;
+  const Vec2 a = r.anchor, h = r.hook_pos;
+  const float dist = length(h - a);
+  if (dist > 2.f) {
+    const Vec2 ctrl = (a + h) * 0.5f + Vec2{0.f, clampf(r.slack * 0.6f, 0.f, 90.f)};  // quadratic sag
+    const int n = std::max(3, static_cast<int>(dist / 8.f));
+    Vec2 prev = a;
+    for (int i = 1; i <= n; ++i) {
+      const float u = static_cast<float>(i) / n, v = 1.f - u;
+      const Vec2 p = a * (v * v) + ctrl * (2.f * u * v) + h * (u * u);
+      const SDL_Point pa{sx(g.cam, prev.x), sy(prev.y)}, pb{sx(g.cam, p.x), sy(p.y)};
+      line(pa.x, pa.y, pb.x, pb.y, with_alpha(col, i % 2 ? 255 : 170));
+      // tick across the link: a chain, not a thread
+      Vec2 d = p - prev;
+      const float dl = std::max(length(d), 0.001f);
+      const Vec2 nrm{-d.y / dl * 2.f, d.x / dl * 2.f};
+      const SDL_Point t0{sx(g.cam, p.x - nrm.x), sy(p.y - nrm.y)}, t1{sx(g.cam, p.x + nrm.x), sy(p.y + nrm.y)};
+      line(t0.x, t0.y, t1.x, t1.y, col);
+      prev = p;
+    }
+  }
+  // Hook: a ring with two prongs
+  auto H = [&](float lx, float ly) {
+    const Vec2 w = h + rotate({lx, ly}, r.hook_angle);
+    return SDL_Point{sx(g.cam, w.x), sy(w.y)};
+  };
+  const Rgba hc = r.held != NULL_ENTITY ? pal::CARGO : pal::BRIGHT;
+  SDL_Point ring[8];
+  for (int i = 0; i < 8; ++i) ring[i] = H(4.f * std::cos(i * PI / 4.f), 4.f * std::sin(i * PI / 4.f) - 2.f);
+  for (int i = 0; i < 8; ++i) line(ring[i].x, ring[i].y, ring[(i + 1) % 8].x, ring[(i + 1) % 8].y, hc);
+  for (float s : {-1.f, 1.f}) {
+    const SDL_Point p0 = H(s * 3.f, 2.f), p1 = H(s * 6.f, 8.f), p2 = H(s * 2.f, 11.f);
+    line(p0.x, p0.y, p1.x, p1.y, hc);
+    line(p1.x, p1.y, p2.x, p2.y, hc);
+  }
+  (void)t;
+}
+
 void Gfx::draw_hud(const Game& g, const UiState& ui) const {
   const bool pad = ui.device == InputDevice::Gamepad;  // hints name the device in use
   const Transform& tf = g.ecs.get<Transform>(g.ship);
@@ -505,14 +673,15 @@ void Gfx::draw_hud(const Game& g, const UiState& ui) const {
   const Thrusters& th = g.ecs.get<Thrusters>(g.ship);
   const int lh = FONT_CELL_H + 4;
 
-  fill(8, 8, 210, 18 * 2 + 4 + lh * 4 + 28, with_alpha(pal::MENU, 120));
+  const int bars = channel_count(d);
+  fill(8, 8, 210, 18 * bars + 4 + lh * 6 + 28, with_alpha(pal::MENU, 120));
   int y = 16;
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < bars; ++i) {
     fill(20, y, 120, 10, pal::DIM);
     float v = clampf(th.level[i], 0.f, 1.f);
     fill(20, y, static_cast<int>(120 * v), 10, mix(pal::MID, pal::HOT, smoothstep((v - 0.6f) / 0.4f)));
     outline(20, y, 120, 10, with_alpha(pal::MID, 120));
-    text(148, y - 3, i == 0 ? "L" : "R", pal::MID);
+    text(148, y - 3, i == 0 ? "L" : i == 1 ? "R" : i == 2 ? "LS" : "RS", pal::MID);
     y += 18;
   }
   y += 4;
@@ -521,6 +690,18 @@ void Gfx::draw_hud(const Game& g, const UiState& ui) const {
   text(20, y, buf, pal::BRIGHT);
   y += lh;
   text(20, y, pad ? "START MENU" : "ESC MENU", pal::MID);
+  y += lh;
+  const Legs& legs = g.ecs.get<Legs>(g.ship);
+  char legbuf[32];
+  std::snprintf(legbuf, sizeof legbuf, "LEGS %s  %s", legs.deployed ? "OUT" : "IN", pad ? "X" : "SPACE");
+  text(20, y, legbuf, legs.deployed ? pal::MID : pal::WARN);
+  y += lh;
+  const Rope& rp = g.ecs.get<Rope>(g.ship);
+  if (rp.held != NULL_ENTITY)
+    std::snprintf(legbuf, sizeof legbuf, "LOAD %.1f  %s", g.ecs.get<Cargo>(rp.held).def->mass, pad ? "A" : "R");
+  else
+    std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", pad ? "A" : "R");
+  text(20, y, legbuf, rp.held != NULL_ENTITY ? pal::CARGO : pal::MID);
   y += lh + 4;
 
   const float alt = g.cave.floor_below(tf.pos.x, tf.pos.y) - tf.pos.y;
@@ -539,6 +720,9 @@ void Gfx::draw_hud(const Game& g, const UiState& ui) const {
   fill(rx - 12, 8, w_ - rx + 4, lh * 3 + 16, with_alpha(pal::MENU, 120));
   for (int i = 0; i < 3; ++i) text(rx, 16 + lh * i, status[i].s, status[i].ok ? pal::PAD : pal::HOT);
 
+  if (g.notice_timer > 0.f)
+    text_centered(w_ / 2, 48 + (fl.state != FlightState::Flying ? 2 * lh + 8 : 0), g.notice,
+                  with_alpha(pal::CARGO, static_cast<uint8_t>(255 * clampf(g.notice_timer / 0.5f, 0.f, 1.f))));
   if (fl.state != FlightState::Flying) {
     const bool landed = fl.state == FlightState::Landed;
     float pulse = 0.65f + 0.35f * std::sin(fl.timer * 10.f);
@@ -552,24 +736,29 @@ void Gfx::draw_minimap(const Game& g, double t) {
   if (!minimap_ || minimap_generation_ != g.cave.generation) build_minimap(g.cave);
   const int x = (w_ - MM_W) / 2, y = h_ - MM_H - 14;
   fill(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::BG, 170));
-  be_->copy(minimap_, SDL_Rect{x, y, MM_W, MM_H}, {255, 255, 255, 255});
+
+  // The window scrolls with the ship and stops at the map's edges
+  const Transform& tf = g.ecs.get<Transform>(g.ship);
+  const float ox = clampf(tf.pos.x * MM_K - MM_W * 0.5f, 0.f, static_cast<float>(Cave::GW - MM_W));
+  const float oy = clampf(tf.pos.y * MM_K - MM_H * 0.5f, 0.f, static_cast<float>(Cave::GH - MM_H));
+  const int ix = static_cast<int>(ox), iy = static_cast<int>(oy);
+  be_->copy_part(minimap_, SDL_Rect{ix, iy, MM_W, MM_H}, SDL_Rect{x, y, MM_W, MM_H}, {255, 255, 255, 255});
   outline(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::MID, 140));
 
-  const float k = MM_W / Cave::WORLD_W;
-  for (const LandingPad& p : g.cave.pads)  // 5x5 dots: easy to see on a handheld too
-    fill(x + static_cast<int>(0.5f * (p.x0 + p.x1) * k) - 2, y + static_cast<int>(p.y * k) - 2, 5, 5, pal::WARN);
-  // Viewport box (drawn twice when it wraps the seam)
-  const float vx = Cave::wrap_x(g.cam.x) * k;
-  const int vw = static_cast<int>(g.cam.vw * k), vh = static_cast<int>(g.cam.vh * k);
-  const int vy = y + static_cast<int>(clampf(g.cam.y, 0.f, Cave::WORLD_H) * k);
-  for (float off : {0.f, -static_cast<float>(MM_W)}) {
-    int bx = x + static_cast<int>(vx + off);
-    if (bx + vw < x || bx > x + MM_W) continue;
-    outline(bx, vy, vw, vh, with_alpha(pal::BRIGHT, 120));
-  }
-  const Transform& tf = g.ecs.get<Transform>(g.ship);
-  if (std::fmod(t, 0.6) < 0.35)
-    fill(x + static_cast<int>(Cave::wrap_x(tf.pos.x) * k) - 2, y + static_cast<int>(tf.pos.y * k) - 2, 5, 5, pal::HOT);
+  // Map coordinates (world px) -> panel px; dots that fall outside are skipped
+  auto dot = [&](float wx, float wy, int size, Rgba c) {
+    const int px = x + static_cast<int>(wx * MM_K) - ix - size / 2, py = y + static_cast<int>(wy * MM_K) - iy - size / 2;
+    if (px < x || py < y || px + size > x + MM_W || py + size > y + MM_H) return;
+    fill(px, py, size, size, c);
+  };
+  for (const LandingPad& p : g.cave.pads) dot(0.5f * (p.x0 + p.x1), p.y, 5, pal::WARN);
+  g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) { dot(ct.pos.x, ct.pos.y, 4, pal::CARGO); });
+  // Viewport box, clipped to the panel
+  const int vw = static_cast<int>(g.cam.vw * MM_K), vh = static_cast<int>(g.cam.vh * MM_K);
+  const int bx = x + static_cast<int>(g.cam.x * MM_K) - ix, by = y + static_cast<int>(g.cam.y * MM_K) - iy;
+  const int cx0 = std::max(bx, x), cy0 = std::max(by, y), cx1 = std::min(bx + vw, x + MM_W), cy1 = std::min(by + vh, y + MM_H);
+  if (cx1 > cx0 && cy1 > cy0) outline(cx0, cy0, cx1 - cx0, cy1 - cy0, with_alpha(pal::BRIGHT, 120));
+  if (std::fmod(t, 0.6) < 0.35) dot(tf.pos.x, tf.pos.y, 5, pal::HOT);
 }
 
 // The value shown beside a choice or slider item
@@ -594,7 +783,8 @@ static const char* menu_hint(const UiState& ui, bool options) {
 void Gfx::draw_menu(const Game& g, const UiState& ui) const {
   const MenuPageDef& page = page_def(ui.page);
   const int lh = FONT_CELL_H + 9;
-  const int panel_w = std::min(w_ - 20, 520), panel_h = 78 + page.count * lh + 44;
+  const int stat_rows = ui.page == MenuPage::Stats ? STAT_FIELD_COUNT : 0;  // read-only lines above the items
+  const int panel_w = std::min(w_ - 20, 520), panel_h = 78 + (stat_rows + page.count) * lh + (stat_rows ? 10 : 0) + 44;
   const int px = w_ / 2 - panel_w / 2, py = std::max(8, h_ / 2 - panel_h / 2);
   fill(0, 0, w_, h_, with_alpha(pal::BG, 120));
   fill(px, py, panel_w, panel_h, pal::MENU);
@@ -604,7 +794,14 @@ void Gfx::draw_menu(const Game& g, const UiState& ui) const {
   text_centered(w_ / 2, py + 18, page.title, pal::BRIGHT);
   fill(px + 24, py + 18 + FONT_CELL_H + 8, panel_w - 48, 1, with_alpha(pal::MID, 140));
 
-  const int row_y = py + 18 + FONT_CELL_H + 22;
+  int row_y = py + 18 + FONT_CELL_H + 22;
+  for (int i = 0; i < stat_rows; ++i, row_y += lh) {
+    char val[32];
+    format_stat(STAT_FIELDS[i], g.stats, val, sizeof val);
+    text(px + 36, row_y, STAT_FIELDS[i].label, pal::MID);
+    text(px + panel_w - 36 - text_width(val), row_y, val, pal::BRIGHT);
+  }
+  if (stat_rows) row_y += 10;
   for (int i = 0; i < page.count; ++i) {
     const MenuItem& item = page.items[i];
     const bool sel = i == ui.cursor;
@@ -687,6 +884,8 @@ void Gfx::draw(const Game& g, const UiState& ui) {
   draw_world(g);
   draw_pads(g, t);
   draw_particles(g);
+  draw_cargo(g, t);
+  draw_rope(g, t);
   draw_ship(g, t);
 
   const Flight& fl = g.ecs.get<Flight>(g.ship);

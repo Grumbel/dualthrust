@@ -36,6 +36,8 @@ class Backend {
   virtual void polygon(const SDL_Point* pts, int n, Rgba c) = 0;  // filled; at most one span per row
   virtual void gradient_triangle(SDL_Point a, SDL_Point b, SDL_Point apex, Rgba base, Rgba tip) = 0;
   virtual void copy(Texture* t, const SDL_Rect& dst, Rgba tint) = 0;  // whole texture, stretched to dst
+  // Part of a texture (src in texels, inside the texture), stretched to dst
+  virtual void copy_part(Texture* t, const SDL_Rect& src, const SDL_Rect& dst, Rgba tint) = 0;
   virtual int draw_calls() const { return -1; }  // GL draws submitted by the last finished frame (-1 unknown)
   virtual bool read_pixels(std::vector<uint8_t>& rgba, int& w, int& h) = 0;  // top-down RGBA, before end_frame
 };

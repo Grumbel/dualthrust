@@ -50,6 +50,8 @@ class Gfx {
   void draw_pads(const Game& g, double t) const;
   void draw_particles(const Game& g) const;
   void draw_ship(const Game& g, double t) const;
+  void draw_cargo(const Game& g, double t) const;
+  void draw_rope(const Game& g, double t) const;
   void draw_hud(const Game& g, const UiState& ui) const;
   void draw_minimap(const Game& g, double t);
   void draw_menu(const Game& g, const UiState& ui) const;   // boxed page: pause, options

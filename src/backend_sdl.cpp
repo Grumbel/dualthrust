@@ -89,6 +89,11 @@ class SdlBackend : public Backend {
     }
   }
 
+  void copy_part(Texture* t, const SDL_Rect& src, const SDL_Rect& dst, Rgba tint) override {
+    SDL_SetTextureColorMod(t->tex, tint.r, tint.g, tint.b);
+    SDL_SetTextureAlphaMod(t->tex, tint.a);
+    SDL_RenderCopy(ren_, t->tex, &src, &dst);
+  }
   void copy(Texture* t, const SDL_Rect& dst, Rgba tint) override {
     SDL_SetTextureColorMod(t->tex, tint.r, tint.g, tint.b);
     SDL_SetTextureAlphaMod(t->tex, tint.a);

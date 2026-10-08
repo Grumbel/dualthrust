@@ -285,6 +285,11 @@ class Gles2Backend : public Backend {
     use(t);
     quad(d.x, d.y, d.x + d.w, d.y + d.h, 0.f, 0.f, 1.f, 1.f, tint);
   }
+  void copy_part(Texture* t, const SDL_Rect& s, const SDL_Rect& d, Rgba tint) override {
+    use(t);
+    quad(d.x, d.y, d.x + d.w, d.y + d.h, static_cast<float>(s.x) / t->w, static_cast<float>(s.y) / t->h,
+         static_cast<float>(s.x + s.w) / t->w, static_cast<float>(s.y + s.h) / t->h, tint);
+  }
 
   bool read_pixels(std::vector<uint8_t>& rgba, int& w, int& h) override {
     flush();
