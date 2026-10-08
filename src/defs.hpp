@@ -6,7 +6,11 @@
 
 #include "math.hpp"
 
-inline constexpr const char* APP_VERSION = "0.1.0";
+// Full version string from the top-level VERSION file (CMake: DUALTHRUST_VERSION)
+#ifndef DUALTHRUST_VERSION
+#define DUALTHRUST_VERSION "unknown"
+#endif
+inline constexpr const char* APP_VERSION = DUALTHRUST_VERSION;
 
 namespace tune {
 inline constexpr float SIM_STEP = 1.f / 120.f;  // fixed real-time step
@@ -73,3 +77,16 @@ inline constexpr ShipDef SHIP_DEFS[] = {
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;
+
+// Zoom levels. Resolution independent: a level fixes how many world pixels are visible vertically, so
+// the scale on screen is screen_height / visible_h (1:1 at 480 px for Near, 720 px for Medium).
+struct ZoomLevel {
+  const char* name;
+  float visible_h;
+};
+inline constexpr ZoomLevel ZOOM_LEVELS[] = {{"NEAR", 480.f}, {"MEDIUM", 720.f}, {"FAR", 1080.f}};
+inline constexpr int ZOOM_COUNT = static_cast<int>(sizeof(ZOOM_LEVELS) / sizeof(ZOOM_LEVELS[0]));
+inline constexpr int DEFAULT_ZOOM = 1;
+// First start without a saved zoom: small displays (the R36S panel) start Near, everything else Medium.
+// Near is 1:1 on a 480 px high screen, which is also the cheapest path for weak GPUs.
+inline int auto_zoom_for_height(int display_h) { return display_h <= 480 ? 0 : DEFAULT_ZOOM; }

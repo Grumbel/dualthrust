@@ -1,5 +1,5 @@
 .\" SPDX-License-Identifier: GPL-3.0-or-later
-.TH DUALTHRUST 1 "October 2026" "dualthrust 0.1.0" "Games"
+.TH DUALTHRUST 1 "October 2026" "dualthrust @PROJECT_VERSION_FULL@" "Games"
 .SH NAME
 dualthrust \- CRT dual-engine cave lander
 .SH SYNOPSIS
@@ -29,6 +29,10 @@ Window size (minimum 320x240).
 .BR \-s ", " \-\-ship " " \fIN\fR
 Ship preset index (0=Narrow .. 4=Long, 5=Topdog, 6=Canopy; 5–6 have top engines).
 .TP
+.BR \-z ", " \-\-zoom " " \fILEVEL\fR
+View zoom: \fBnear\fR, \fBmedium\fR or \fBfar\fR (also 0 to 2). Independent of the
+resolution; the default is Near on small screens, Medium elsewhere.
+.TP
 .BR \-S ", " \-\-seed " " \fIN\fR
 Unsigned seed for cave generation.
 .TP
@@ -46,16 +50,25 @@ Override XDG config directory (default
 Triggers / L1 R1 / stick up
 Left and right engine thrust.
 .TP
+Left Ctrl, Right Ctrl (or A, D / arrows)
+Left and right engine at full thrust, so both hands can fly.
+.TP
+Left Shift, Right Shift
+Left and right engine at half thrust.
+.TP
 Start
 Open or close the menu.
 .TP
-A / B
-Reset after crash, or relight after landing.
+Enter / A / B
+Respawn after a crash. (After a landing, simply throttle up.)
 .TP
 Y / G
 Generate a new cave.
 .TP
-Select / Tab
+Tab / mouse wheel / D-pad up, down
+Change the zoom level (Near, Medium, Far).
+.TP
+S / Select
 Next ship preset.
 .TP
 X

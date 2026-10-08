@@ -40,7 +40,8 @@ using World = Registry<Transform, Motion, Hull, Thrusters, Flight, Particle>;
 // ---------------------------------------------------------------------------
 struct Camera {
   float x = 0.f, y = 0.f;
-  float vw = 1280.f, vh = 720.f;  // viewport in px
+  float vw = 1280.f, vh = 720.f;  // viewport in world px: what the zoom level makes visible
+  int zoom = DEFAULT_ZOOM;        // index into ZOOM_LEVELS
   float prev_ship_x = 0.f;
   bool have_prev = false;
   float shake = 0.f;  // 0..1, decays

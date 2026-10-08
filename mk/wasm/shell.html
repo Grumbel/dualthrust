@@ -1,0 +1,165 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Emscripten HTML shell for the WebAssembly build. CMake fills in the @...@ values
+     (configure_file), Emscripten the script below. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>dualthrust @PROJECT_VERSION_FULL@</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: #000a04; color: #28b450;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      overflow: hidden;
+    }
+    #wrap {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      height: 100%; gap: 0.6rem;
+    }
+    /* The game draws 16:9 and is scaled to fit. */
+    #slot {
+      width: min(96vw, calc(78vh * 16 / 9));
+      height: min(78vh, calc(96vw * 9 / 16));
+      box-shadow: 0 0 24px rgba(40, 180, 80, 0.25);
+    }
+    #wrap:fullscreen #slot, #wrap:-webkit-full-screen #slot {
+      width: min(100vw, calc(100vh * 16 / 9));
+      height: min(100vh, calc(100vw * 9 / 16));
+      box-shadow: none;
+    }
+    #wrap:fullscreen > :not(#slot), #wrap:-webkit-full-screen > :not(#slot) { display: none; }
+    canvas.emscripten {
+      display: block; background: #000;
+      width: 100% !important; height: 100% !important;
+      outline: none;
+    }
+    #status { font-size: 0.9rem; opacity: 0.85; min-height: 1.2em; }
+    #progress {
+      width: min(320px, 80vw); height: 6px;
+      background: #104020; border-radius: 3px; overflow: hidden;
+    }
+    #progress > div { height: 100%; width: 0%; background: #8cffa0; transition: width 0.15s ease-out; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; max-width: 96vw; }
+    .toolbar button {
+      background: #04180c; color: #8cffa0; font: inherit;
+      border: 1px solid #28b450; border-radius: 4px;
+      padding: 0.3rem 0.7rem; cursor: pointer; font-size: 0.8rem;
+    }
+    .toolbar button:hover { background: #0a2c18; }
+    .toolbar button:disabled { opacity: 0.4; cursor: default; }
+    #help, #meta { font-size: 0.75rem; opacity: 0.75; text-align: center; line-height: 1.6; max-width: 96vw; }
+    #meta a { color: #8cffa0; }
+    kbd {
+      font-family: inherit; font-size: 0.7rem;
+      border: 1px solid #28b450; border-radius: 3px; padding: 0 0.25rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="slot">
+      <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+    </div>
+    <div id="status">Loading…</div>
+    <div id="progress"><div id="progress-bar"></div></div>
+    <div class="toolbar">
+      <button type="button" id="btn-fullscreen">Fullscreen</button>
+      <button type="button" id="btn-pause" disabled>Menu</button>
+    </div>
+    <div id="help">
+      <kbd>Ctrl</kbd> / <kbd>A</kbd> <kbd>D</kbd> left / right engine ·
+      <kbd>Shift</kbd> half thrust · <kbd>Tab</kbd> / wheel zoom · <kbd>S</kbd> next ship ·
+      <kbd>X</kbd> swap engines · <kbd>Enter</kbd> respawn after a crash ·
+      <kbd>G</kbd> new cave · <kbd>M</kbd> mute · <kbd>Esc</kbd> menu ·
+      gamepads work too
+    </div>
+    <div id="meta">
+      dualthrust <strong>@PROJECT_VERSION_FULL@</strong> ·
+      <a href="@DUALTHRUST_SOURCE_URL@" target="_blank" rel="noopener">Source</a> ·
+      <a href="@DUALTHRUST_SOURCE_URL@/tree/@DUALTHRUST_GIT_REV@" target="_blank" rel="noopener">Revision @DUALTHRUST_GIT_REV@</a>
+    </div>
+  </div>
+  <script type="text/javascript">
+    var statusElement = document.getElementById('status');
+    var progressBar = document.getElementById('progress-bar');
+
+    /* The game keeps its settings in $HOME/.config/dualthrust (HOME is /home/web_user here). That
+       directory is an IndexedDB mount, loaded before the game starts and written back by the game
+       after every change (FS.syncfs). */
+    var CONFIG_MOUNT = '/home/web_user/.config';
+
+    function mountConfig() {
+      FS.mkdirTree(CONFIG_MOUNT);
+      FS.mount(FS.filesystems.IDBFS, {}, CONFIG_MOUNT);
+      Module.addRunDependency('dualthrust-config');
+      FS.syncfs(true, function(err) {
+        if (err) console.warn('dualthrust: loading the settings failed', err);
+        Module.removeRunDependency('dualthrust-config');
+      });
+    }
+
+    function pauseGame() {
+      if (typeof Module._dualthrust_pause === 'function') Module._dualthrust_pause();
+    }
+
+    function toggleFullscreen() {
+      var wrap = document.getElementById('wrap');
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      } else {
+        (wrap.requestFullscreen || wrap.webkitRequestFullscreen).call(wrap);
+      }
+    }
+
+    function enableControls() {
+      document.getElementById('btn-fullscreen').onclick = toggleFullscreen;
+      var menu = document.getElementById('btn-pause');
+      menu.disabled = false;
+      menu.onclick = function() { pauseGame(); document.getElementById('canvas').focus(); };
+      /* A hidden tab stops the browser's frames: open the menu, so the flight does not jump on
+         when it comes back. */
+      document.addEventListener('visibilitychange', function() { if (document.hidden) pauseGame(); });
+      document.getElementById('canvas').focus();
+    }
+
+    var Module = {
+      preRun: [mountConfig],
+      postRun: [enableControls],
+      print: function(text) { console.log(text); },
+      printErr: function(text) { console.error(text); },
+      canvas: (function() {
+        var canvas = document.getElementById('canvas');
+        canvas.addEventListener('webglcontextlost', function(e) {
+          alert('The WebGL context was lost. Reload the page.');
+          e.preventDefault();
+        }, false);
+        return canvas;
+      })(),
+      setStatus: function(text) {
+        var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+        if (m) {
+          progressBar.style.width = (parseInt(m[2]) / parseInt(m[4]) * 100) + '%';
+          statusElement.textContent = m[1];
+        } else {
+          statusElement.textContent = text;
+          if (!text) document.getElementById('progress').style.display = 'none';
+        }
+      },
+      totalDependencies: 0,
+      monitorRunDependencies: function(left) {
+        this.totalDependencies = Math.max(this.totalDependencies, left);
+        Module.setStatus(left ? 'Preparing… (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')' : '');
+      }
+    };
+    Module.setStatus('Downloading…');
+    window.onerror = function() {
+      Module.setStatus('Something went wrong, see the JavaScript console');
+      Module.setStatus = function(text) { if (text) console.error('[status] ' + text); };
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

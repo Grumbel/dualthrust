@@ -10,6 +10,7 @@ struct UserConfig {
   bool swap_engines = false;
   bool sound = true;
   int ship = 1;
+  int zoom = -1;  // index into ZOOM_LEVELS; -1 = pick by screen size
 };
 
 void set_config_dir_override(const std::string& dir);

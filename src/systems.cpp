@@ -212,7 +212,7 @@ void collision_system(Game& g) {
       f = {FlightState::Crashed, 0.f};
       m = {};
       g.events.push_back({SimEventKind::Crashed, cpos, n, vn});
-      std::printf("CRASH impact=%.1f\n", vn);
+      std::printf("CRASH impact=%.1f vel=(%.0f,%.0f) angle=%.2f pos=(%.0f,%.0f)\n", vn, m.vel.x, m.vel.y, t.angle, t.pos.x, t.pos.y);
     } else {
       Vec2 tangent = m.vel - n * dot(m.vel, n);
       m.vel = n * (vn * tune::BOUNCE_RESTITUTION) + tangent * tune::BOUNCE_FRICTION;
@@ -287,17 +287,22 @@ void respawn_ship(Game& g, float wx) {
   g.fired.clear();
 }
 
-void relight_ship(Game& g) {
-  Flight& f = g.ecs.get<Flight>(g.ship);
-  if (f.state != FlightState::Landed) return;
-  f = {};
-  g.ecs.get<Motion>(g.ship).vel.y = -30.f;
-}
-
 void set_thrust(Game& g, float left, float right) {
   Thrusters& th = g.ecs.get<Thrusters>(g.ship);
   th.level[0] = left;
   th.level[1] = right;
+}
+
+void set_zoom(Game& g, int index) { g.cam.zoom = std::clamp(index, 0, ZOOM_COUNT - 1); }
+
+void update_view(Game& g, float dt, float aspect, bool snap) {
+  Camera& c = g.cam;
+  const float target = ZOOM_LEVELS[c.zoom].visible_h;
+  // Glide in log space so zooming in and out feel alike
+  const float k = snap ? 1.f : 1.f - std::exp(-9.f * dt);
+  c.vh = std::exp(std::log(c.vh) + (std::log(target) - std::log(c.vh)) * k);
+  if (std::abs(c.vh - target) < 0.25f) c.vh = target;
+  c.vw = c.vh * aspect;
 }
 
 void snap_camera(Game& g) {
@@ -311,6 +316,13 @@ void snap_camera(Game& g) {
 
 void step_sim(Game& g, float dt) {
   g.time += dt;
+  // Landed ships lift off as soon as an engine is throttled up
+  g.ecs.view<Flight, Thrusters, Motion>([](Entity, Flight& f, Thrusters& th, Motion& m) {
+    if (f.state == FlightState::Landed && (th.level[0] > 0.05f || th.level[1] > 0.05f)) {
+      f = {};
+      m.vel.y = -30.f;
+    }
+  });
   flight_system(g, dt);
   collision_system(g);
   g.ecs.view<Flight>([dt](Entity, Flight& f) {

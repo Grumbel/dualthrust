@@ -243,6 +243,7 @@ let
         "-DCMAKE_BUILD_TYPE=Release"
         # GCC 15 headers vs ArkOS libstdc++: shim missing ABI symbols.
         "-DDUALTHRUST_CXXABI_SHIM=${../mk/r36s/cxxabi_shim.cpp}"
+        "-DPROJECT_VERSION_FULL=${version}"
       ];
 
       dontPatchELF = true;

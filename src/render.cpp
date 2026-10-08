@@ -126,10 +126,12 @@ struct Canvas {
 bool Gfx::init(SDL_Renderer* ren) {
   ren_ = ren;
   SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_BLEND);
+  // Textures are sampled 1:1 (nearest = cheapest on weak GPUs); only the zoom target is created filtered
+  // Chunk textures are drawn 1:1 at rest, and slightly stretched while the zoom glides: filter them
+  SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
   for (const Glyph& g : GLYPHS) glyph_bits_[g.ch - FIRST_CHAR] = g.bits;
-  build_rock_tiles();
   resize();
-  return !rock_px_.empty();
+  return true;
 }
 
 void Gfx::shutdown() {
@@ -147,19 +149,6 @@ void Gfx::resize() {
   w_ = std::max(w_, 320);
   h_ = std::max(h_, 240);
   build_overlay();
-}
-
-void Gfx::build_rock_tiles() {
-  rock_px_.assign(static_cast<size_t>(Cave::MAX_DEPTH) * TILE * TILE * 4, 0);
-  for (int band = 0; band < Cave::MAX_DEPTH; ++band)
-    for (int y = 0; y < TILE; ++y)
-      for (int x = 0; x < TILE; ++x) {
-        const bool hatch = ((x - y) & 3) == 0 && ROCK_BANDS[band].hatch_alpha > 0;
-        const Rgba c = hatch ? with_alpha(pal::MID, ROCK_BANDS[band].hatch_alpha)
-                             : with_alpha(pal::DIM, ROCK_BANDS[band].base_alpha);
-        uint8_t* p = &rock_px_[((band * TILE + y) * TILE + x) * 4];
-        p[0] = c.r; p[1] = c.g; p[2] = c.b; p[3] = c.a;
-      }
 }
 
 // CRT look: scanlines + vignette in one screen-sized black overlay
@@ -292,100 +281,123 @@ void Gfx::text(int x, int y, const char* s, Rgba c) const {
 int Gfx::text_width(const char* s) const { return static_cast<int>(std::strlen(s)) * FONT_CELL_W; }
 
 int Gfx::sx(const Camera& cam, float wx) const {
-  return static_cast<int>(std::lround(cam.continuous_x(wx) - view_.ox));
+  return static_cast<int>(std::lround(static_cast<double>(cam.continuous_x(wx)) * scale_)) - view_.ox;
 }
-int Gfx::sy(float wy) const { return static_cast<int>(std::lround(wy - view_.oy)); }
+int Gfx::sy(float wy) const { return static_cast<int>(std::lround(static_cast<double>(wy) * scale_)) - view_.oy; }
+int Gfx::Z(float world_len) const { return std::max(1, static_cast<int>(std::lround(world_len * scale_))); }
 
 // ---------------------------------------------------------------------------
 // World
 // ---------------------------------------------------------------------------
-// Bake one chunk: stars (open space only), rock tiles by depth, marching-squares contour.
-// Samples sit at cell centres so the outline lies exactly on the collision boundary.
-void Gfx::render_chunk(const Cave& cave, int cx, int cy, std::vector<uint8_t>& px) const {
-  px.assign(static_cast<size_t>(CHUNK) * CHUNK * 4, 0);
-  Canvas cv{CHUNK, CHUNK, px.data()};
-  const int wx0 = cx * CHUNK, wy0 = cy * CHUNK;  // world px of the chunk's top-left
+// Bake one chunk at scale `s` (screen px per world px): stars (open space only), rock fill and hatching by
+// depth, marching-squares contour. Everything is placed in global pixel coordinates P(world) so neighbouring
+// chunks and their line glow meet exactly. Samples sit at cell centres so the outline lies on the collision
+// boundary. Geometry scales with the zoom; line widths stay one pixel.
+void Gfx::render_chunk(const Cave& cave, int cx, int cy, std::vector<uint8_t>& px, int& tex_w, int& tex_h) const {
+  const double s = bake_scale_;
+  auto P = [s](double world) { return static_cast<int>(std::lround(world * s)); };
+  const int x0 = P(cx * CHUNK), y0 = P(cy * CHUNK);  // global px of the chunk's top-left
+  tex_w = P((cx + 1) * CHUNK) - x0;
+  tex_h = P((cy + 1) * CHUNK) - y0;
+  px.assign(static_cast<size_t>(tex_w) * tex_h * 4, 0);
+  Canvas cv{tex_w, tex_h, px.data()};
   const int gx0 = cx * CHUNK_CELLS, gy0 = cy * CHUNK_CELLS;
 
-  for (const Star& s : cave.stars) {
-    const int sy = static_cast<int>(s.y) - wy0;
-    if (sy < -8 || sy > CHUNK + 8) continue;
+  for (const Star& st : cave.stars) {
+    const int sy = P(st.y) - y0;
+    const int sz = std::max(1, static_cast<int>(std::lround(st.size * s)));
+    if (sy < -sz || sy > tex_h + sz) continue;
     for (float shift : {0.f, -Cave::WORLD_W, Cave::WORLD_W}) {  // stars straddling the X seam
-      const int sx = static_cast<int>(s.x + shift) - wx0;
-      if (sx < -8 || sx > CHUNK + 8) continue;
-      const int sz = s.size, x = sx - sz / 2, y = sy - sz / 2;
-      cv.rect(x, y, sz, sz, with_alpha(pal::STAR, 200));
-      if (sz >= 4) cv.rect(x + 1, y + 1, sz - 2, sz - 2, with_alpha(pal::BRIGHT, 180));
+      const int sx = P(st.x + shift) - x0;
+      if (sx < -sz || sx > tex_w + sz) continue;
+      cv.rect(sx - sz / 2, sy - sz / 2, sz, sz, with_alpha(pal::STAR, 200));
+      if (sz >= 4) cv.rect(sx - sz / 2 + 1, sy - sz / 2 + 1, sz - 2, sz - 2, with_alpha(pal::BRIGHT, 180));
     }
   }
 
+  // Rock: translucent fill plus diagonal hatching whose pitch scales with the zoom (a hatch is 4 world px)
+  const int pitch = std::max(2, static_cast<int>(std::lround(4.0 * s)));
+  const int thick = s >= 2.5 ? 2 : 1;
   for (int j = 0; j < CHUNK_CELLS; ++j)
     for (int i = 0; i < CHUNK_CELLS; ++i) {
       const int d = cave.depth_at(gx0 + i, gy0 + j);
       if (!d) continue;
-      const uint8_t* tile = &rock_px_[static_cast<size_t>(std::min(d, Cave::MAX_DEPTH) - 1) * TILE * TILE * 4];
-      for (int y = 0; y < TILE; ++y)
-        for (int x = 0; x < TILE; ++x) {
-          const uint8_t* t = tile + (y * TILE + x) * 4;
-          cv.blend(i * TILE + x, j * TILE + y, {t[0], t[1], t[2], t[3]});
+      const RockBand& band = ROCK_BANDS[std::min(d, Cave::MAX_DEPTH) - 1];
+      const Rgba base = with_alpha(pal::DIM, band.base_alpha), hatch = with_alpha(pal::MID, band.hatch_alpha);
+      const int cx0 = P((gx0 + i) * Cave::CELL), cx1 = P((gx0 + i + 1) * Cave::CELL);
+      const int cy0 = P((gy0 + j) * Cave::CELL), cy1 = P((gy0 + j + 1) * Cave::CELL);
+      for (int y = cy0; y < cy1; ++y)
+        for (int x = cx0; x < cx1; ++x) {
+          const int m = ((x - y) % pitch + pitch) % pitch;  // global px: the hatch runs across chunk seams
+          cv.blend(x - x0, y - y0, (m < thick && band.hatch_alpha) ? hatch : base);
         }
     }
 
-  constexpr int H = TILE / 2;
-  static constexpr int EDGE[4][2] = {{H, 0}, {TILE, H}, {H, TILE}, {0, H}};  // edge midpoints in a cell
+  constexpr float H = Cave::CELL * 0.5f;
+  static constexpr float EDGE[4][2] = {{H, 0.f}, {Cave::CELL, H}, {H, Cave::CELL}, {0.f, H}};  // edge midpoints
   for (int gy = std::max(gy0 - 1, 0); gy <= std::min(gy0 + CHUNK_CELLS, Cave::GH - 1); ++gy)
     for (int gx = gx0 - 1; gx <= gx0 + CHUNK_CELLS; ++gx) {  // neighbours' lines reach into this chunk
       const ContourCase& cc = CONTOUR_CASES[cave.contour_at(gx, gy)];
-      const int ox = (gx - gx0) * TILE + H, oy = (gy - gy0) * TILE + H;
-      for (const auto& s : cc.seg) {
-        if (s[0] < 0) continue;
-        cv.glow_line(ox + EDGE[s[0]][0], oy + EDGE[s[0]][1], ox + EDGE[s[1]][0], oy + EDGE[s[1]][1], pal::BRIGHT);
+      const double ox = gx * Cave::CELL + H, oy = gy * Cave::CELL + H;
+      for (const auto& sg : cc.seg) {
+        if (sg[0] < 0) continue;
+        cv.glow_line(P(ox + EDGE[sg[0]][0]) - x0, P(oy + EDGE[sg[0]][1]) - y0, P(ox + EDGE[sg[1]][0]) - x0,
+                     P(oy + EDGE[sg[1]][1]) - y0, pal::BRIGHT);
       }
     }
 }
 
+void Gfx::drop_chunks() {
+  for (Chunk& c : chunks_)
+    if (c.tex) SDL_DestroyTexture(c.tex);
+  chunks_.assign(CHUNKS_X * CHUNKS_Y, Chunk{});
+  chunk_count_ = 0;
+}
+
 void Gfx::draw_world(const Game& g) {
   const Cave& cave = g.cave;
-  if (chunk_generation_ != cave.generation) {  // new cave: drop everything cached
-    for (Chunk& c : chunks_)
-      if (c.tex) SDL_DestroyTexture(c.tex);
-    chunks_.assign(CHUNKS_X * CHUNKS_Y, Chunk{});
-    chunk_count_ = 0;
+  // A new cave or a new zoom level re-rasterises the chunks at that level's scale
+  if (chunk_generation_ != cave.generation || std::abs(chunk_scale_ - bake_scale_) > 1e-4f) {
+    drop_chunks();
     chunk_generation_ = cave.generation;
+    chunk_scale_ = bake_scale_;
   }
 
-  const int ucx0 = static_cast<int>(std::floor(view_.ox / CHUNK));
-  const int ucx1 = static_cast<int>(std::floor((view_.ox + w_ - 1) / CHUNK));
-  const int cy0 = std::max(0, static_cast<int>(std::floor(view_.oy / CHUNK)));
-  const int cy1 = std::min(CHUNKS_Y - 1, static_cast<int>(std::floor((view_.oy + h_ - 1) / CHUNK)));
+  const float vw_world = w_ / scale_, vh_world = h_ / scale_;
+  const int ucx0 = static_cast<int>(std::floor(g.cam.x / CHUNK));
+  const int ucx1 = static_cast<int>(std::floor((g.cam.x + vw_world) / CHUNK));
+  const int cy0 = std::max(0, static_cast<int>(std::floor(g.cam.y / CHUNK)));
+  const int cy1 = std::min(CHUNKS_Y - 1, static_cast<int>(std::floor((g.cam.y + vh_world) / CHUNK)));
   const int visible = (ucx1 - ucx0 + 1) * std::max(0, cy1 - cy0 + 1);
-  const int max_cached = std::max(24, visible * 2);
-  const int base_x = sx(g.cam, Cave::wrap_x(static_cast<float>(ucx0 * CHUNK)));
+  const int max_cached = std::max(12, visible + 6);
+
+  auto edge_x = [&](int u) { return static_cast<int>(std::lround(static_cast<double>(u) * CHUNK * scale_)) - view_.ox; };
+  auto edge_y = [&](int v) { return static_cast<int>(std::lround(static_cast<double>(v) * CHUNK * scale_)) - view_.oy; };
 
   for (int cy = cy0; cy <= cy1; ++cy)
     for (int ucx = ucx0; ucx <= ucx1; ++ucx) {
       const int cx = ((ucx % CHUNKS_X) + CHUNKS_X) % CHUNKS_X;
       Chunk& ch = chunks_[cy * CHUNKS_X + cx];
       if (!ch.tex) {
-        SDL_Texture* reuse = nullptr;
+        int tw = 0, th = 0;
+        render_chunk(cave, cx, cy, chunk_px_, tw, th);
+        SDL_Texture* tex = nullptr;
         if (chunk_count_ >= max_cached) {  // evict the least recently used chunk not on screen
           Chunk* victim = nullptr;
           for (Chunk& c : chunks_)
             if (c.tex && c.last_used != frame_ && (!victim || c.last_used < victim->last_used)) victim = &c;
-          if (victim) { reuse = victim->tex; victim->tex = nullptr; --chunk_count_; }
+          if (victim) { SDL_DestroyTexture(victim->tex); victim->tex = nullptr; --chunk_count_; }
         }
-        if (!reuse) {
-          reuse = SDL_CreateTexture(ren_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, CHUNK, CHUNK);
-          if (!reuse) continue;
-          SDL_SetTextureBlendMode(reuse, SDL_BLENDMODE_BLEND);
-        }
-        render_chunk(cave, cx, cy, chunk_px_);
-        SDL_UpdateTexture(reuse, nullptr, chunk_px_.data(), CHUNK * 4);
-        ch.tex = reuse;
+        tex = SDL_CreateTexture(ren_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, tw, th);
+        if (!tex) continue;
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+        SDL_UpdateTexture(tex, nullptr, chunk_px_.data(), tw * 4);
+        ch.tex = tex;
         ++chunk_count_;
       }
       ch.last_used = frame_;
-      SDL_Rect dst{base_x + (ucx - ucx0) * CHUNK, sy(static_cast<float>(cy * CHUNK)), CHUNK, CHUNK};
+      const int dx = edge_x(ucx), dy = edge_y(cy);
+      SDL_Rect dst{dx, dy, edge_x(ucx + 1) - dx, edge_y(cy + 1) - dy};
       SDL_RenderCopy(ren_, ch.tex, nullptr, &dst);
     }
 }
@@ -394,47 +406,47 @@ void Gfx::draw_pads(const Game& g, double t) const {
   const auto& pads = g.cave.pads;
   for (int pi = 0; pi < static_cast<int>(pads.size()); ++pi) {
     const LandingPad& p = pads[pi];
-    int x0 = sx(g.cam, p.x0);
-    int x1 = x0 + static_cast<int>(p.x1 - p.x0);
-    int y = sy(p.y);
-    if (x1 < -40 || x0 > w_ + 40 || y < -80 || y > h_ + 40) continue;
-    int w = std::max(1, x1 - x0), mid = (x0 + x1) / 2;
+    const int x0 = sx(g.cam, p.x0);
+    const int x1 = x0 + Z(p.x1 - p.x0);
+    const int y = sy(p.y);
+    if (x1 < -40 || x0 > w_ + 40 || y < -Z(80) || y > h_ + Z(40)) continue;
+    const int w = std::max(1, x1 - x0), mid = (x0 + x1) / 2;
+    const int z2 = Z(2), z4 = Z(4), z6 = Z(6);
 
     // Deck slab with cross-hatch
-    fill(x0, y - 2, w, 5, with_alpha(pal::PAD, 200));
-    outline(x0, y - 2, w, 5, pal::BRIGHT);
+    fill(x0, y - z2, w, Z(5), with_alpha(pal::PAD, 200));
+    outline(x0, y - z2, w, Z(5), pal::BRIGHT);
     color(with_alpha(pal::MID, 180));
-    for (int i = 0; i < w - 4; i += 6) SDL_RenderDrawLine(ren_, x0 + i, y - 2, x0 + i + 4, y + 2);
+    for (int i = 0; i < w - z4; i += z6) SDL_RenderDrawLine(ren_, x0 + i, y - z2, x0 + i + z4, y + z2);
 
     // Support struts into the rock
     color(with_alpha(pal::PAD, 160));
-    SDL_RenderDrawLine(ren_, x0 + 4, y + 3, x0 + 4, y + 18);
-    SDL_RenderDrawLine(ren_, x1 - 4, y + 3, x1 - 4, y + 18);
-    SDL_RenderDrawLine(ren_, mid, y + 3, mid, y + 22);
-    SDL_RenderDrawLine(ren_, x0 + 4, y + 18, x1 - 4, y + 18);
+    SDL_RenderDrawLine(ren_, x0 + z4, y + Z(3), x0 + z4, y + Z(18));
+    SDL_RenderDrawLine(ren_, x1 - z4, y + Z(3), x1 - z4, y + Z(18));
+    SDL_RenderDrawLine(ren_, mid, y + Z(3), mid, y + Z(22));
+    SDL_RenderDrawLine(ren_, x0 + z4, y + Z(18), x1 - z4, y + Z(18));
 
     // Approach chevrons, chasing upward
-    int chase = static_cast<int>(t * 3.0) % 3;
+    const int chase = static_cast<int>(t * 3.0) % 3;
     for (int c = 0; c < 3; ++c) {
-      int cy = y - 14 - c * 10, inset = 8 + c * 6;
-      Rgba col = with_alpha(pal::WARN, c == chase ? 255 : 110);
-      color(col);
-      SDL_RenderDrawLine(ren_, x0 + inset, cy, mid, cy + 6);
-      SDL_RenderDrawLine(ren_, x1 - inset, cy, mid, cy + 6);
+      const int cy = y - Z(14) - c * Z(10), inset = Z(8) + c * z6;
+      color(with_alpha(pal::WARN, c == chase ? 255 : 110));
+      SDL_RenderDrawLine(ren_, x0 + inset, cy, mid, cy + z6);
+      SDL_RenderDrawLine(ren_, x1 - inset, cy, mid, cy + z6);
     }
 
     // Alternating end beacons with a soft halo
-    bool on = (static_cast<int>(t * 2.5) + pi) % 2 == 0;
-    Rgba beacon = on ? pal::HOT : pal::PAD;
+    const bool on = (static_cast<int>(t * 2.5) + pi) % 2 == 0;
+    const Rgba beacon = on ? pal::HOT : pal::PAD;
     for (int bxp : {x0, x1}) {
-      fill(bxp - 5, y - 9, 10, 10, with_alpha(beacon, on ? 50 : 20));
-      fill(bxp - 2, y - 6, 4, 4, beacon);
+      fill(bxp - Z(5), y - Z(9), Z(10), Z(10), with_alpha(beacon, on ? 50 : 20));
+      fill(bxp - z2, y - z6, z4, z4, beacon);
     }
 
     // Centre T-mark
     color(pal::BRIGHT);
-    SDL_RenderDrawLine(ren_, mid - 8, y, mid + 8, y);
-    SDL_RenderDrawLine(ren_, mid, y - 6, mid, y + 2);
+    SDL_RenderDrawLine(ren_, mid - Z(8), y, mid + Z(8), y);
+    SDL_RenderDrawLine(ren_, mid, y - z6, mid, y + z2);
   }
 }
 
@@ -450,7 +462,7 @@ void Gfx::draw_particles(const Game& g) const {
     const float age = 1.f - p.life / p.ttl;
     const int b = std::clamp(static_cast<int>(age * BUCKETS), 0, BUCKETS - 1);
     colors[b] = mix(p.from, p.to, (b + 0.5f) / BUCKETS);
-    const int s = std::max(1, static_cast<int>(p.size * (0.4f + 0.6f * (1.f - age))));
+    const int s = Z(p.size * (0.4f + 0.6f * (1.f - age)));
     rects[b].push_back({x - s / 2, y - s / 2, s, s});
   });
   SDL_SetRenderDrawBlendMode(ren_, SDL_BLENDMODE_ADD);
@@ -549,7 +561,8 @@ void Gfx::draw_ship(const Game& g, double t) const {
 // ---------------------------------------------------------------------------
 // HUD / UI
 // ---------------------------------------------------------------------------
-void Gfx::draw_hud(const Game& g) const {
+void Gfx::draw_hud(const Game& g, const UiState& ui) const {
+  const bool pad = ui.device == InputDevice::Gamepad;  // hints name the device in use
   const Transform& tf = g.ecs.get<Transform>(g.ship);
   const Motion& m = g.ecs.get<Motion>(g.ship);
   const ShipDef& d = *g.ecs.get<Hull>(g.ship).def;
@@ -572,7 +585,7 @@ void Gfx::draw_hud(const Game& g) const {
   std::snprintf(buf, sizeof(buf), "%s%s", d.name, d.engines_top ? " TOP" : "");
   text(20, y, buf, pal::BRIGHT);
   y += lh;
-  text(20, y, "START MENU", pal::MID);
+  text(20, y, pad ? "START MENU" : "ESC MENU", pal::MID);
   y += lh + 4;
 
   const float alt = g.cave.floor_below(tf.pos.x, tf.pos.y) - tf.pos.y;
@@ -582,11 +595,11 @@ void Gfx::draw_hud(const Game& g) const {
   std::snprintf(buf, sizeof(buf), "VX %.0f VY %.0f", m.vel.x, m.vel.y);
   text(20, y, buf, pal::MID);
 
-  const bool pad = g.cave.pad_below(tf.pos.x, tf.pos.y, 140.f) != nullptr;
+  const bool on_pad = g.cave.pad_below(tf.pos.x, tf.pos.y, 140.f) != nullptr;
   const bool ok_v = m.vel.y < tune::LAND_MAX_VY && std::abs(m.vel.x) < tune::LAND_MAX_VX;
   const bool ok_a = std::abs(tf.angle) < tune::LAND_MAX_ANGLE;
   const struct { const char* s; bool ok; } status[] = {
-      {pad ? "PAD OK" : "NO PAD", pad}, {ok_v ? "SPEED OK" : "SPEED HI", ok_v}, {ok_a ? "ATT OK" : "ATT BAD", ok_a}};
+      {on_pad ? "PAD OK" : "NO PAD", on_pad}, {ok_v ? "SPEED OK" : "SPEED HI", ok_v}, {ok_a ? "ATT OK" : "ATT BAD", ok_a}};
   const int rx = w_ - text_width("SPEED OK") - 24;
   fill(rx - 12, 8, w_ - rx + 4, lh * 3 + 16, with_alpha(pal::MENU, 120));
   for (int i = 0; i < 3; ++i) text(rx, 16 + lh * i, status[i].s, status[i].ok ? pal::PAD : pal::HOT);
@@ -596,7 +609,7 @@ void Gfx::draw_hud(const Game& g) const {
     float pulse = 0.65f + 0.35f * std::sin(fl.timer * 10.f);
     Rgba c = landed ? pal::PAD : pal::HOT;
     text_centered(w_ / 2, 48, landed ? "LANDED" : "CRASH", with_alpha(c, static_cast<uint8_t>(255 * pulse)));
-    text_centered(w_ / 2, 48 + lh, landed ? "A TO RELIGHT" : "A TO RESET", pal::MID);
+    text_centered(w_ / 2, 48 + lh, landed ? "THRUST TO LIFT OFF" : (pad ? "A TO RESPAWN" : "ENTER TO RESPAWN"), pal::MID);
   }
 }
 
@@ -644,6 +657,7 @@ void Gfx::draw_menu(const Game& g, const UiState& ui) const {
       case MenuAction::Ship:
         std::snprintf(line, sizeof line, "%s %s", label, g.ecs.get<Hull>(g.ship).def->name);
         break;
+      case MenuAction::Zoom: std::snprintf(line, sizeof line, "%s %s", label, ZOOM_LEVELS[g.cam.zoom].name); break;
       case MenuAction::SwapEngines: std::snprintf(line, sizeof line, "%s %s", label, ui.swap_engines ? "ON" : "OFF"); break;
       case MenuAction::Sound: std::snprintf(line, sizeof line, "%s %s", label, ui.sound ? "ON" : "OFF"); break;
       default: std::snprintf(line, sizeof line, "%s", label);
@@ -656,15 +670,17 @@ void Gfx::draw_menu(const Game& g, const UiState& ui) const {
     }
     text(lx, ly, line, sel ? pal::WARN : pal::MID);
   }
-  text_centered(w_ / 2, py + panel_h - lh - 8, "UP DOWN MOVE  A SELECT", pal::MID);
+  text_centered(w_ / 2, py + panel_h - lh - 8, ui.device == InputDevice::Gamepad ? "UP DOWN MOVE  A SELECT" : "UP DOWN MOVE  ENTER SELECT", pal::MID);
 }
 
 // ---------------------------------------------------------------------------
 // Frame
 // ---------------------------------------------------------------------------
 void Gfx::draw(const Game& g, const UiState& ui) {
-  view_.ox = std::round(g.cam.x + g.cam.shake_off.x);
-  view_.oy = std::round(g.cam.y + g.cam.shake_off.y);
+  scale_ = h_ / g.cam.vh;  // screen px per world px; animates while the zoom level changes
+  bake_scale_ = std::min(h_ / ZOOM_LEVELS[g.cam.zoom].visible_h, 3.f);  // chunk resolution: the level's own scale
+  view_.ox = static_cast<int>(std::lround(g.cam.x * static_cast<double>(scale_) + g.cam.shake_off.x * scale_));
+  view_.oy = static_cast<int>(std::lround(g.cam.y * static_cast<double>(scale_) + g.cam.shake_off.y * scale_));
   const double t = ui.time;
 
   color(pal::BG);
@@ -680,7 +696,12 @@ void Gfx::draw(const Game& g, const UiState& ui) {
     float flash = (0.5f + 0.5f * std::sin(fl.timer * 20.f)) * std::exp(-fl.timer * 1.5f);
     fill(0, 0, w_, h_, with_alpha(pal::HOT, static_cast<uint8_t>(8 + 100 * flash)));
   }
-  draw_hud(g);
+  draw_hud(g, ui);
+  if (ui.zoom_toast > 0.f) {  // zoom level name, fading out
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "ZOOM %s", ZOOM_LEVELS[g.cam.zoom].name);
+    text_centered(w_ / 2, h_ - MM_H - 14 - FONT_CELL_H - 18, buf, with_alpha(pal::BRIGHT, static_cast<uint8_t>(255 * clampf(ui.zoom_toast / 0.5f, 0.f, 1.f))));
+  }
   draw_minimap(g, t);
   if (ui.menu_open) draw_menu(g, ui);
 

@@ -22,9 +22,9 @@ class Gfx {
   bool save_screenshot(const char* path) const;
 
  private:
-  struct View { float ox, oy; };
+  // World layer: world px * scale_ = screen px; the offsets are the camera's position in screen px
+  struct View { int ox, oy; };
 
-  void build_rock_tiles();
   void build_overlay();
   void build_minimap(const Cave& cave);
 
@@ -37,21 +37,25 @@ class Gfx {
   void text(int x, int y, const char* s, Rgba c) const;
   int text_width(const char* s) const;
   void text_centered(int cx, int y, const char* s, Rgba c) const { text(cx - text_width(s) / 2, y, s, c); }
-  int sx(const Camera& cam, float wx) const;
+  int sx(const Camera& cam, float wx) const;  // world -> screen px (zoom applied)
   int sy(float wy) const;
+  int Z(float world_len) const;               // a world length in screen px, at least 1
 
   void draw_world(const Game& g);
-  void render_chunk(const Cave& cave, int cx, int cy, std::vector<uint8_t>& px) const;
+  void render_chunk(const Cave& cave, int cx, int cy, std::vector<uint8_t>& px, int& tex_w, int& tex_h) const;
+  void drop_chunks();
   void draw_pads(const Game& g, double t) const;
   void draw_particles(const Game& g) const;
   void draw_ship(const Game& g, double t) const;
-  void draw_hud(const Game& g) const;
+  void draw_hud(const Game& g, const UiState& ui) const;
   void draw_minimap(const Game& g, double t);
   void draw_menu(const Game& g, const UiState& ui) const;
 
   SDL_Renderer* ren_ = nullptr;
-  int w_ = 1280, h_ = 720;
-  View view_{0.f, 0.f};
+  int w_ = 1280, h_ = 720;           // screen (output) size in px
+  float scale_ = 1.f;                // screen px per world px (animates while zooming)
+  float bake_scale_ = 1.f;           // scale the cached chunk textures were rasterised at (the zoom level's)
+  View view_{0, 0};
   const char* glyph_bits_[95] = {};  // 3x5 bit strings per printable ASCII char
   SDL_Texture* overlay_ = nullptr;
   SDL_Texture* minimap_ = nullptr;
@@ -64,9 +68,9 @@ class Gfx {
     unsigned last_used = 0;
   };
   std::vector<Chunk> chunks_;
-  std::vector<uint8_t> rock_px_;  // MAX_DEPTH tiles of TILE x TILE RGBA
   std::vector<uint8_t> chunk_px_;  // scratch buffer
   unsigned chunk_generation_ = ~0u;
   unsigned frame_ = 0;
   int chunk_count_ = 0;
+  float chunk_scale_ = 0.f;  // bake scale of the cached chunks; a change of zoom level re-rasterises them
 };

@@ -1,21 +1,5 @@
 {
   "nodes": {
-    "arkos-sysroot": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1787339014,
-        "narHash": "sha256-vdc15JmtewgOwZPk8PfWZzM+t19P6YlRfe2Jp02+ycg=",
-        "owner": "grumnix",
-        "repo": "arkos-sysroot",
-        "rev": "3d2a98fe2fdff123fe4c6c7c7e9f6c0150c99a1c",
-        "type": "github"
-      },
-      "original": {
-        "owner": "grumnix",
-        "repo": "arkos-sysroot",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1791260994,
@@ -34,7 +18,6 @@
     },
     "root": {
       "inputs": {
-        "arkos-sysroot": "arkos-sysroot",
         "nixpkgs": "nixpkgs"
       }
     }

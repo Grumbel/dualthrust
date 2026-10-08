@@ -10,11 +10,31 @@
       url = "github:grumnix/arkos-sysroot";
       flake = false;
     };
+
+    # SDL2 sources for the WebAssembly build (nix/wasm.nix)
+    sdl2-src = {
+      url = "https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-2.30.3.tar.gz";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, arkos-sysroot }:
+  outputs = { self, nixpkgs, arkos-sysroot, sdl2-src }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
+
+      # VERSION is the only source of truth; -dev builds get .<revCount>+g<rev> appended.
+      versionBase = nixpkgs.lib.strings.removeSuffix "\n" (builtins.readFile ./VERSION);
+      gitRev = "${self.shortRev or self.dirtyShortRev or "dirty"}";
+      isDev = nixpkgs.lib.strings.hasInfix "-dev" versionBase;
+      version =
+        if isDev then "${versionBase}.${toString (self.revCount or 0)}+g${gitRev}"
+        else versionBase;
+
+      mkWasm = pkgs: import ./nix/wasm.nix {
+        inherit pkgs version gitRev;
+        sdlSrc = sdl2-src;
+        sdlVersion = "2.30.3";
+      };
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         pkgs = import nixpkgs { inherit system; };
       });
@@ -23,7 +43,7 @@
       packages = forAllSystems ({ pkgs }:
         let
           lib = pkgs.lib;
-          version = "0.1.0";
+          wasm = mkWasm pkgs;
           r36s = import ./nix/r36s.nix {
             inherit (pkgs) lib stdenv stdenvNoCC cmake pkg-config writeShellScript zip pkgsCross;
             sysrootSrc = arkos-sysroot;
@@ -42,6 +62,10 @@
             inherit version;
           };
         in {
+        # WebAssembly (Emscripten): `nix build .#dualthrust-wasm`, `nix run .#dualthrust-wasm`
+        sdl2-wasm = wasm.sdl2Wasm;
+        dualthrust-wasm = wasm.dualthrustWasm;
+
         # R36S / ArkOS handheld (aarch64, linked against the ArkOS sysroot)
         arkos-sysroot = r36s.arkosSysroot;
         dualthrust-r36s = dualthrustR36s;
@@ -53,7 +77,7 @@
 
         default = pkgs.stdenv.mkDerivation {
           pname = "dualthrust";
-          version = "0.1.0";
+          inherit version;
           src = self;
 
           nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.pkg-config ];
@@ -61,6 +85,7 @@
 
           cmakeFlags = [
             "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+            "-DPROJECT_VERSION_FULL=${version}"
             "-GNinja"
           ];
 
@@ -78,6 +103,8 @@
           type = "app";
           program = "${self.packages.${pkgs.system}.default}/bin/dualthrust";
         };
+        # serve the WebAssembly build locally and open a browser
+        dualthrust-wasm = (mkWasm pkgs).serveApp;
       });
 
       devShells = forAllSystems ({ pkgs }: {
