@@ -61,6 +61,27 @@
             r36sPkg = dualthrustR36s;
             inherit version;
           };
+          dualthrustNative = pkgs.stdenv.mkDerivation {
+            pname = "dualthrust";
+            inherit version;
+            src = self;
+
+            nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.pkg-config ];
+            buildInputs = [ pkgs.SDL2 ];
+
+            cmakeFlags = [
+              "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+              "-DPROJECT_VERSION_FULL=${version}"
+              "-GNinja"
+            ];
+
+            meta = with pkgs.lib; {
+              description = "CRT dual-engine lander controlled by gamepad triggers";
+              license = licenses.gpl3Plus;
+              platforms = platforms.linux;
+              mainProgram = "dualthrust";
+            };
+          };
         in {
         # WebAssembly (Emscripten): `nix build .#dualthrust-wasm`, `nix run .#dualthrust-wasm`
         sdl2-wasm = wasm.sdl2Wasm;
@@ -75,27 +96,9 @@
           inherit version;
         };
 
-        default = pkgs.stdenv.mkDerivation {
-          pname = "dualthrust";
-          inherit version;
-          src = self;
-
-          nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.pkg-config ];
-          buildInputs = [ pkgs.SDL2 ];
-
-          cmakeFlags = [
-            "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
-            "-DPROJECT_VERSION_FULL=${version}"
-            "-GNinja"
-          ];
-
-          meta = with pkgs.lib; {
-            description = "CRT dual-engine lander controlled by gamepad triggers";
-            license = licenses.gpl3Plus;
-            platforms = platforms.linux;
-            mainProgram = "dualthrust";
-          };
-        };
+        # the native package; `dualthrust` is an alias so `nix build .#dualthrust` reads naturally
+        default = dualthrustNative;
+        dualthrust = dualthrustNative;
       });
 
       apps = forAllSystems ({ pkgs }: {
