@@ -42,13 +42,14 @@ void exhaust_system(Game& g, float dt) {
       [&](Entity, Thrusters& th, Transform& t, Motion& m, Hull& h, Flight& f) {
         if (f.state != FlightState::Flying) return;
         const ShipDef& d = *h.def;
-        Vec2 down = rotate({0.f, 1.f}, t.angle);  // exhaust direction
-        Vec2 side{-down.y, down.x};
-        for (int i = 0; i < 2; ++i) {
-          float lvl = th.level[i];
+        for (int i = 0; i < thruster_count(d); ++i) {
+          const ThrusterPose tp = thruster_pose(d, i);
+          const float lvl = th.level[tp.channel] * tp.power;
           if (lvl < 0.05f) { th.emit_acc[i] = 0.f; continue; }
+          const Vec2 down = rotate(tp.flame, t.angle);  // exhaust direction
+          const Vec2 side{-down.y, down.x};
           th.emit_acc[i] += tune::EXHAUST_RATE * lvl * dt;
-          Vec2 nozzle = to_world(t, {i == 0 ? -d.engine_offset_x : d.engine_offset_x, d.nozzle_y()});
+          Vec2 nozzle = to_world(t, tp.nozzle);
           for (; th.emit_acc[i] >= 1.f; th.emit_acc[i] -= 1.f) {
             Particle p;
             p.ttl = p.life = g.rng.range(0.18f, 0.45f);
@@ -70,7 +71,6 @@ void particle_system(Game& g, float dt) {
     m.vel = m.vel * std::max(0.f, 1.f - p.drag * dt);
     m.vel.y += tune::GRAVITY * p.gravity * dt;
     t.pos += m.vel * dt;
-    t.pos.x = Cave::wrap_x(t.pos.x);
     // Sparks die in rock, but get a moment of grace so bursts can leave the surface
     const bool embedded = p.ttl - p.life > 0.08f && cave.is_solid_world(t.pos.x, t.pos.y);
     if (p.life <= 0.f || embedded) g.dead.push_back(e);
@@ -93,6 +93,7 @@ void event_system(Game& g) {
               with_alpha(pal::HOT, 0), 0.6f, 0.6f);
         g.cam.shake = std::max(g.cam.shake, clampf(ev.strength / 250.f, 0.f, 0.5f));
         break;
+      default: break;  // beeps have no particles
       case SimEventKind::Crashed:
         burst(g, ev.pos, ev.normal, 140, 340.f, PI * 1.6f, pal::FLAME_CORE, with_alpha(pal::HOT, 0), 0.8f,
               1.6f);
@@ -105,120 +106,230 @@ void event_system(Game& g) {
 }
 
 // ---------------------------------------------------------------------------
-// Flight: thrust, gravity, drag, integration
+// Rigid body: forces in, Box2D step, state out
 // ---------------------------------------------------------------------------
-void flight_system(Game& g, float dt) {
-  g.ecs.view<Hull, Transform, Motion, Thrusters, Flight>(
-      [&](Entity, Hull& h, Transform& t, Motion& m, Thrusters& th, Flight& f) {
-        if (f.state != FlightState::Flying) return;
-        const ShipDef& d = *h.def;
-        const Vec2 thrust_dir = rotate({0.f, -1.f}, t.angle);  // toward the nose
-        Vec2 force{};
-        float torque = 0.f;
-        for (int i = 0; i < 2; ++i) {
-          if (th.level[i] <= 0.f) continue;
-          Vec2 fv = thrust_dir * (d.max_thrust * th.level[i]);
-          force += fv;
-          Vec2 r = rotate({i == 0 ? -d.engine_offset_x : d.engine_offset_x, d.eng_y()}, t.angle);
-          torque += r.x * fv.y - r.y * fv.x;
-        }
-        m.vel += force * (dt / d.mass);
-        m.vel.y += tune::GRAVITY * dt;
-        m.vel = m.vel * std::max(0.f, 1.f - tune::LINEAR_DRAG * dt);
-        t.pos += m.vel * dt;
-        t.pos.x = Cave::wrap_x(t.pos.x);
-        m.ang_vel += (torque / d.inertia) * dt;
-        m.ang_vel *= std::max(0.f, 1.f - tune::ANGULAR_DRAG * dt);
-        m.ang_vel = clampf(m.ang_vel, -tune::MAX_ANGULAR_VEL, tune::MAX_ANGULAR_VEL);
-        t.angle += m.ang_vel * dt;
-        while (t.angle > PI) t.angle -= 2.f * PI;
-        while (t.angle < -PI) t.angle += 2.f * PI;
-      });
+void stat_add(Game& g, double Stats::* field, double v) {
+  if (!g.stats_enabled) return;
+  g.stats.*field += v;
+  g.stats_dirty = true;
 }
 
-// ---------------------------------------------------------------------------
-// Collision: probe points vs. the rock grid
-// ---------------------------------------------------------------------------
-using Probes = std::array<Vec2, 10>;
+// Engine thrust at the nozzle mounts, and the leg springs. The legs are light bodies on prismatic joints; the
+// joint only guides them, the spring (stiffness for half the ship's mass each, so it feels the same whatever the
+// leg mass) is applied here, which also lets the retract button simply move its target.
+void forces_system(Game& g) {
+  g.ecs.view<Body, Hull, Thrusters, Flight, Legs>([&](Entity, Body& body, Hull& h, Thrusters& th, Flight& f, Legs& lg) {
+    const ShipDef& d = *h.def;
+    const ShipBodies& sb = body.b;
+    const b2Rot q = b2Body_GetRotation(sb.hull);
 
-Probes make_probes(const ShipDef& d) {
-  const float ox = d.engine_offset_x, ey = d.eng_y(), fy = d.foot_y();
-  return {{
-      // feet / belly (always ground-side)
-      {-ox * 0.6f, fy}, {0.f, fy + 4.f}, {ox * 0.6f, fy},
-      {-d.half_w * 0.7f, fy - 2.f}, {d.half_w * 0.7f, fy - 2.f},
-      // engines
-      {-ox, ey}, {ox, ey},
-      // nose / sides
-      {0.f, -d.half_h * 0.85f}, {-d.half_w * 0.55f, 0.f}, {d.half_w * 0.55f, 0.f},
-  }};
+    if (f.state != FlightState::Crashed) {
+      for (int i = 0; i < thruster_count(d); ++i) {
+        const ThrusterPose tp = thruster_pose(d, i);
+        const float level = th.level[tp.channel];
+        if (level <= 0.f) continue;
+        const float force = d.mass * d.max_thrust / PPM * level * tp.power;
+        const b2Vec2 at = b2Body_GetWorldPoint(sb.hull, to_b2(tp.pos));
+        b2Body_ApplyForce(sb.hull, b2MulSV(force, b2RotateVector(q, {tp.push.x, tp.push.y})), at, true);
+      }
+    }
+
+    if (!b2Body_IsAwake(sb.hull)) return;  // resting: springs are balanced; do not keep the bodies awake
+    const LegGeom lgeo = leg_geom(d);
+    const float m_eff = d.mass * 0.5f;
+    const float omega = 2.f * PI * tune::LEG_HERTZ;
+    const float k = f.state == FlightState::Crashed ? 0.f : m_eff * omega * omega;
+    const float c = 2.f * tune::LEG_DAMPING * m_eff * omega;
+    const float target = lg.deployed ? 0.f : -lgeo.travel / PPM;
+    for (int i = 0; i < 2; ++i) {
+      const float side = i == 0 ? -1.f : 1.f;
+      const b2Vec2 axis = b2RotateVector(q, {side * lgeo.axis_x, lgeo.axis_y});
+      const float x = b2PrismaticJoint_GetTranslation(sb.joint[i]);
+      const float v = b2PrismaticJoint_GetSpeed(sb.joint[i]);
+      const float F = k * (target - x) - c * v;  // along the strut, outward positive
+      const b2Vec2 fv = b2MulSV(F, axis);
+      b2Body_ApplyForceToCenter(sb.leg[i], fv, false);
+      b2Body_ApplyForce(sb.hull, b2Neg(fv), b2Body_GetPosition(sb.leg[i]), false);
+    }
+  });
 }
 
-bool first_hit(const Cave& cave, const Transform& t, const Probes& probes, Vec2& contact) {
-  for (const Vec2& lp : probes) {
-    Vec2 wp = to_world(t, lp);
-    if (cave.is_solid_world(wp.x, wp.y)) { contact = wp; return true; }
-  }
-  if (cave.is_solid_world(t.pos.x, t.pos.y)) { contact = t.pos; return true; }
+// Box2D -> components
+void sync_system(Game& g) {
+  g.ecs.view<Body, Transform, Motion, Legs, Hull>([&](Entity, Body& body, Transform& t, Motion& m, Legs& lg, Hull&) {
+    const ShipBodies& sb = body.b;
+    const b2Vec2 p = b2Body_GetPosition(sb.hull);
+    float w = b2Body_GetAngularVelocity(sb.hull);
+    if (std::abs(w) > tune::MAX_ANGULAR_VEL) {
+      w = clampf(w, -tune::MAX_ANGULAR_VEL, tune::MAX_ANGULAR_VEL);
+      b2Body_SetAngularVelocity(sb.hull, w);
+    }
+    t.pos = from_b2(p);
+    t.angle = b2Rot_GetAngle(b2Body_GetRotation(sb.hull));
+    m.vel = from_b2(b2Body_GetLinearVelocity(sb.hull));
+    m.ang_vel = w;
+    for (int i = 0; i < 2; ++i) lg.trans[i] = b2PrismaticJoint_GetTranslation(sb.joint[i]) * PPM;
+  });
+  g.ecs.view<Body, Rope, Hull>([&](Entity, Body& body, Rope& r, Hull& h) {
+    const ShipBodies& sb = body.b;
+    r.anchor = from_b2(b2Body_GetWorldPoint(sb.hull, to_b2({0.f, winch_y(*h.def)})));
+    r.hook_pos = from_b2(b2Body_GetPosition(sb.hook));
+    r.hook_angle = b2Rot_GetAngle(b2Body_GetRotation(sb.hook));
+    r.slack = std::max(0.f, r.length - length(r.hook_pos - r.anchor));
+  });
+  g.ecs.view<Cargo, Transform>([&](Entity, Cargo& c, Transform& t) {
+    if (!b2Body_IsEnabled(c.body)) return;
+    t.pos = from_b2(b2Body_GetPosition(c.body));
+    t.angle = b2Rot_GetAngle(b2Body_GetRotation(c.body));
+  });
+}
+
+void beep(Game& g, SimEventKind kind) { g.fired.push_back({kind, {}, {}, 200.f}); }
+
+void notice(Game& g, const char* text) {
+  std::snprintf(g.notice, sizeof g.notice, "%s", text);
+  g.notice_timer = 2.2f;
+}
+
+// Crates sleep as frozen (disabled) bodies until the ground around them is built, and are frozen again once
+// they are at rest and the ship has moved on.
+void cargo_activation(Game& g) {
+  Entity held = NULL_ENTITY;
+  g.ecs.view<Rope>([&](Entity, Rope& r) { held = r.held; });
+  g.ecs.view<Cargo, Transform>([&](Entity e, Cargo& c, Transform& t) {
+    if (!b2Body_IsEnabled(c.body)) {
+      if (g.phys.terrain_at(t.pos)) {
+        b2Body_Enable(c.body);
+        b2Body_SetAwake(c.body, true);
+      }
+    } else if (e != held && !b2Body_IsAwake(c.body) && !g.phys.terrain_at(t.pos)) {
+      b2Body_Disable(c.body);
+    }
+  });
+}
+
+// Reel the cable in and out
+void rope_system(Game& g, float dt) {
+  g.ecs.view<Body, Rope>([&](Entity, Body& body, Rope& r) {
+    const float speed = r.held != NULL_ENTITY ? rope::REEL_SPEED_LOADED : rope::REEL_SPEED;
+    const float before = r.length;
+    const float target = r.out ? rope::OUT_LEN : rope::MIN_LEN;  // all the way out or all the way in
+    r.length = r.length < target ? std::min(target, r.length + speed * dt) : std::max(target, r.length - speed * dt);
+    if (r.length != before) {
+      b2DistanceJoint_SetLengthRange(body.b.cable, 0.05f, r.length / PPM);
+      b2DistanceJoint_SetLength(body.b.cable, r.length / PPM);
+      b2Body_SetAwake(body.b.hook, true);
+    }
+  });
+}
+
+// Delivery: a crate that was lifted and now rests on a landing pad
+void cargo_system(Game& g, float dt) {
+  Entity held = NULL_ENTITY;
+  g.ecs.view<Rope>([&](Entity, Rope& r) { held = r.held; });
+  g.ecs.view<Cargo, Transform>([&](Entity e, Cargo& c, Transform& t) {
+    if (!b2Body_IsEnabled(c.body)) return;
+    const float speed = length(from_b2(b2Body_GetLinearVelocity(c.body)));
+    c.rest_time = (speed < 8.f && e != held) ? c.rest_time + dt : 0.f;
+    if (!c.picked || c.rest_time < 1.f) return;
+    const float bottom = t.pos.y + c.def->half_h;
+    for (const LandingPad& p : g.cave.pads)
+      if (std::abs(bottom - p.y) < 12.f && t.pos.x >= p.x0 && t.pos.x <= p.x1) {
+        c.picked = false;
+        stat_add(g, &Stats::cargo_delivered, 1);
+        notice(g, "CARGO DELIVERED");
+        beep(g, SimEventKind::Delivered);
+        return;
+      }
+  });
+}
+
+// Does the lowest contact lie on a landing pad?
+bool touching_pad(const Cave& cave, Vec2 pt) {
+  for (const LandingPad& p : cave.pads)
+    if (std::abs(pt.y - p.y) < Cave::CELL && pt.x >= p.x0 - 4.f && pt.x <= p.x1 + 4.f)
+      return true;
   return false;
 }
 
-// Outward surface normal near `contact`, from the rock density around it
-Vec2 surface_normal(const Cave& cave, Vec2 contact, Vec2 vel) {
-  const float s = Cave::CELL;
-  static constexpr float offs[8][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-  Vec2 grad{};
-  for (const auto& o : offs)
-    if (cave.is_solid_world(contact.x + o[0] * s, contact.y + o[1] * s)) grad += {o[0], o[1]};
-  float gl = length(grad);
-  if (gl > 1e-3f) return grad * (-1.f / gl);
-  float vl = length(vel);
-  return vl > 1e-3f ? vel * (-1.f / vl) : Vec2{0.f, -1.f};
+// Impacts from Box2D's hit events: hard hits destroy the ship, softer ones bounce with sparks and noise.
+void impact_system(Game& g) {
+  const b2ContactEvents ce = b2World_GetContactEvents(g.phys.world());
+  g.ecs.view<Flight>([&](Entity, Flight& f) {
+    for (int i = 0; i < ce.hitCount; ++i) {
+      const b2ContactHitEvent& ev = ce.hitEvents[i];
+      const Part pa = shape_part(ev.shapeIdA), pb = shape_part(ev.shapeIdB);
+      const bool a_terrain = pa == Part::Terrain;
+      const Part ship_part = a_terrain ? pb : pa;
+      if (!is_ship_part(ship_part) || (a_terrain ? false : pb != Part::Terrain)) continue;  // only ship against rock
+      const Vec2 n = Vec2{ev.normal.x, ev.normal.y} * (a_terrain ? 1.f : -1.f);  // out of the rock, unit
+      const Vec2 pos{ev.point.x * PPM, ev.point.y * PPM};
+      const float speed = ev.approachSpeed * PPM;
+      if (f.state == FlightState::Crashed) continue;
+      const float limit = ship_part == Part::Hull ? tune::CRASH_HULL_SPEED : tune::CRASH_FOOT_SPEED;
+      if (speed > limit) {
+        f.state = FlightState::Crashed;
+        f.timer = f.settle = 0.f;
+        g.events.push_back({SimEventKind::Crashed, pos, n, speed});
+        stat_add(g, &Stats::crashes, 1);
+        std::printf("CRASH impact=%.1f part=%d\n", speed, static_cast<int>(ship_part));
+      } else if (speed > tune::HIT_MIN_SPEED) {
+        g.events.push_back({SimEventKind::Bounce, pos, n, speed});
+        stat_add(g, &Stats::hard_hits, 1);
+      }
+    }
+  });
 }
 
-void collision_system(Game& g) {
-  const Cave& cave = g.cave;
-  g.ecs.view<Hull, Transform, Motion, Flight>([&](Entity, Hull& h, Transform& t, Motion& m, Flight& f) {
-    if (f.state != FlightState::Flying) return;
-    const ShipDef& d = *h.def;
-    const Probes probes = make_probes(d);
-    Vec2 contact;
-    if (!first_hit(cave, t, probes, contact)) return;
-
-    const Vec2 n = surface_normal(cave, contact, m.vel);
-
-    // Push the hull out along the normal
-    Vec2 scratch;
-    for (int step = 0; step < 24 && first_hit(cave, t, probes, scratch); ++step) {
-      t.pos += n * 3.f;
-      t.pos.x = Cave::wrap_x(t.pos.x);
+// Touching, resting and landed/flying bookkeeping
+void ground_system(Game& g, float dt) {
+  const float real_dt = dt / tune::TIME_SCALE;
+  g.ecs.view<Body, Flight, Motion, Thrusters, Transform>([&](Entity, Body& body, Flight& f, Motion& m, Thrusters& th, Transform& t) {
+    f.contacts = 0;
+    float lowest = -1e9f;
+    for (b2BodyId b : {body.b.hull, body.b.leg[0], body.b.leg[1]}) {
+      b2ContactData cd[8];
+      const int n = b2Body_GetContactData(b, cd, 8);
+      for (int i = 0; i < n; ++i)
+        for (int k = 0; k < cd[i].manifold.pointCount; ++k) {
+          ++f.contacts;
+          const Vec2 pt = from_b2(cd[i].manifold.points[k].point);
+          if (pt.y > lowest) { lowest = pt.y; f.contact_pt = pt; }
+        }
     }
 
-    const float vn = -dot(m.vel, n);  // > 0 when moving into the rock
-    if (vn <= 0.f) return;
-
-    const Vec2 cpos{Cave::wrap_x(contact.x), contact.y};
-    const bool pad = cave.on_pad(cpos.x, cpos.y + Cave::CELL) || cave.on_pad(t.pos.x, t.pos.y + d.foot_y() + 8.f);
-    const bool gentle = m.vel.y < tune::LAND_MAX_VY && std::abs(m.vel.x) < tune::LAND_MAX_VX &&
-                        std::abs(t.angle) < tune::LAND_MAX_ANGLE && std::abs(m.ang_vel) < tune::LAND_MAX_ANGVEL;
-
-    if (pad && gentle && vn < tune::CRASH_IMPACT_SPEED * 0.5f) {
-      f = {FlightState::Landed, 0.f};
-      m = {};
-      t.angle = 0.f;
-      g.events.push_back({SimEventKind::Landed, cpos, n, vn});
-      std::printf("LANDED\n");
-    } else if (vn > tune::CRASH_IMPACT_SPEED) {
-      f = {FlightState::Crashed, 0.f};
-      m = {};
-      g.events.push_back({SimEventKind::Crashed, cpos, n, vn});
-      std::printf("CRASH impact=%.1f vel=(%.0f,%.0f) angle=%.2f pos=(%.0f,%.0f)\n", vn, m.vel.x, m.vel.y, t.angle, t.pos.x, t.pos.y);
-    } else {
-      Vec2 tangent = m.vel - n * dot(m.vel, n);
-      m.vel = n * (vn * tune::BOUNCE_RESTITUTION) + tangent * tune::BOUNCE_FRICTION;
-      m.ang_vel *= tune::BOUNCE_ANG_DAMP;
-      if (vn > 30.f) g.events.push_back({SimEventKind::Bounce, cpos, n, vn});
+    const float speed = length(m.vel);
+    const bool thrust = std::max(std::max(th.level[0], th.level[1]), std::max(th.level[2], th.level[3])) > 0.05f;
+    f.timer += dt;
+    if (f.state == FlightState::Flying) {
+      const bool resting = f.contacts > 0 && !thrust && speed < tune::SETTLE_SPEED && std::abs(m.ang_vel) < tune::SETTLE_ANGVEL &&
+                           std::abs(t.angle) < tune::SETTLE_MAX_ANGLE;  // on its side or upside down is not landed
+      f.settle = resting ? f.settle + dt : 0.f;
+      if (f.settle >= tune::SETTLE_TIME) {
+        f.state = FlightState::Landed;
+        f.timer = 0.f;
+        const bool pad = touching_pad(g.cave, f.contact_pt);
+        g.events.push_back({SimEventKind::Landed, f.contact_pt, {0.f, -1.f}, 0.f});
+        stat_add(g, &Stats::landings, 1);
+        if (pad) stat_add(g, &Stats::pad_landings, 1);
+        std::printf("LANDED%s\n", pad ? " (pad)" : "");
+      }
+    } else if (f.state == FlightState::Landed) {
+      if (thrust || speed > tune::UNSETTLE_SPEED || f.contacts == 0) {
+        f.state = FlightState::Flying;
+        f.timer = f.settle = 0.f;
+      }
     }
+
+    // Statistics
+    if (f.state == FlightState::Flying) {
+      stat_add(g, &Stats::flight_time, real_dt);
+      stat_add(g, &Stats::distance, speed * dt / PPM);
+    } else if (f.state == FlightState::Landed) {
+      stat_add(g, &Stats::landed_time, real_dt);
+    }
+    if (f.state != FlightState::Crashed)
+      stat_add(g, &Stats::thrust_time, (th.level[0] + th.level[1] + th.level[2] + th.level[3]) * real_dt);
   });
 }
 
@@ -227,6 +338,65 @@ void collision_system(Game& g) {
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
+namespace {
+
+// Crates for the current cave (new ones when the cave changed)
+void ensure_cargo(Game& g) {
+  if (g.cargo_generation == g.cave.generation) return;
+  g.cargo_generation = g.cave.generation;
+  g.dead.clear();
+  g.ecs.view<Cargo>([&](Entity e, Cargo& c) {
+    b2DestroyBody(c.body);
+    g.dead.push_back(e);
+  });
+  for (Entity e : g.dead) g.ecs.destroy(e);
+  g.dead.clear();
+  for (const CargoSpot& s : g.cave.cargo) {
+    const CargoDef& def = CARGO_DEFS[std::clamp(s.kind, 0, CARGO_DEF_COUNT - 1)];
+    const Vec2 pos{s.x, s.floor_y - def.half_h - 1.f};
+    Entity e = g.ecs.create();
+    g.ecs.add<Transform>(e, {pos, 0.f});
+    g.ecs.add<Cargo>(e, {g.phys.create_cargo(pos, 0.f, def), &def});
+  }
+}
+
+// Let go of the crate on the hook (if any) and return it to a free crate's behaviour
+void release_crate(Game& g) {
+  Rope& r = g.ecs.get<Rope>(g.ship);
+  Body& body = g.ecs.get<Body>(g.ship);
+  if (r.held == NULL_ENTITY) return;
+  if (B2_IS_NON_NULL(body.b.grip) && b2Joint_IsValid(body.b.grip)) b2DestroyJoint(body.b.grip);
+  body.b.grip = b2_nullJointId;
+  Cargo& c = g.ecs.get<Cargo>(r.held);
+  b2Body_SetLinearDamping(c.body, 0.05f);
+  b2Body_SetAngularDamping(c.body, 0.3f);
+  b2ShapeId sid;
+  if (b2Body_GetShapes(c.body, &sid, 1) == 1) {
+    b2Filter f = b2Shape_GetFilter(sid);
+    f.maskBits |= CAT_SHIP;
+    b2Shape_SetFilter(sid, f);
+  }
+  r.held = NULL_ENTITY;
+}
+
+// (Re)create the ship's rigid bodies at a pose, keeping or resetting its state
+void build_bodies(Game& g, Vec2 pos, float angle, Vec2 vel, float ang_vel) {
+  Body& body = g.ecs.get<Body>(g.ship);
+  g.phys.init();
+  ensure_cargo(g);
+  release_crate(g);
+  g.phys.destroy_ship(body.b);
+  g.ecs.get<Rope>(g.ship) = {};
+  g.phys.stream(g.cave, pos, 9);  // the ground must exist before the ship does
+  body.b = g.phys.create_ship(*g.ecs.get<Hull>(g.ship).def, pos, angle, vel, ang_vel);
+  Transform& t = g.ecs.get<Transform>(g.ship);
+  t.pos = pos;
+  t.angle = angle;
+  g.ecs.get<Motion>(g.ship) = {vel, ang_vel};
+}
+
+}  // namespace
+
 void create_ship(Game& g, int def_index) {
   g.ship = g.ecs.create();
   g.ecs.add<Transform>(g.ship);
@@ -234,29 +404,133 @@ void create_ship(Game& g, int def_index) {
   g.ecs.add<Hull>(g.ship, {&SHIP_DEFS[std::clamp(def_index, 0, SHIP_DEF_COUNT - 1)]});
   g.ecs.add<Thrusters>(g.ship);
   g.ecs.add<Flight>(g.ship);
+  g.ecs.add<Body>(g.ship);
+  g.ecs.add<Legs>(g.ship);
+  g.ecs.add<Rope>(g.ship);
 }
 
 int ship_def_index(const Game& g) { return static_cast<int>(g.ecs.get<Hull>(g.ship).def - SHIP_DEFS); }
 
 void set_ship_def(Game& g, int def_index) {
   def_index = (def_index % SHIP_DEF_COUNT + SHIP_DEF_COUNT) % SHIP_DEF_COUNT;
-  g.ecs.get<Hull>(g.ship).def = &SHIP_DEFS[def_index];
-  Motion& m = g.ecs.get<Motion>(g.ship);
-  m.ang_vel *= 0.5f;
-  m.vel = m.vel * 0.7f;
+  const ShipDef& old_def = *g.ecs.get<Hull>(g.ship).def;
+  const ShipDef& new_def = SHIP_DEFS[def_index];
+  g.ecs.get<Hull>(g.ship).def = &new_def;
+  const Transform t = g.ecs.get<Transform>(g.ship);
+  const Motion m = g.ecs.get<Motion>(g.ship);
+  // Keep the feet where they were: a longer ship moves up by the difference, a shorter one down
+  Vec2 pos = t.pos + rotate({0.f, leg_geom(old_def).foot_y - leg_geom(new_def).foot_y}, t.angle);
+  // ... and if that still leaves it in the rock (wider feet, a nose in a low ceiling) lift it out
+  const LegGeom lg = leg_geom(new_def);
+  const HullGeom hg = hull_geom(new_def);
+  const float need_w = std::max(new_def.half_w, lg.foot_x + lg.foot_half_w) + 4.f;
+  const float top = hg.hh + 4.f, bottom = lg.foot_y + 2.f;
+  for (int i = 0; i < 80 && !g.cave.is_open_box(pos.x, pos.y + 0.5f * (bottom - top), need_w, 0.5f * (bottom + top)); ++i)
+    pos.y -= 4.f;
+  build_bodies(g, pos, t.angle, m.vel * 0.7f, m.ang_vel * 0.5f);  // a different body: same pose, fresh physics
+  g.ecs.get<Legs>(g.ship).deployed = true;
+}
+
+void place_ship(Game& g, Vec2 pos, float angle) {
+  g.ecs.get<Thrusters>(g.ship) = {};
+  g.ecs.get<Flight>(g.ship) = {};
+  g.ecs.get<Legs>(g.ship).deployed = true;
+  build_bodies(g, pos, angle, {}, 0.f);
+}
+
+void debug_rope(Game& g, float len) {
+  Rope& r = g.ecs.get<Rope>(g.ship);
+  const ShipBodies& sb = g.ecs.get<Body>(g.ship).b;
+  r.length = clampf(len, rope::MIN_LEN, rope::OUT_LEN);
+  r.out = len > rope::MIN_LEN;
+  b2DistanceJoint_SetLengthRange(sb.cable, 0.05f, r.length / PPM);
+  b2DistanceJoint_SetLength(sb.cable, r.length / PPM);
+  const Transform& t = g.ecs.get<Transform>(g.ship);
+  b2Body_SetTransform(sb.hook, to_b2(t.pos + rotate({0.f, winch_y(*g.ecs.get<Hull>(g.ship).def) + r.length}, t.angle)), b2MakeRot(0.f));
+}
+
+void set_winch(Game& g, bool out) {
+  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
+  Rope& r = g.ecs.get<Rope>(g.ship);
+  if (r.out == out) return;
+  r.out = out;
+  beep(g, out ? SimEventKind::HookOut : SimEventKind::HookIn);
+}
+
+void toggle_grip(Game& g) {
+  Rope& r = g.ecs.get<Rope>(g.ship);
+  Body& body = g.ecs.get<Body>(g.ship);
+  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
+  if (r.held != NULL_ENTITY) {  // let go
+    release_crate(g);
+    notice(g, "RELEASED");
+    beep(g, SimEventKind::Release);
+    return;
+  }
+  // The crate whose edge is nearest the hook, within reach
+  Entity best = NULL_ENTITY;
+  float best_d = rope::GRAB_REACH;
+  g.ecs.view<Cargo, Transform>([&](Entity e, Cargo& c, Transform&) {
+    if (!b2Body_IsEnabled(c.body)) return;
+    const b2Vec2 lp = b2Body_GetLocalPoint(c.body, b2Body_GetPosition(body.b.hook));
+    const float dx = std::max(std::abs(lp.x) * PPM - c.def->half_w, 0.f), dy = std::max(std::abs(lp.y) * PPM - c.def->half_h, 0.f);
+    const float d = std::sqrt(dx * dx + dy * dy);
+    if (d < best_d) { best_d = d; best = e; }
+  });
+  if (best == NULL_ENTITY) {
+    notice(g, "NOTHING IN REACH");
+    beep(g, SimEventKind::NoTarget);
+    return;
+  }
+  Cargo& c = g.ecs.get<Cargo>(best);
+  b2RevoluteJointDef jd = b2DefaultRevoluteJointDef();  // hangs from the hook like a pendulum
+  jd.bodyIdA = body.b.hook;
+  jd.bodyIdB = c.body;
+  jd.localAnchorA = {0.f, 0.f};
+  jd.localAnchorB = b2Body_GetLocalPoint(c.body, b2Body_GetPosition(body.b.hook));
+  jd.collideConnected = false;
+  body.b.grip = b2CreateRevoluteJoint(g.phys.world(), &jd);
+  b2RevoluteJoint_EnableMotor(body.b.grip, true);  // a motor that holds still = friction in the pivot
+  b2RevoluteJoint_SetMotorSpeed(body.b.grip, 0.f);
+  b2RevoluteJoint_SetMaxMotorTorque(body.b.grip, rope::GRIP_FRICTION * c.def->mass);
+  b2Body_SetLinearDamping(c.body, rope::HELD_LINEAR_DAMPING);
+  b2Body_SetAngularDamping(c.body, rope::HELD_ANGULAR_DAMPING);
+  b2ShapeId sid;
+  if (b2Body_GetShapes(c.body, &sid, 1) == 1) {
+    b2Filter f = b2Shape_GetFilter(sid);
+    f.maskBits &= ~CAT_SHIP;
+    b2Shape_SetFilter(sid, f);
+  }
+  b2Body_SetAwake(c.body, true);
+  r.held = best;
+  if (!c.picked) stat_add(g, &Stats::cargo_picked, 1);
+  c.picked = true;
+  notice(g, "CARGO PICKED UP");
+  beep(g, SimEventKind::Grab);
+}
+
+void toggle_legs(Game& g) {
+  Legs& l = g.ecs.get<Legs>(g.ship);
+  l.deployed = !l.deployed;
+  beep(g, l.deployed ? SimEventKind::LegsOut : SimEventKind::LegsIn);
+  b2Body_SetAwake(g.ecs.get<Body>(g.ship).b.hull, true);
 }
 
 void respawn_ship(Game& g, float wx) {
   const Cave& cave = g.cave;
   const ShipDef& d = *g.ecs.get<Hull>(g.ship).def;
-  Transform& t = ship_transform(g);
-  const float need_w = std::max(d.half_w, d.engine_offset_x) + 8.f;
-  const float need_h = d.half_h + d.engine_offset_y + 12.f;
+  const LegGeom lg = leg_geom(d);
+  const HullGeom hg = hull_geom(d);
+  Vec2 pos;
+  // The ship hangs from nose to feet; check an open box around that extent
+  const float need_w = std::max(d.half_w, lg.foot_x + lg.foot_half_w) + 8.f;
+  const float top = hg.hh + 8.f, bottom = lg.foot_y + 8.f;
+  const float box_cy = 0.5f * (bottom - top), box_hh = 0.5f * (bottom + top);
 
   auto try_pad = [&](const LandingPad& p) {
-    float cx = Cave::wrap_x(0.5f * (p.x0 + p.x1));
-    for (float y = p.y - need_h - 10.f; y > p.y - 320.f; y -= 8.f)
-      if (cave.is_open_box(cx, y, need_w, need_h)) { t.pos = {cx, y}; return true; }
+    float cx = 0.5f * (p.x0 + p.x1);
+    for (float y = p.y - lg.foot_y - 4.f; y > p.y - 320.f; y -= 8.f)
+      if (cave.is_open_box(cx, y + box_cy, need_w, box_hh)) { pos = {cx, y}; return true; }
     return false;
   };
 
@@ -265,19 +539,19 @@ void respawn_ship(Game& g, float wx) {
   int best = -1;
   float best_d = 1e12f;
   for (int i = 0; i < static_cast<int>(cave.pads.size()); ++i) {
-    float dist = std::abs(Cave::wrap_delta(wx, 0.5f * (cave.pads[i].x0 + cave.pads[i].x1)));
+    float dist = std::abs(wx - 0.5f * (cave.pads[i].x0 + cave.pads[i].x1));
     if (dist < best_d) { best_d = dist; best = i; }
   }
   if (best >= 0) ok = try_pad(cave.pads[best]);
   for (size_t i = 0; i < cave.pads.size() && !ok; ++i) ok = try_pad(cave.pads[i]);
   for (float y = Cave::WORLD_H * 0.2f; y < Cave::WORLD_H * 0.8f && !ok; y += 16.f)
-    if (cave.is_open_box(Cave::wrap_x(wx), y, need_w, need_h)) { t.pos = {Cave::wrap_x(wx), y}; ok = true; }
-  if (!ok) t.pos = {Cave::wrap_x(wx), Cave::WORLD_H * 0.4f};
+    if (cave.is_open_box(wx, y + box_cy, need_w, box_hh)) { pos = {wx, y}; ok = true; }
+  if (!ok) pos = {wx, Cave::WORLD_H * 0.4f};
 
-  t.angle = 0.f;
-  g.ecs.get<Motion>(g.ship) = {};
   g.ecs.get<Thrusters>(g.ship) = {};
   g.ecs.get<Flight>(g.ship) = {};
+  g.ecs.get<Legs>(g.ship).deployed = true;
+  build_bodies(g, pos, 0.f, {}, 0.f);
 
   // Drop leftover particles
   for (size_t i = 0; i < g.ecs.pool<Particle>().size(); ++i) g.dead.push_back(g.ecs.pool<Particle>().owner(i));
@@ -292,6 +566,13 @@ void set_thrust(Game& g, float left, float right) {
   th.level[0] = left;
   th.level[1] = right;
 }
+
+void set_thrusts(Game& g, const float levels[4]) {
+  Thrusters& th = g.ecs.get<Thrusters>(g.ship);
+  for (int i = 0; i < 4; ++i) th.level[i] = levels[i];
+}
+
+int ship_channels(const Game& g) { return channel_count(*g.ecs.get<Hull>(g.ship).def); }
 
 void set_zoom(Game& g, int index) { g.cam.zoom = std::clamp(index, 0, ZOOM_COUNT - 1); }
 
@@ -309,25 +590,27 @@ void snap_camera(Game& g) {
   const Vec2 p = ship_transform(g).pos;
   g.cam.x = p.x - g.cam.vw * 0.5f;
   g.cam.y = p.y - g.cam.vh * 0.55f;
-  g.cam.prev_ship_x = p.x;
-  g.cam.have_prev = true;
   g.cam.shake = 0.f;
 }
 
 void step_sim(Game& g, float dt) {
   g.time += dt;
-  // Landed ships lift off as soon as an engine is throttled up
-  g.ecs.view<Flight, Thrusters, Motion>([](Entity, Flight& f, Thrusters& th, Motion& m) {
-    if (f.state == FlightState::Landed && (th.level[0] > 0.05f || th.level[1] > 0.05f)) {
-      f = {};
-      m.vel.y = -30.f;
-    }
+  g.notice_timer = std::max(0.f, g.notice_timer - dt / tune::TIME_SCALE);
+  // Ground is needed around the ship and around every crate that is moving
+  static std::vector<Vec2> anchors;
+  anchors.assign(1, ship_transform(g).pos);
+  g.ecs.view<Cargo, Transform>([&](Entity, Cargo& c, Transform& t) {
+    if (b2Body_IsEnabled(c.body) && b2Body_IsAwake(c.body)) anchors.push_back(t.pos);
   });
-  flight_system(g, dt);
-  collision_system(g);
-  g.ecs.view<Flight>([dt](Entity, Flight& f) {
-    if (f.state != FlightState::Flying) f.timer += dt;
-  });
+  g.phys.stream(g.cave, anchors.data(), static_cast<int>(anchors.size()));
+  cargo_activation(g);
+  rope_system(g, dt);
+  forces_system(g);
+  g.phys.step(dt);
+  sync_system(g);
+  cargo_system(g, dt);
+  impact_system(g);
+  ground_system(g, dt);
   event_system(g);
   exhaust_system(g, dt);
   particle_system(g, dt);
@@ -337,18 +620,12 @@ void update_camera(Game& g, float dt) {
   Camera& c = g.cam;
   const Transform& t = ship_transform(g);
   const Motion& m = g.ecs.get<Motion>(g.ship);
-  if (c.have_prev) {
-    float d = t.pos.x - c.prev_ship_x;
-    if (d > Cave::WORLD_W * 0.5f) c.x -= Cave::WORLD_W;
-    else if (d < -Cave::WORLD_W * 0.5f) c.x += Cave::WORLD_W;
-  }
-  c.prev_ship_x = t.pos.x;
-  c.have_prev = true;
   // Look ahead a little in the direction of travel
   const Vec2 lead = {clampf(m.vel.x * 0.35f, -180.f, 180.f), clampf(m.vel.y * 0.25f, -120.f, 120.f)};
   const float k = 1.f - std::exp(-5.f * dt);
   c.x += (t.pos.x + lead.x - c.vw * 0.5f - c.x) * k;
   c.y += (t.pos.y + lead.y - c.vh * 0.55f - c.y) * k;
+  c.x = clampf(c.x, -100.f, Cave::WORLD_W - c.vw + 100.f);  // the rock ring may show, not the void beyond it
   c.y = clampf(c.y, -100.f, Cave::WORLD_H - c.vh * 0.3f);
 
   c.shake = std::max(0.f, c.shake - dt * 2.2f);

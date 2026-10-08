@@ -8,20 +8,54 @@
 #include "defs.hpp"
 #include "ecs.hpp"
 #include "math.hpp"
+#include "physics.hpp"
+#include "stats.hpp"
 
 // ---------------------------------------------------------------------------
 // Components (plain data)
 // ---------------------------------------------------------------------------
 enum class FlightState { Flying, Landed, Crashed };
 
+// Mirrors of the rigid body for drawing, camera and effects (px, px/s); particles are not simulated by Box2D
 struct Transform { Vec2 pos; float angle = 0.f; };
 struct Motion { Vec2 vel; float ang_vel = 0.f; };
 struct Hull { const ShipDef* def = nullptr; };
 struct Thrusters {
-  float level[2] = {0.f, 0.f};     // 0 = left, 1 = right, 0..1
-  float emit_acc[2] = {0.f, 0.f};  // fractional exhaust particles owed
+  float level[4] = {0.f, 0.f, 0.f, 0.f};     // per control channel 0..1: left trigger, right trigger, left stick, right stick
+  float emit_acc[4] = {0.f, 0.f, 0.f, 0.f};  // fractional exhaust particles owed, per thruster
 };
-struct Flight { FlightState state = FlightState::Flying; float timer = 0.f; };
+// Flying / Landed / Crashed is a label on top of the rigid-body simulation: the body never stops simulating.
+struct Flight {
+  FlightState state = FlightState::Flying;
+  float timer = 0.f;     // time in the current state
+  float settle = 0.f;    // how long the ship has been resting (Flying -> Landed at SETTLE_TIME)
+  int contacts = 0;      // touching contact manifolds on hull and legs this tick
+  Vec2 contact_pt;       // lowest touching point (px)
+};
+// Box2D bodies of the ship, and the landing gear on top of them
+struct Body { ShipBodies b; };
+struct Legs {
+  bool deployed = true;
+  float trans[2] = {0.f, 0.f};  // foot travel along its strut in px: 0 = fully out, negative = pushed in
+};
+
+// The winch: the cable's reach and what the hook holds. The hook's own pose is mirrored for drawing.
+struct Rope {
+  float length = rope::MIN_LEN;  // how far the cable lets the hook go (px)
+  bool out = false;              // winch wants the cable fully out (true) or fully in (false); no stops between
+  Entity held = NULL_ENTITY;     // crate on the hook
+  Vec2 hook_pos;
+  float hook_angle = 0.f;
+  Vec2 anchor;                   // where the cable leaves the hull (px)
+  float slack = 0.f;             // px of cable not taut, for drawing the sag
+};
+// A crate. `body` stays valid for the life of the cave; it is disabled while the ground around it is not built.
+struct Cargo {
+  b2BodyId body = b2_nullBodyId;
+  const CargoDef* def = nullptr;
+  bool picked = false;      // lifted since it last stood on a pad: counts as delivered when it rests on one
+  float rest_time = 0.f;    // how long it has been still
+};
 
 // Short-lived visual: fades `from`→`to` over `ttl`, optionally affected by gravity and drag.
 struct Particle {
@@ -33,7 +67,7 @@ struct Particle {
   bool additive = true;
 };
 
-using World = Registry<Transform, Motion, Hull, Thrusters, Flight, Particle>;
+using World = Registry<Transform, Motion, Hull, Thrusters, Flight, Particle, Body, Legs, Rope, Cargo>;
 
 // ---------------------------------------------------------------------------
 // Resources
@@ -42,20 +76,15 @@ struct Camera {
   float x = 0.f, y = 0.f;
   float vw = 1280.f, vh = 720.f;  // viewport in world px: what the zoom level makes visible
   int zoom = DEFAULT_ZOOM;        // index into ZOOM_LEVELS
-  float prev_ship_x = 0.f;
-  bool have_prev = false;
   float shake = 0.f;  // 0..1, decays
   Vec2 shake_off;
 
   float center_x() const { return x + vw * 0.5f; }
-  // X of a wrapped world coordinate, continuous around the camera centre
-  float continuous_x(float wx) const {
-    float c = center_x();
-    return c + Cave::wrap_delta(c, Cave::wrap_x(wx));
-  }
 };
 
-enum class SimEventKind { Landed, Crashed, Bounce };
+// Landed / Crashed / Bounce come out of the simulation; the rest are feedback for the pilot's own actions
+// (beeps), pushed straight to `fired`
+enum class SimEventKind { Landed, Crashed, Bounce, HookOut, HookIn, Grab, Release, NoTarget, Delivered, LegsOut, LegsIn };
 struct SimEvent {
   SimEventKind kind;
   Vec2 pos, normal;
@@ -64,8 +93,15 @@ struct SimEvent {
 
 struct Game {
   Cave cave;
+  Physics phys;
   World ecs;
   Entity ship = NULL_ENTITY;
+  unsigned cargo_generation = ~0u;  // cave the crates belong to
+  char notice[40] = "";             // short message in the middle of the HUD ("CARGO PICKED UP")
+  float notice_timer = 0.f;
+  Stats stats;
+  bool stats_dirty = false;
+  bool stats_enabled = true;  // off for screenshot/debug runs so they leave the saved statistics alone
   Camera cam;
   Rng rng{0x5eed};
   std::vector<SimEvent> events;
