@@ -18,22 +18,24 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 
 - Triggers (or L1/R1, or sticks up): engines. Keyboard: L/R Ctrl (or A/D, arrows) full, L/R Shift half thrust
 - Start/Escape: pause menu (Escape also = back; quits from the title screen on desktop)
-- Screens: title (Start/Options/Quit) → play ⇄ pause (Resume/New Cave/Options/Main Menu/Quit); Options: Ship, Zoom,
+- Screens: title (Start/Options/Statistics/Quit) → play ⇄ pause (Resume/New Cave/Options/Statistics/Main Menu/Quit); Options: Ship, Zoom,
   Swap Engines, Music + Effects sliders, CRT Effect, Fullscreen, Back. Pages are data in `ui.hpp`; left/right change values
 - On-screen hints follow the last-used device (`UiState::device`: keyboard events/wheel vs gamepad buttons/axes)
 - Zoom: Tab (cycle), mouse wheel, D-pad up/down in play; `-z near|medium|far`. Ship: S or Select.
 - M: sound on/off (saved in config; `-m/--mute` for one run)
-- Enter (keyboard) or A/B (gamepad): respawn after crash (landed ships lift off automatically when thrust is applied)
+- Space (keyboard) or X (gamepad): retract / extend the landing legs
+- Q/E or D-pad left/right (one press): hook cable fully out / fully in (no in-betweens); R or A (gamepad): hook grabs / releases a crate (A respawns when crashed)
+- Enter (keyboard) or A/B (gamepad): respawn after crash (a landed ship lifts off when thrust is applied)
 - Y or G: new cave
 - F: fullscreen
 
 ## World
 
-- Toroidal X (24000px), tall cave Y (4800px)
+- Bounded map, 24000×4800 px, ringed by solid rock (4 cells at the sides, 4 at roof and floor); nothing wraps
 - 2D cellular cave: main tunnel, branches, stalactites/mites, pillars, pads
 - Camera scrolls freely with velocity look-ahead; background star dots for motion reference
-- Tunnel is blended across the X seam; pads are only placed in the main connected cave
-- Minimap (bottom centre) shows the whole wrapped world, pads and ship
+- Main tunnel runs side to side; pads are only placed in the main connected cave
+- Minimap (bottom centre, 400×100 px) is a window of one texel per cave cell that scrolls with the ship (`Backend::copy_part`); pads, crates, ship and view box
 
 ## Source layout (`src/`)
 
@@ -41,8 +43,40 @@ Small sparse-set ECS plus data tables; all tuning/art data lives in `defs.hpp`.
 
 - `ecs.hpp` — `Pool<T>` / `Registry<Cs...>` with `view<Driver, Others...>(f)`; queue destroys, never destroy inside `view`
 - `defs.hpp` — tuning constants, palette, `SHIP_DEFS` table (add a ship = add a row)
-- `game.hpp` — components (`Transform`, `Motion`, `Hull`, `Thrusters`, `Flight`, `Particle`), `Camera`, `Game`
-- `systems.cpp` — flight, collision, exhaust, particles, events, camera; fixed 120 Hz step from `main.cpp`
+- `game.hpp` — components (`Transform`, `Motion`, `Hull`, `Thrusters`, `Flight`, `Body`, `Legs`, `Particle`), `Camera`, `Game`.
+  `Transform`/`Motion` are mirrors of the Box2D bodies (px, px/s) written by `sync_system`; particles are plain ECS entities, not bodies.
+- `physics.hpp/.cpp` — Box2D 3.1 (C API) wrapper: world, terrain streaming, ship bodies. Game code works in px (+y down),
+  Box2D in metres (`PPM` = 32 px/m; `to_b2`/`from_b2`). Collision categories `CAT_*`, shape user data `Part` (hull/foot/strut/terrain).
+  - Terrain = the cave's marching-squares contour (the line the renderer draws), traced into polylines and made one-sided
+    chain shapes (right-hand side = open air), per-segment friction (pads grippier). 30×30-cell chunks (480 px; 50×10 tile
+    the world exactly) are built on demand around the ship, one-cell overlap, at most 2 per tick, dropped beyond 2 chunks.
+  - Ship = hull (cabin polygon + two engine bells), COM well below the hull centre (stands stable on slopes; thrust acts along
+    the axis so flight is unchanged), and two light leg bodies on prismatic joints (`leg_geom()` in `defs.hpp`). The leg spring
+    is applied by hand in `forces_system` (joint springs scale with the reduced mass, which is the light leg's), target 0 =
+    extended, `-travel` = retracted. Sleeping bodies are left alone (`b2Body_IsAwake`); moving a sleeping body does not wake it.
+  - Chain gotchas: open chains need a ghost point at each end (first and last point create no segment); chains are one-sided.
+- Rope and cargo: the cable is a b2 distance joint hull→hook with `enableSpring` at 0 Hz and a min/max length (that is how Box2D
+  makes a rope); `rope_system` reels `Rope::length` toward `rope::OUT_LEN` or `MIN_LEN` depending on `Rope::out` (`rope::*` in `defs.hpp`). Grab = revolute joint hook→crate at
+  the hook's position (a pendulum) with a friction motor, crate damping raised and crate-vs-ship collision off while held
+  (`release_crate` undoes it). The cable anchors at the COM (`com_y`), which keeps the load from twisting the ship. Crates (`Cargo` + `Transform` entities, `CARGO_DEFS`, spots from `Cave::cargo`) are created
+  *disabled* and enabled only while the ground around them is built (`Physics::terrain_at`, `cargo_activation`); moving crates
+  are extra stream anchors. Delivery = lifted crate resting 1 s on a pad (`cargo_system`). Rope visual: sagging chain in `draw_rope`.
+  Crates collide with terrain, ship, hook and each other; the hook only with terrain and crates; the cable itself never collides.
+- Thrusters: `ThrusterDef` lists (`FRIGATE_T` …) give position, push angle (0 = toward the nose, +90° = right, 180° = down), power and
+  control channel 0..3 (left trigger, right trigger, left stick up, right stick up); ships without a list have the classic pair.
+  `thruster_pose()` is what forces, exhaust particles, flames and bells use; `channel_count()` is 2 or 4 and `read_thrust()` folds the
+  sticks into channels 0/1 for 2-channel ships. `Thrusters::level[4]` is per channel. Big ships set `engine_offset_x/y` to the outboard
+  main engines so legs and belly geometry keep working, and `STYLE_DECK` (a collidable belly deck).
+- Ships: `SHIP_DEFS` rows + `ShipStyle` flags (fins/tanks/dome/dish/stripes drawn in `draw_ship`; tanks also add collision shapes in
+  `physics.cpp`). `hull_geom()`/`leg_geom()`/`winch_y()` in `defs.hpp` are shared by drawing and physics.
+- Cave generation (`cave.cpp`): noise-warped rock density around a wandering spine that thins toward both map edges, majority-CA
+  smoothing, side chambers, meandering branches, then (after smoothing, whose erosion would eat them) rock islands, cone-shaped
+  stalactites/stalagmites, pads, crate spots.
+- `systems.cpp` — `forces_system` (thrust, leg springs) → `Physics::step` → `sync_system` → `impact_system` (hit events: crash
+  or bounce) → `ground_system` (touching/resting; `Flight` Flying/Landed/Crashed is a label, the body always simulates;
+  Landed = touching, upright, still and thrust-free for `SETTLE_TIME`) → events, exhaust, particles; fixed 120 Hz step from `main.cpp`
+- `stats.hpp/.cpp` — permanent statistics: `STAT_FIELDS` table (key, menu label, format); file `$XDG_STATE_HOME/dualthrust/stats`,
+  saved on landing/crash, every 30 s, on pause and at exit (not in `--frames`/`--screenshot` runs). Web build mounts the state dir as IDBFS.
 - `cave.cpp` — generation stages + baked per-cell `depth` / `contour` (rendering reads these, never recomputes)
 - `backend.hpp` + `backend_gles2.cpp` / `backend_sdl.cpp` — the 2D primitive layer under `Gfx`. GLES2: own batcher (one VBO, one
   shader, flush only on texture/blend change; ~7-18 GL draws per frame; entry points via `SDL_GL_GetProcAddress`, minimal
@@ -56,10 +90,14 @@ Small sparse-set ECS plus data tables; all tuning/art data lives in `defs.hpp`.
 - `audio.cpp` — synthesised sound (no assets): engine rumble, landing/bounce/crash effects, generative Am-F-C-G music with echo; mixed in the SDL callback, fed from `Game::fired`
 - `ui.hpp` — `MENU_ITEMS` table; `config.cpp` — XDG config; `main.cpp` — args, input, loop
 
-Debug flags: `--play`, `--screen title|pause|options`, `--renderer auto|gles2|sdl`, `--thrust L,R`, `--frames N`, `--screenshot FILE.bmp` (works headless with
-`SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software`).
+Debug flags: `--play`, `--no-gamepad` (ignore a connected pad; a pad with stuck triggers fires the engines in test runs), `--rope LEN`, `--screen title|pause|options`, `--renderer auto|gles2|sdl`, `--thrust L,R` (channels 0 and 1), `--at X,Y[,DEG]` (ship at rest anywhere),
+`--frames N`, `--screenshot FILE.bmp` (works headless with `SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software`).
 
-GL backend regression test: `cmake -DDUALTHRUST_BUILD_TESTS=ON`, then `xvfb-run -a env SDL_VIDEODRIVER=x11 ctest` (skips without GLES2).
+Tests: `cmake -DDUALTHRUST_BUILD_TESTS=ON`, then `ctest`. `physics_test` is headless (settling, lift-off, crash vs soft drop, leg retract,
+map edges, 120 random drops must never end inside rock); the GL backend test needs `xvfb-run -a env SDL_VIDEODRIVER=x11 ctest` (skips without GLES2).
+
+Box2D: native builds `find_package(box2d)` (nixpkgs `box2d` 3.1.1); R36S and wasm compile the sources of `pkgs.box2d.src` via
+`-DDUALTHRUST_BOX2D_SRC=` (subproject, so the cross toolchains compile it as C17). No SIMD flags needed (NEON on aarch64, scalar on wasm).
 
 New `.cpp` files must be listed in `CMakeLists.txt` and `git add`ed (flake builds only see tracked files).
 
@@ -86,7 +124,7 @@ nix build .#dualthrust-r36s-portmaster-zip  # PortMaster autoinstall zip
 - Launcher exports `XDG_CONFIG_HOME` and `XDG_STATE_HOME` = `<port>/conf`, so settings persist in `conf/dualthrust/`, not `$HOME`.
   The game never guesses: settings = `$XDG_CONFIG_HOME/dualthrust`, saves/stats = `$XDG_STATE_HOME/dualthrust`, each falling back to
   `$HOME/.config` / `$HOME/.local/state` only when the variable is unset; a relative path or no usable base → error, exit 1.
-- Verified: aarch64 ELF, needs only GLIBC ≤ 2.17 / GLIBCXX 3.4 / CXXABI 1.3.9. Runs on a real R36S (ArkOS,
+- Verified: aarch64 ELF, needs only GLIBC ≤ 2.17 / GLIBCXX ≤ 3.4.18 / CXXABI ≤ 1.3.9 (0.2 with Box2D builds; not run on the device yet). Runs on a real R36S (ArkOS,
   SDL 2.0.10, KMSDRM + opengles2) at 60 fps in play. Not yet tested through the PortMaster launcher or with
   the real controller mapping.
 

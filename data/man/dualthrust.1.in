@@ -10,8 +10,8 @@ dualthrust \- CRT dual-engine cave lander
 is a small 2D cave lander with a green CRT look. The left and right
 engines are driven by the gamepad triggers, the shoulder buttons and/or by
 pushing the corresponding analog stick up. Differential thrust translates and rotates
-the ship. Land gently on marked pads; bounce off walls at low speed;
-crash only on hard impacts. Sound and music are synthesised at runtime.
+the ship, a rigid body on sprung landing legs. Land anywhere gently, on a pad or on
+a slope; bounce off walls at low speed; crash only on hard impacts. Sound and music are synthesised at runtime.
 .SH OPTIONS
 .TP
 .BR \-h ", " \-\-help
@@ -56,11 +56,23 @@ Left and right engine thrust.
 Left Ctrl, Right Ctrl (or A, D / arrows)
 Left and right engine at full thrust, so both hands can fly.
 .TP
+W / Up arrow, Down arrow / Right Alt
+The two extra thrusters of the big four-thruster ships (the gamepad sticks, which fold into the main engines on the other ships).
+.TP
 Left Shift, Right Shift
 Left and right engine at half thrust.
 .TP
 Start / Escape
 Open or close the pause menu; Escape also goes back one menu page (and quits from the title screen).
+.TP
+Space / X (gamepad)
+Retract or extend the landing legs.
+.TP
+Q / E, D-pad left / right
+Deploy or retract the winch cable fully.
+.TP
+R / A (gamepad)
+Grab the crate in reach of the hook, or let go of it.
 .TP
 Enter / A / B
 Respawn after a crash. (After a landing, simply throttle up.)
@@ -86,6 +98,9 @@ Sound on or off.
 .TP
 .I $XDG_CONFIG_HOME/dualthrust/config
 Saved settings (fullscreen, ship, zoom, engine swap, sound, music and effects volume, CRT effect).
+.TP
+.I $XDG_STATE_HOME/dualthrust/stats
+Permanent statistics (flight time, distance, landings, crashes, ...), shown in the Statistics menu.
 .SH SEE ALSO
 .BR sdl2-config (1)
 .SH AUTHOR

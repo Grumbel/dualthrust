@@ -14,7 +14,7 @@ Copyright 2026 Ingo Ruhnke <grumbel@gmail.com>
     <p>
       A small 2D dual-engine lander with a green CRT look. The left and right
       engines (gamepad triggers, or the keyboard) rotate and thrust the ship.
-      Fly through a large wrapping cave and land gently on the pads.
+      Fly through a large cave and land gently on the pads.
     </p>
     <p>
       Three zoom levels, seven ships, music and effects, a title screen and
