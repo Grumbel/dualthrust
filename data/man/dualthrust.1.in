@@ -33,6 +33,9 @@ Ship preset index (0=Narrow .. 4=Long, 5=Topdog, 6=Canopy; 5–6 have top engine
 View zoom: \fBnear\fR, \fBmedium\fR or \fBfar\fR (also 0 to 2). Independent of the
 resolution; the default is Near on small screens, Medium elsewhere.
 .TP
+.B \-\-renderer \fIMODE\fR
+\fBauto\fR (the default: OpenGL ES 2 if available, else SDL's renderer), \fBgles2\fR or \fBsdl\fR.
+.TP
 .BR \-S ", " \-\-seed " " \fIN\fR
 Unsigned seed for cave generation.
 .TP
@@ -56,8 +59,8 @@ Left and right engine at full thrust, so both hands can fly.
 Left Shift, Right Shift
 Left and right engine at half thrust.
 .TP
-Start
-Open or close the menu.
+Start / Escape
+Open or close the pause menu; Escape also goes back one menu page (and quits from the title screen).
 .TP
 Enter / A / B
 Respawn after a crash. (After a landing, simply throttle up.)
@@ -79,13 +82,10 @@ Toggle fullscreen.
 .TP
 M
 Sound on or off.
-.TP
-Escape
-Menu, or quit from the menu.
 .SH FILES
 .TP
 .I $XDG_CONFIG_HOME/dualthrust/config
-Saved settings (fullscreen, ship, engine swap, sound).
+Saved settings (fullscreen, ship, zoom, engine swap, sound, music and effects volume, CRT effect).
 .SH SEE ALSO
 .BR sdl2-config (1)
 .SH AUTHOR

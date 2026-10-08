@@ -17,15 +17,15 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 ## Controls
 
 - Triggers (or L1/R1, or sticks up): engines. Keyboard: L/R Ctrl (or A/D, arrows) full, L/R Shift half thrust
-- Start: open/close menu
-- Menu: D-pad/Up-Down, A/Enter select — Resume, Fullscreen, New Cave, Ship, Zoom, Swap Engines, Sound, Quit
+- Start/Escape: pause menu (Escape also = back; quits from the title screen on desktop)
+- Screens: title (Start/Options/Quit) → play ⇄ pause (Resume/New Cave/Options/Main Menu/Quit); Options: Ship, Zoom,
+  Swap Engines, Music + Effects sliders, CRT Effect, Fullscreen, Back. Pages are data in `ui.hpp`; left/right change values
 - On-screen hints follow the last-used device (`UiState::device`: keyboard events/wheel vs gamepad buttons/axes)
 - Zoom: Tab (cycle), mouse wheel, D-pad up/down in play; `-z near|medium|far`. Ship: S or Select.
 - M: sound on/off (saved in config; `-m/--mute` for one run)
 - Enter (keyboard) or A/B (gamepad): respawn after crash (landed ships lift off automatically when thrust is applied)
 - Y or G: new cave
 - F: fullscreen
-- Escape: menu (or quit from menu)
 
 ## World
 
@@ -44,6 +44,10 @@ Small sparse-set ECS plus data tables; all tuning/art data lives in `defs.hpp`.
 - `game.hpp` — components (`Transform`, `Motion`, `Hull`, `Thrusters`, `Flight`, `Particle`), `Camera`, `Game`
 - `systems.cpp` — flight, collision, exhaust, particles, events, camera; fixed 120 Hz step from `main.cpp`
 - `cave.cpp` — generation stages + baked per-cell `depth` / `contour` (rendering reads these, never recomputes)
+- `backend.hpp` + `backend_gles2.cpp` / `backend_sdl.cpp` — the 2D primitive layer under `Gfx`. GLES2: own batcher (one VBO, one
+  shader, flush only on texture/blend change; ~7-18 GL draws per frame; entry points via `SDL_GL_GetProcAddress`, minimal
+  GL declarations in the file so no GLES headers are needed). SDL: fallback for software/headless (`--renderer sdl`).
+  `main.cpp` tries GLES2 first (window needs `SDL_WINDOW_OPENGL` + ES attributes), else falls back.
 - `render.cpp` — zoom: `ZOOM_LEVELS` (defs.hpp) fix the world px visible vertically (480/720/1080), so scale = screen_h / visible_h,
   resolution independent. The world layer is *vector*-scaled, not pixel-scaled: chunks are rasterised at the zoom level's own
   scale (outline, hatch pitch, stars in global pixel coordinates so chunk seams are invisible), the ship/pads/particles are
@@ -52,7 +56,7 @@ Small sparse-set ECS plus data tables; all tuning/art data lives in `defs.hpp`.
 - `audio.cpp` — synthesised sound (no assets): engine rumble, landing/bounce/crash effects, generative Am-F-C-G music with echo; mixed in the SDL callback, fed from `Game::fired`
 - `ui.hpp` — `MENU_ITEMS` table; `config.cpp` — XDG config; `main.cpp` — args, input, loop
 
-Debug flags: `--play`, `--thrust L,R`, `--frames N`, `--screenshot FILE.bmp` (works headless with
+Debug flags: `--play`, `--screen title|pause|options`, `--renderer auto|gles2|sdl`, `--thrust L,R`, `--frames N`, `--screenshot FILE.bmp` (works headless with
 `SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software`).
 
 New `.cpp` files must be listed in `CMakeLists.txt` and `git add`ed (flake builds only see tracked files).
@@ -70,13 +74,11 @@ nix build .#dualthrust-r36s-portmaster-zip  # PortMaster autoinstall zip
 
 - The sysroot is the flake input `github:grumnix/arkos-sysroot` (pinned in `flake.lock`; `nix flake update arkos-sysroot`
   to refresh). Dev shortcut: `DUALTHRUST_ARKOS_SYSROOT=/nix/store/…-arkos-sysroot-… nix build --impure .#dualthrust-r36s`
-- Draw calls are the bottleneck on the Mali GPU. SDL 2.0.10's GLES2 backend issues one `glDrawArrays` per
-  `SDL_RenderCopy` and per *rect* of `SDL_RenderFillRects` (only consecutive same-blend two-point lines are grouped, and a
-  colour change breaks the group); SDL >= 2.0.18 merges same-texture/blend commands and has `SDL_RenderGeometry`. So
-  `FillRects` arrays save API overhead on the device, not GL draws. What really helped: the static world is baked into
-  cached CPU-rasterised chunk textures (about 3000 draws -> about 12; 33 ms -> 16 ms/frame). Check with
-  `./dualthrust --play --frames 300` (prints per-frame sim/draw/present ms). Avoid per-glyph/per-line/per-particle calls;
-  the next step would be a small GLES2 renderer with a real vertex batcher.
+- Draw calls were the bottleneck on the Mali GPU: SDL 2.0.10's GLES2 renderer issues one `glDrawArrays` per
+  `SDL_RenderCopy` and per rect of `SDL_RenderFillRects`. Our own GLES2 backend batches everything (see `backend_gles2.cpp`):
+  on the device 7-18 GL draws/frame, 14.6 ms (60 fps) vs 27.7 ms with SDL's renderer. The static world is additionally baked into
+  cached CPU-rasterised chunk textures. Check with `./dualthrust --play --frames 300` (prints per-frame sim/draw/present ms and
+  the GL draw count; `--renderer sdl` compares).
 - Keep to SDL ≤ 2.0.10 API (headers in the sysroot; no `SDL_RenderGeometry` — see `Gfx::gradient_triangle`).
 - `mk/r36s/cxxabi_shim.cpp` shims GCC 15 → old libstdc++/glibc symbols (`-DDUALTHRUST_CXXABI_SHIM`).
 - Launcher exports `XDG_CONFIG_HOME` into the port dir, so ship/sound settings persist there.

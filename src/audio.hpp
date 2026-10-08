@@ -18,6 +18,7 @@ class Audio {
   bool available() const { return dev_ != 0; }
 
   void set_enabled(bool on);
+  void set_volumes(float music, float sfx);  // 0..1 each: music loop vs engines + effects
   void set_engines(float left, float right);  // 0..1; pass 0 when not flying
   void trigger(SimEventKind kind, float strength);
 
@@ -40,13 +41,14 @@ class Audio {
   // Shared parameters (written under the device lock)
   float target_[2] = {0.f, 0.f};
   float master_target_ = 1.f;
+  float music_target_ = 0.5f, sfx_target_ = 1.f;
   Voice voices_[MAX_VOICES];
 
   // Mixer state (audio thread only)
   float level_[2] = {0.f, 0.f};
   float lp_[2] = {0.f, 0.f};
   float rumble_phase_[2] = {0.f, 0.f};
-  float master_ = 0.f;
+  float master_ = 0.f, music_gain_ = 0.f, sfx_gain_ = 0.f;
   uint32_t rng_ = 12345;
 
   // Music

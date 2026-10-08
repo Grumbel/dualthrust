@@ -31,7 +31,11 @@ namespace { UiState* web_ui = nullptr; }  // for the page's hooks
 
 // Called by the web page when the tab is hidden or its Pause button pressed.
 extern "C" EMSCRIPTEN_KEEPALIVE void dualthrust_pause() {
-  if (web_ui) web_ui->menu_open = true;
+  if (web_ui && web_ui->screen == Screen::Play) {
+    web_ui->screen = Screen::Pause;
+    web_ui->page = MenuPage::Pause;
+    web_ui->cursor = 0;
+  }
 }
 #endif
 
@@ -52,7 +56,8 @@ struct Options {
   // Debug / automation
   int frames = 0;              // exit after N frames (0 = run forever)
   const char* screenshot = nullptr;
-  bool play = false;           // skip the menu
+  bool play = false;           // skip the title screen
+  std::string screen;          // start on: title, pause or options (screenshots, testing)
   float hold[2] = {0.f, 0.f};  // constant engine input
 };
 
@@ -76,7 +81,8 @@ void print_help(const char* argv0) {
       "  --config-dir PATH    Override XDG config directory\n"
       "\n"
       "Debug:\n"
-      "  --play               Skip the menu and start flying\n"
+      "  --play               Skip the title screen and start flying\n"
+      "  --screen NAME        Start on title, pause or options\n"
       "  --thrust L,R         Hold both engines at fixed levels (0..1)\n"
       "  --frames N           Exit after N frames\n"
       "  --screenshot FILE    Save a BMP of the last frame (with --frames)\n"
@@ -125,6 +131,7 @@ int parse_args(int argc, char** argv, Options& o) {
     else if (a == "-m" || a == "--mute") o.mute = true;
     else if (a == "--config-dir") set_config_dir_override(need("--config-dir"));
     else if (a == "--play") o.play = true;
+    else if (a == "--screen") o.screen = need("--screen");
     else if (a == "--frames") o.frames = std::atoi(need("--frames"));
     else if (a == "--screenshot") o.screenshot = need("--screenshot");
     else if (a == "--thrust") {
@@ -290,13 +297,20 @@ int main(int argc, char** argv) {
 
   UiState ui;
   ui.device = SDL_NumJoysticks() > 0 ? InputDevice::Gamepad : InputDevice::Keyboard;
-  ui.menu_open = !opt.play;
   ui.fullscreen = user.fullscreen;
   ui.swap_engines = user.swap_engines;
   ui.sound = user.sound && !opt.mute;
+  ui.crt = user.crt;
+  ui.music_vol = std::clamp(user.music, 0, SLIDER_MAX);
+  ui.sfx_vol = std::clamp(user.sfx, 0, SLIDER_MAX);
+  if (opt.play) ui.screen = Screen::Play;
+  else if (opt.screen == "pause") { ui.screen = Screen::Pause; ui.page = MenuPage::Pause; }
+  else if (opt.screen == "options") { ui.screen = Screen::Pause; ui.page = MenuPage::Options; ui.options_back = MenuPage::Pause; }
   Audio audio;
   audio.init();
   audio.set_enabled(ui.sound);
+  auto apply_volumes = [&] { audio.set_volumes(ui.music_vol / static_cast<float>(SLIDER_MAX), ui.sfx_vol / static_cast<float>(SLIDER_MAX)); };
+  apply_volumes();
   bool running = true;
 
 #ifdef __EMSCRIPTEN__
@@ -312,6 +326,9 @@ int main(int argc, char** argv) {
     c.sound = opt.mute ? user.sound : ui.sound;
     c.ship = ship_def_index(game);
     c.zoom = game.cam.zoom;
+    c.crt = ui.crt;
+    c.music = ui.music_vol;
+    c.sfx = ui.sfx_vol;
     save_config(c);
   };
   auto sync_viewport = [&] {
@@ -335,15 +352,21 @@ int main(int argc, char** argv) {
     int pi = game.rng.range_i(0, static_cast<int>(game.cave.pads.size()) - 1);
     new_game_at(0.5f * (game.cave.pads[pi].x0 + game.cave.pads[pi].x1));
   };
+  auto show_toast = [&](const char* text) {
+    std::snprintf(ui.toast, sizeof ui.toast, "%s", text);
+    ui.toast_timer = 1.6f;
+  };
   auto zoom_to = [&](int index, bool wrap) {
     const int n = wrap ? (index % ZOOM_COUNT + ZOOM_COUNT) % ZOOM_COUNT : index;
     const int before = game.cam.zoom;
     set_zoom(game, n);
-    ui.zoom_toast = 1.6f;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "ZOOM %s", ZOOM_LEVELS[game.cam.zoom].name);
+    if (!ui.in_menu()) show_toast(buf);
     if (game.cam.zoom != before) persist_config();
   };
-  auto cycle_ship = [&] {
-    set_ship_def(game, ship_def_index(game) + 1);
+  auto cycle_ship = [&](int delta) {
+    set_ship_def(game, ship_def_index(game) + delta);
     persist_config();
   };
   auto toggle_swap = [&] {
@@ -353,21 +376,65 @@ int main(int argc, char** argv) {
   auto toggle_sound = [&] {
     ui.sound = !ui.sound;
     audio.set_enabled(ui.sound);
+    show_toast(ui.sound ? "SOUND ON" : "SOUND OFF");
     persist_config();
   };
-  auto activate_menu = [&] {
-    switch (MENU_ITEMS[ui.cursor].action) {
-      case MenuAction::Resume: ui.menu_open = false; break;
-      case MenuAction::Fullscreen: toggle_fullscreen(); break;
-      case MenuAction::NewCave: new_cave(); ui.menu_open = false; break;
-      case MenuAction::Ship: cycle_ship(); break;
-      case MenuAction::Zoom: zoom_to(game.cam.zoom + 1, true); break;
-      case MenuAction::SwapEngines: toggle_swap(); break;
-      case MenuAction::Sound: toggle_sound(); break;
+
+  // --- Menus: pages are data (ui.hpp); this is their behaviour ---
+  auto open_page = [&](MenuPage p, int cursor = 0) {
+    ui.page = p;
+    ui.cursor = cursor;
+  };
+  auto menu_move = [&](int d) {
+    const int n = page_def(ui.page).count;
+    ui.cursor = (ui.cursor + n + d) % n;
+  };
+  auto start_game = [&] {
+    new_game_at(first_pad_x());
+    ui.screen = Screen::Play;
+  };
+  // delta = +1/-1 from left/right; `confirm` = Enter/A (cycles forward, wrapping sliders too)
+  auto activate = [&](int delta, bool confirm) {
+    const MenuItem& item = page_def(ui.page).items[ui.cursor];
+    if (!confirm && item.kind == ItemKind::Action) return;
+    auto slider = [&](int& v) {
+      v = confirm ? (v + 1) % (SLIDER_MAX + 1) : std::clamp(v + delta, 0, SLIDER_MAX);
+      apply_volumes();
+      persist_config();
+    };
+    switch (item.action) {
+      case MenuAction::Start: start_game(); break;
+      case MenuAction::Resume: ui.screen = Screen::Play; break;
+      case MenuAction::NewCave: new_cave(); ui.screen = Screen::Play; break;
+      case MenuAction::Options: ui.options_back = ui.page; open_page(MenuPage::Options); break;
+      case MenuAction::MainMenu: ui.screen = Screen::Title; open_page(MenuPage::Title); break;
       case MenuAction::Quit: persist_config(); running = false; break;
+      case MenuAction::Back: open_page(ui.options_back, 1); break;  // back on its Options entry
+      case MenuAction::Ship: cycle_ship(delta); break;
+      case MenuAction::Zoom: zoom_to(game.cam.zoom + delta, true); break;
+      case MenuAction::SwapEngines: toggle_swap(); break;
+      case MenuAction::Crt: ui.crt = !ui.crt; persist_config(); break;
+      case MenuAction::Fullscreen: toggle_fullscreen(); break;
+      case MenuAction::Music: slider(ui.music_vol); break;
+      case MenuAction::Effects: slider(ui.sfx_vol); break;
     }
   };
-  auto menu_move = [&](int d) { ui.cursor = (ui.cursor + MENU_COUNT + d) % MENU_COUNT; };
+  auto menu_back = [&] {  // Escape / B
+    switch (ui.page) {
+      case MenuPage::Title:
+#ifndef __EMSCRIPTEN__
+        persist_config();
+        running = false;
+#endif
+        break;
+      case MenuPage::Pause: ui.screen = Screen::Play; break;
+      case MenuPage::Options: open_page(ui.options_back, 1); break;
+    }
+  };
+  auto open_pause = [&] {
+    ui.screen = Screen::Pause;
+    open_page(MenuPage::Pause);
+  };
 
   SDL_GameController* pad = nullptr;
   for (int i = 0; i < SDL_NumJoysticks() && !pad; ++i)
@@ -396,41 +463,48 @@ int main(int argc, char** argv) {
         case SDL_KEYDOWN: {
           ui.device = InputDevice::Keyboard;
           const SDL_Keycode k = ev.key.keysym.sym;
-          if (k == SDLK_ESCAPE) {
-            if (ui.menu_open) running = false;
-            else ui.menu_open = true;
-          } else if ((k == SDLK_RETURN || k == SDLK_KP_ENTER) && (ev.key.keysym.mod & KMOD_ALT)) {
-            toggle_fullscreen();
-          } else if (ui.menu_open) {
+          const bool enter = k == SDLK_RETURN || k == SDLK_KP_ENTER;
+          if (enter && (ev.key.keysym.mod & KMOD_ALT)) { toggle_fullscreen(); break; }
+          if (k == SDLK_f) { toggle_fullscreen(); break; }
+          if (k == SDLK_m) { toggle_sound(); break; }
+          if (ui.screen == Screen::Play) {
+            if (k == SDLK_ESCAPE) open_pause();
+            if (k == SDLK_TAB) zoom_to(game.cam.zoom + 1, true);
+            if (k == SDLK_s) cycle_ship(+1);
+            if (k == SDLK_x) toggle_swap();
+            if (enter) respawn_after_crash();
+            if (k == SDLK_g) new_cave();
+          } else {
             if (k == SDLK_UP || k == SDLK_w) menu_move(-1);
             if (k == SDLK_DOWN || k == SDLK_s) menu_move(+1);
-            if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_SPACE) activate_menu();
-          } else {
-            if (k == SDLK_TAB) zoom_to(game.cam.zoom + 1, true);
-            if (k == SDLK_s) cycle_ship();
-            if (k == SDLK_x) toggle_swap();
-            if (k == SDLK_m) toggle_sound();
-            if (k == SDLK_RETURN || k == SDLK_KP_ENTER) respawn_after_crash();
-            if (k == SDLK_f) toggle_fullscreen();
-            if (k == SDLK_g) new_cave();
+            if (k == SDLK_LEFT || k == SDLK_a) activate(-1, false);
+            if (k == SDLK_RIGHT || k == SDLK_d) activate(+1, false);
+            if (enter || k == SDLK_SPACE) activate(+1, true);
+            if (k == SDLK_ESCAPE) menu_back();
           }
           break;
         }
         case SDL_CONTROLLERBUTTONDOWN: {
           ui.device = InputDevice::Gamepad;
           const int b = ev.cbutton.button;
-          if (b == SDL_CONTROLLER_BUTTON_START) ui.menu_open = !ui.menu_open;
-          else if (ui.menu_open) {
-            if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) menu_move(-1);
-            if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) menu_move(+1);
-            if (b == SDL_CONTROLLER_BUTTON_A) activate_menu();
-            if (b == SDL_CONTROLLER_BUTTON_B) ui.menu_open = false;
-          } else {
-            if (b == SDL_CONTROLLER_BUTTON_BACK) cycle_ship();
+          if (ui.screen == Screen::Play) {
+            if (b == SDL_CONTROLLER_BUTTON_START) open_pause();
+            if (b == SDL_CONTROLLER_BUTTON_BACK) cycle_ship(+1);
             if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) zoom_to(game.cam.zoom - 1, false);    // closer
             if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) zoom_to(game.cam.zoom + 1, false);  // farther
             if (b == SDL_CONTROLLER_BUTTON_A || b == SDL_CONTROLLER_BUTTON_B) respawn_after_crash();
             if (b == SDL_CONTROLLER_BUTTON_Y) new_cave();
+          } else {
+            if (b == SDL_CONTROLLER_BUTTON_START) {
+              if (ui.screen == Screen::Title) start_game();
+              else ui.screen = Screen::Play;
+            }
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) menu_move(-1);
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) menu_move(+1);
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_LEFT) activate(-1, false);
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) activate(+1, false);
+            if (b == SDL_CONTROLLER_BUTTON_A) activate(+1, true);
+            if (b == SDL_CONTROLLER_BUTTON_B) menu_back();
           }
           break;
         }
@@ -439,7 +513,7 @@ int main(int argc, char** argv) {
           break;
         case SDL_MOUSEWHEEL:
           ui.device = InputDevice::Keyboard;
-          if (!ui.menu_open && ev.wheel.y != 0) zoom_to(game.cam.zoom + (ev.wheel.y > 0 ? -1 : 1), false);
+          if (ui.screen == Screen::Play && ev.wheel.y != 0) zoom_to(game.cam.zoom + (ev.wheel.y > 0 ? -1 : 1), false);
           break;
         case SDL_CONTROLLERDEVICEADDED:
           if (!pad) pad = SDL_GameControllerOpen(ev.cdevice.which);
@@ -455,7 +529,7 @@ int main(int argc, char** argv) {
 
     // Input → thruster levels (L/R swapped on request)
     float in[2] = {0.f, 0.f};
-    if (!ui.menu_open) {
+    if (ui.screen == Screen::Play) {
       read_thrust(pad, in);
       in[0] = std::max(in[0], opt.hold[0]);
       in[1] = std::max(in[1], opt.hold[1]);
@@ -469,11 +543,11 @@ int main(int argc, char** argv) {
     const float dt = std::min(static_cast<float>((now - prev) / freq), 0.05f);
     prev = now;
     ui.time += dt;
-    ui.zoom_toast = std::max(0.f, ui.zoom_toast - dt);
+    ui.toast_timer = std::max(0.f, ui.toast_timer - dt);
     update_view(game, dt, aspect());
 
     const double t0 = stamp();
-    if (!ui.menu_open) {
+    if (ui.screen != Screen::Pause) {  // the title screen runs the world too: the ship settles onto its pad
       // Fixed-step simulation, independent of display refresh
       accumulator += dt;
       for (int n = 0; accumulator >= tune::SIM_STEP && n < tune::MAX_STEPS_PER_FRAME; ++n) {
@@ -481,7 +555,16 @@ int main(int argc, char** argv) {
         accumulator -= tune::SIM_STEP;
       }
       accumulator = std::min(accumulator, tune::SIM_STEP);
-      update_camera(game, dt);
+      if (ui.screen == Screen::Title) {
+        // Slow drift over the cave behind the logo, the ship staying in view
+        const Vec2 p = ship_transform(game).pos;
+        // (parked low and to the left, out from behind the menu text)
+        game.cam.x = p.x - game.cam.vw * 0.36f + 80.f * std::sin(static_cast<float>(ui.time) * 0.13f);
+        game.cam.y = p.y - game.cam.vh * 0.74f + 20.f * std::sin(static_cast<float>(ui.time) * 0.09f);
+        game.cam.prev_ship_x = p.x;
+      } else {
+        update_camera(game, dt);
+      }
     } else {
       accumulator = 0.f;
     }

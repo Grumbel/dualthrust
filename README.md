@@ -35,7 +35,7 @@ you are.
 
 ### Ships
 
-Seven presets, switched with the menu, **S**, or **Select**. Heavier and wider ships are
+Seven presets, switched in Options, with **S**, or with **Select**. Heavier and wider ships are
 steadier but slower to turn.
 
 | Preset | Notes |
@@ -50,8 +50,8 @@ steadier but slower to turn.
 | Triggers, L1/R1, or stick up (left/right) | Left / right engine |
 | Keyboard **Left Ctrl** / **Right Ctrl** (or **A** / **D**, arrows) | Left / right engine, full thrust |
 | Keyboard **Left Shift** / **Right Shift** | Left / right engine, half thrust |
-| **Start** / **Escape** | Menu (Escape quits from the menu) |
-| D-pad or Up/Down, **A** / Enter | Navigate / select in the menu |
+| **Start** / **Escape** | Pause menu (Escape also goes back one page; from the title it quits) |
+| D-pad or arrows, **A** / Enter | Menus: move, change values (left/right), select |
 | **Enter** (keyboard), **A**/**B** (gamepad) | Respawn after a crash |
 | **Y** or **G** | New cave |
 | **Tab**, mouse wheel, or D-pad up/down | Zoom: Near / Medium / Far |
@@ -62,7 +62,10 @@ steadier but slower to turn.
 
 On-screen hints follow the device you used last: they name keyboard keys or gamepad buttons accordingly.
 
-The menu has Resume, Fullscreen, New Cave, Ship Preset, Zoom, Swap Engines, Sound and Quit.
+**Menus.** The game opens on a title screen (Start, Options, Quit). Pausing shows Resume, New Cave, Options,
+Main Menu and Quit. **Options** has Ship, Zoom, Swap Engines, Music and Effects volume (sliders), CRT Effect
+(scanlines and vignette on or off) and Fullscreen; change a value with left/right, or Enter/A to step it forward.
+Everything is remembered between runs.
 
 **Zoom** is independent of the screen resolution: Near shows 480 world pixels of height, Medium 720 and Far 1080,
 whatever the window or display size. The first start picks Near on small screens such as the R36S's and Medium
@@ -93,13 +96,14 @@ dualthrust [options]
   -w, --window WxH     window size (default 1280x720)
   -s, --ship N         ship preset 0..6
   -z, --zoom LEVEL     near, medium or far
+  --renderer MODE      auto (GLES2, else SDL), gles2 or sdl
   -S, --seed N         cave seed (same seed, same cave)
   -x, --swap-engines   swap left/right
   -m, --mute           start with sound off
   --config-dir PATH    use another config directory
 ```
 
-`--play`, `--thrust L,R`, `--frames N` and `--screenshot FILE` exist for automated testing;
+`--play`, `--screen title|pause|options`, `--thrust L,R`, `--frames N` and `--screenshot FILE` exist for automated testing;
 see `dualthrust --help`. A man page (`man dualthrust`) is installed with the game.
 
 ## Config

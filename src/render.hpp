@@ -52,7 +52,9 @@ class Gfx {
   void draw_ship(const Game& g, double t) const;
   void draw_hud(const Game& g, const UiState& ui) const;
   void draw_minimap(const Game& g, double t);
-  void draw_menu(const Game& g, const UiState& ui) const;
+  void draw_menu(const Game& g, const UiState& ui) const;   // boxed page: pause, options
+  void draw_title(const Game& g, const UiState& ui) const;  // logo + the title page
+  void item_value(const MenuItem& item, const Game& g, const UiState& ui, char* buf, size_t n) const;
 
   std::unique_ptr<Backend> be_;
   int w_ = 1280, h_ = 720;           // screen (output) size in px

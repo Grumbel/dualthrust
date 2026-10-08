@@ -58,6 +58,9 @@ UserConfig load_config() {
     else if (!std::strcmp(key, "sound")) c.sound = val != 0;
     else if (!std::strcmp(key, "ship")) c.ship = val;
     else if (!std::strcmp(key, "zoom")) c.zoom = val;
+    else if (!std::strcmp(key, "crt")) c.crt = val != 0;
+    else if (!std::strcmp(key, "music")) c.music = val;
+    else if (!std::strcmp(key, "sfx")) c.sfx = val;
   }
   std::fclose(f);
   return c;
@@ -67,8 +70,8 @@ void save_config(const UserConfig& c) {
   if (!make_dirs(config_dir_path())) return;
   std::FILE* f = std::fopen(config_file_path().c_str(), "w");
   if (!f) return;
-  std::fprintf(f, "# dualthrust config (XDG)\nfullscreen=%d\nswap_engines=%d\nsound=%d\nship=%d\nzoom=%d\n", c.fullscreen ? 1 : 0,
-               c.swap_engines ? 1 : 0, c.sound ? 1 : 0, c.ship, c.zoom);
+  std::fprintf(f, "# dualthrust config (XDG)\nfullscreen=%d\nswap_engines=%d\nsound=%d\nship=%d\nzoom=%d\ncrt=%d\nmusic=%d\nsfx=%d\n",
+               c.fullscreen ? 1 : 0, c.swap_engines ? 1 : 0, c.sound ? 1 : 0, c.ship, c.zoom, c.crt ? 1 : 0, c.music, c.sfx);
   std::fclose(f);
 #ifdef __EMSCRIPTEN__
   // The config directory is an IndexedDB mount (see mk/wasm/shell.html): write it back to the browser.

@@ -556,7 +556,8 @@ void Gfx::draw_minimap(const Game& g, double t) {
   outline(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::MID, 140));
 
   const float k = MM_W / Cave::WORLD_W;
-  for (const LandingPad& p : g.cave.pads) fill(x + static_cast<int>(p.x0 * k), y + static_cast<int>(p.y * k) - 1, 3, 2, pal::WARN);
+  for (const LandingPad& p : g.cave.pads)  // 5x5 dots: easy to see on a handheld too
+    fill(x + static_cast<int>(0.5f * (p.x0 + p.x1) * k) - 2, y + static_cast<int>(p.y * k) - 2, 5, 5, pal::WARN);
   // Viewport box (drawn twice when it wraps the seam)
   const float vx = Cave::wrap_x(g.cam.x) * k;
   const int vw = static_cast<int>(g.cam.vw * k), vh = static_cast<int>(g.cam.vh * k);
@@ -568,43 +569,106 @@ void Gfx::draw_minimap(const Game& g, double t) {
   }
   const Transform& tf = g.ecs.get<Transform>(g.ship);
   if (std::fmod(t, 0.6) < 0.35)
-    fill(x + static_cast<int>(Cave::wrap_x(tf.pos.x) * k) - 1, y + static_cast<int>(tf.pos.y * k) - 1, 3, 3, pal::HOT);
+    fill(x + static_cast<int>(Cave::wrap_x(tf.pos.x) * k) - 2, y + static_cast<int>(tf.pos.y * k) - 2, 5, 5, pal::HOT);
 }
 
+// The value shown beside a choice or slider item
+void Gfx::item_value(const MenuItem& item, const Game& g, const UiState& ui, char* buf, size_t n) const {
+  auto on_off = [&](bool v) { std::snprintf(buf, n, "%s", v ? "ON" : "OFF"); };
+  switch (item.action) {
+    case MenuAction::Ship: std::snprintf(buf, n, "%s", g.ecs.get<Hull>(g.ship).def->name); break;
+    case MenuAction::Zoom: std::snprintf(buf, n, "%s", ZOOM_LEVELS[g.cam.zoom].name); break;
+    case MenuAction::SwapEngines: on_off(ui.swap_engines); break;
+    case MenuAction::Crt: on_off(ui.crt); break;
+    case MenuAction::Fullscreen: on_off(ui.fullscreen); break;
+    default: buf[0] = '\0';
+  }
+}
+
+static const char* menu_hint(const UiState& ui, bool options) {
+  if (ui.device == InputDevice::Gamepad) return options ? "DPAD MOVE CHANGE  A OK  B BACK" : "DPAD MOVE  A OK  B BACK";
+  return options ? "ARROWS MOVE CHANGE  ENTER OK  ESC BACK" : "UP DOWN MOVE  ENTER OK  ESC BACK";
+}
+
+// A boxed menu page (pause, options) over the dimmed game
 void Gfx::draw_menu(const Game& g, const UiState& ui) const {
-  const int lh = FONT_CELL_H + 8;
-  const int panel_w = 420, panel_h = 80 + MENU_COUNT * lh + 40;
-  const int px = w_ / 2 - panel_w / 2, py = h_ / 2 - panel_h / 2;
+  const MenuPageDef& page = page_def(ui.page);
+  const int lh = FONT_CELL_H + 9;
+  const int panel_w = std::min(w_ - 20, 520), panel_h = 78 + page.count * lh + 44;
+  const int px = w_ / 2 - panel_w / 2, py = std::max(8, h_ / 2 - panel_h / 2);
+  fill(0, 0, w_, h_, with_alpha(pal::BG, 120));
   fill(px, py, panel_w, panel_h, pal::MENU);
   outline(px, py, panel_w, panel_h, pal::BRIGHT);
   outline(px + 3, py + 3, panel_w - 6, panel_h - 6, with_alpha(pal::MID, 90));
 
-  text_centered(w_ / 2, py + 16, "DUALTHRUST", pal::BRIGHT);
-  text_centered(w_ / 2, py + 16 + lh, "CRT CAVE LANDER", pal::MID);
+  text_centered(w_ / 2, py + 18, page.title, pal::BRIGHT);
+  fill(px + 24, py + 18 + FONT_CELL_H + 8, panel_w - 48, 1, with_alpha(pal::MID, 140));
 
-  const int row_y = py + 16 + lh * 2 + 8;
-  for (int i = 0; i < MENU_COUNT; ++i) {
-    char line[48];
-    const char* label = MENU_ITEMS[i].label;
-    switch (MENU_ITEMS[i].action) {
-      case MenuAction::Fullscreen: std::snprintf(line, sizeof line, "%s %s", label, ui.fullscreen ? "ON" : "OFF"); break;
-      case MenuAction::Ship:
-        std::snprintf(line, sizeof line, "%s %s", label, g.ecs.get<Hull>(g.ship).def->name);
-        break;
-      case MenuAction::Zoom: std::snprintf(line, sizeof line, "%s %s", label, ZOOM_LEVELS[g.cam.zoom].name); break;
-      case MenuAction::SwapEngines: std::snprintf(line, sizeof line, "%s %s", label, ui.swap_engines ? "ON" : "OFF"); break;
-      case MenuAction::Sound: std::snprintf(line, sizeof line, "%s %s", label, ui.sound ? "ON" : "OFF"); break;
-      default: std::snprintf(line, sizeof line, "%s", label);
-    }
+  const int row_y = py + 18 + FONT_CELL_H + 22;
+  for (int i = 0; i < page.count; ++i) {
+    const MenuItem& item = page.items[i];
     const bool sel = i == ui.cursor;
-    const int lx = px + 40, ly = row_y + i * lh;
+    const int lx = px + 36, ly = row_y + i * lh, rx = px + panel_w - 36;
     if (sel) {
       fill(px + 12, ly - 4, panel_w - 24, FONT_CELL_H + 8, with_alpha(pal::MID, 40));
       if (std::fmod(ui.time, 0.8) < 0.55) text(lx - FONT_CELL_W - 4, ly, ">", pal::WARN);
     }
-    text(lx, ly, line, sel ? pal::WARN : pal::MID);
+    const Rgba col = sel ? pal::WARN : pal::MID;
+    text(lx, ly, item.label, col);
+    if (item.kind == ItemKind::Choice) {
+      char val[24];
+      item_value(item, g, ui, val, sizeof val);
+      char shown[32];
+      std::snprintf(shown, sizeof shown, sel ? "< %s >" : "%s", val);
+      text(rx - text_width(shown), ly, shown, col);
+    } else if (item.kind == ItemKind::Slider) {
+      const int v = item.action == MenuAction::Music ? ui.music_vol : ui.sfx_vol;
+      const int cell = 9, gap = 3, bars_w = SLIDER_MAX * (cell + gap) - gap;
+      for (int c = 0; c < SLIDER_MAX; ++c)
+        fill(rx - bars_w + c * (cell + gap), ly, cell, FONT_CELL_H, c < v ? col : with_alpha(pal::DIM, 255));
+    }
   }
-  text_centered(w_ / 2, py + panel_h - lh - 8, ui.device == InputDevice::Gamepad ? "UP DOWN MOVE  A SELECT" : "UP DOWN MOVE  ENTER SELECT", pal::MID);
+  text_centered(w_ / 2, py + panel_h - FONT_CELL_H - 14, menu_hint(ui, ui.page == MenuPage::Options), pal::MID);
+}
+
+// Title screen: the cave drifts behind a glowing logo; the title page is plain centred text
+void Gfx::draw_title(const Game& g, const UiState& ui) const {
+  (void)g;
+  fill(0, 0, w_, h_, with_alpha(pal::BG, 140));
+  // Logo letter scale: about 70% of the width, never taller than a seventh of the screen
+  const int S = std::clamp(std::min(static_cast<int>(w_ * 0.7f) / (10 * FONT_CELL_W), h_ / 70), 2, 9);
+  const char* logo = "DUALTHRUST";
+  const int ly = h_ / 8;
+  const int lx = w_ / 2 - text_width(logo, S) / 2;
+  const float pulse = 0.75f + 0.25f * std::sin(static_cast<float>(ui.time) * 2.f);
+  for (int o = 3; o >= 1; --o)  // phosphor glow: soft copies around the sharp letters
+    for (int d = 0; d < 4; ++d) {
+      const int ox = (d == 0 ? -o : d == 1 ? o : 0), oy = (d == 2 ? -o : d == 3 ? o : 0);
+      text(lx + ox, ly + oy, logo, with_alpha(pal::MID, static_cast<uint8_t>(26 * pulse)), S);
+    }
+  text(lx, ly, logo, pal::BRIGHT, S);
+  const int rule_y = ly + 5 * FONT_SCALE * S + 14;
+  fill(lx, rule_y, text_width(logo, S) - FONT_SCALE * S, 2, with_alpha(pal::MID, 180));
+  text_centered(w_ / 2, rule_y + 12, "CRT CAVE LANDER", pal::MID, 2);
+
+  const MenuPageDef& page = page_def(ui.page);
+  const int lh = FONT_CELL_H * 2 + 14;
+  const int top = std::max(rule_y + 12 + FONT_CELL_H * 2 + 28, h_ * 11 / 20);
+  for (int i = 0; i < page.count; ++i) {
+    const bool sel = i == ui.cursor;
+    const int y = top + i * lh;
+    const char* label = page.items[i].label;
+    text_centered(w_ / 2, y, label, sel ? pal::WARN : pal::MID, 2);
+    if (sel && std::fmod(ui.time, 0.8) < 0.55) {
+      const int half = text_width(label, 2) / 2 + 14;
+      text(w_ / 2 - half - FONT_CELL_W * 2, y, ">", pal::WARN, 2);
+      text(w_ / 2 + half, y, "<", pal::WARN, 2);
+    }
+  }
+  text_centered(w_ / 2, h_ - FONT_CELL_H * 2 - 22, menu_hint(ui, false), pal::MID);
+  char ver[64];
+  std::snprintf(ver, sizeof ver, "V%s", APP_VERSION);
+  text(12, h_ - FONT_CELL_H - 8, ver, with_alpha(pal::MID, 150));
 }
 
 // ---------------------------------------------------------------------------
@@ -616,6 +680,7 @@ void Gfx::draw(const Game& g, const UiState& ui) {
   view_.ox = static_cast<int>(std::lround(g.cam.x * static_cast<double>(scale_) + g.cam.shake_off.x * scale_));
   view_.oy = static_cast<int>(std::lround(g.cam.y * static_cast<double>(scale_) + g.cam.shake_off.y * scale_));
   const double t = ui.time;
+  const bool title = ui.screen == Screen::Title;
 
   be_->begin_frame(pal::BG);
   ++frame_;
@@ -625,20 +690,21 @@ void Gfx::draw(const Game& g, const UiState& ui) {
   draw_ship(g, t);
 
   const Flight& fl = g.ecs.get<Flight>(g.ship);
-  if (fl.state == FlightState::Crashed) {
+  if (!title && fl.state == FlightState::Crashed) {
     float flash = (0.5f + 0.5f * std::sin(fl.timer * 20.f)) * std::exp(-fl.timer * 1.5f);
     fill(0, 0, w_, h_, with_alpha(pal::HOT, static_cast<uint8_t>(8 + 100 * flash)));
   }
-  draw_hud(g, ui);
-  if (ui.zoom_toast > 0.f) {  // zoom level name, fading out
-    char buf[32];
-    std::snprintf(buf, sizeof buf, "ZOOM %s", ZOOM_LEVELS[g.cam.zoom].name);
-    text_centered(w_ / 2, h_ - MM_H - 14 - FONT_CELL_H - 18, buf, with_alpha(pal::BRIGHT, static_cast<uint8_t>(255 * clampf(ui.zoom_toast / 0.5f, 0.f, 1.f))));
+  if (!title) {
+    draw_hud(g, ui);
+    if (ui.toast_timer > 0.f && !ui.in_menu())  // short message above the minimap, fading out
+      text_centered(w_ / 2, h_ - MM_H - 14 - FONT_CELL_H - 18, ui.toast,
+                    with_alpha(pal::BRIGHT, static_cast<uint8_t>(255 * clampf(ui.toast_timer / 0.5f, 0.f, 1.f))));
+    draw_minimap(g, t);
   }
-  draw_minimap(g, t);
-  if (ui.menu_open) draw_menu(g, ui);
+  if (title && ui.page == MenuPage::Title) draw_title(g, ui);
+  else if (ui.in_menu()) draw_menu(g, ui);
 
-  be_->copy(overlay_, SDL_Rect{0, 0, w_, h_}, {255, 255, 255, 255});
+  if (ui.crt) be_->copy(overlay_, SDL_Rect{0, 0, w_, h_}, {255, 255, 255, 255});
 }
 
 bool Gfx::save_screenshot(const char* path) const {

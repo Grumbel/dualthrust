@@ -10,6 +10,8 @@ struct UserConfig {
   bool swap_engines = false;
   bool sound = true;
   int ship = 1;
+  bool crt = true;
+  int music = 7, sfx = 10;  // volumes 0..10
   int zoom = -1;  // index into ZOOM_LEVELS; -1 = pick by screen size
 };
 

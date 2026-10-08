@@ -72,6 +72,14 @@ void Audio::set_enabled(bool on) {
   SDL_UnlockAudioDevice(dev_);
 }
 
+void Audio::set_volumes(float music, float sfx) {
+  if (!dev_) return;
+  SDL_LockAudioDevice(dev_);
+  music_target_ = music * music * 1.4f;  // squared: slider steps feel even
+  sfx_target_ = sfx * sfx;
+  SDL_UnlockAudioDevice(dev_);
+}
+
 void Audio::set_engines(float left, float right) {
   if (!dev_) return;
   SDL_LockAudioDevice(dev_);
@@ -106,6 +114,8 @@ void Audio::render(float* out, int frames) {
 
   for (int i = 0; i < frames; ++i) {
     master_ += (master_target_ - master_) * 0.0008f;  // click-free mute fades
+    music_gain_ += (music_target_ - music_gain_) * 0.0008f;
+    sfx_gain_ += (sfx_target_ - sfx_gain_) * 0.0008f;
     float l = 0.f, r = 0.f;
 
     // --- Engines: filtered noise + low rumble, panned per side ---
@@ -159,6 +169,9 @@ void Audio::render(float* out, int frames) {
       if (v.t > life) v.active = false;
     }
 
+    l *= sfx_gain_;  // engines and effects, before the music joins
+    r *= sfx_gain_;
+
     // --- Music: pad + sparse echoing arpeggio ---
     double step_pos = music_t_ / step_len;
     int step = static_cast<int>(step_pos);
@@ -207,8 +220,8 @@ void Audio::render(float* out, int frames) {
     mr += dr * 0.5f;
     music_lp_[0] += (ml - music_lp_[0]) * 0.35f;  // keep it soft
     music_lp_[1] += (mr - music_lp_[1]) * 0.35f;
-    l += music_lp_[0];
-    r += music_lp_[1];
+    l += music_lp_[0] * music_gain_;
+    r += music_lp_[1] * music_gain_;
 
     out[i * 2] = soft_clip(l * master_);
     out[i * 2 + 1] = soft_clip(r * master_);
