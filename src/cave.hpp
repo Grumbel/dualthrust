@@ -11,6 +11,11 @@ struct LandingPad {
   float x0, x1, y;  // world surface y of the pad
 };
 
+struct CargoSpot {
+  float x, floor_y;  // crate stands on the floor at floor_y
+  int kind;          // index into CARGO_DEFS
+};
+
 struct Star {
   float x, y;
   uint8_t size;   // px
@@ -29,7 +34,7 @@ inline constexpr ContourCase CONTOUR_CASES[16] = {
     {{{3, 1}, {-1, -1}}},   {{{0, 1}, {-1, -1}}}, {{{3, 0}, {-1, -1}}}, {{{-1, -1}, {-1, -1}}},
 };
 
-// Toroidal in X, tall in Y. Rock is a boolean grid; draw-side data is baked in generate().
+// A bounded map ringed by rock on all sides. Rock is a boolean grid; draw-side data is baked in generate().
 struct Cave {
   static constexpr float WORLD_W = 24000.f;
   static constexpr float WORLD_H = 4800.f;
@@ -42,30 +47,20 @@ struct Cave {
   std::vector<uint8_t> depth;    // 0 open, n = cells from the nearest open cell (capped)
   std::vector<uint8_t> contour;  // marching-squares case per cell
   std::vector<LandingPad> pads;
+  std::vector<CargoSpot> cargo;  // where crates start
   std::vector<Star> stars;
   unsigned seed = 1;
   unsigned generation = 0;  // bumps on every generate(), for cache invalidation
 
-  static float wrap_x(float wx) {
-    wx = std::fmod(wx, WORLD_W);
-    return wx < 0.f ? wx + WORLD_W : wx;
-  }
-  // Shortest signed X distance from → to on the torus
-  static float wrap_delta(float from, float to) {
-    return std::fmod(to - from + WORLD_W * 1.5f, WORLD_W) - WORLD_W * 0.5f;
-  }
-  static int wrap_gx(int gx) { return ((gx % GW) + GW) % GW; }
-
-  bool is_solid_cell(int gx, int gy) const {
-    if (gy < 0 || gy >= GH) return true;  // outside vertical = solid
-    return solid[gy * GW + wrap_gx(gx)] != 0;
-  }
+  static bool in_grid(int gx, int gy) { return gx >= 0 && gx < GW && gy >= 0 && gy < GH; }
+  // Everything outside the map is rock
+  bool is_solid_cell(int gx, int gy) const { return !in_grid(gx, gy) || solid[gy * GW + gx] != 0; }
   bool is_solid_world(float wx, float wy) const {
-    if (wy < 0.f || wy >= WORLD_H) return true;
-    return is_solid_cell(static_cast<int>(wrap_x(wx) / CELL), static_cast<int>(wy / CELL));
+    if (wx < 0.f || wx >= WORLD_W || wy < 0.f || wy >= WORLD_H) return true;
+    return is_solid_cell(static_cast<int>(wx / CELL), static_cast<int>(wy / CELL));
   }
-  uint8_t depth_at(int gx, int gy) const { return depth[gy * GW + wrap_gx(gx)]; }
-  uint8_t contour_at(int gx, int gy) const { return contour[gy * GW + wrap_gx(gx)]; }
+  uint8_t depth_at(int gx, int gy) const { return in_grid(gx, gy) ? depth[gy * GW + gx] : MAX_DEPTH; }
+  uint8_t contour_at(int gx, int gy) const { return in_grid(gx, gy) ? contour[gy * GW + gx] : 15; }
 
   bool is_open_box(float wx, float wy, float half_w, float half_h) const;
   float floor_below(float wx, float wy) const;
