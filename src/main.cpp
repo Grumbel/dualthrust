@@ -19,6 +19,7 @@
 #include "defs.hpp"
 #include "game.hpp"
 #include "render.hpp"
+#include "stats.hpp"
 #include "systems.hpp"
 #include "ui.hpp"
 
@@ -57,8 +58,12 @@ struct Options {
   int frames = 0;              // exit after N frames (0 = run forever)
   const char* screenshot = nullptr;
   bool play = false;           // skip the title screen
+  bool no_pad = false;         // ignore game controllers (reproducible tests next to a real pad)
   std::string screen;          // start on: title, pause or options (screenshots, testing)
   float hold[2] = {0.f, 0.f};  // constant engine input
+  float rope_len = 0.f;        // --rope: start with the cable paid out
+  bool at_set = false;         // --at: start the ship at a given world position
+  float at_x = 0.f, at_y = 0.f, at_deg = 0.f;
 };
 
 void print_help(const char* argv0) {
@@ -82,8 +87,11 @@ void print_help(const char* argv0) {
       "\n"
       "Debug:\n"
       "  --play               Skip the title screen and start flying\n"
-      "  --screen NAME        Start on title, pause or options\n"
+      "  --no-gamepad         Ignore game controllers\n"
+      "  --screen NAME        Start on title, pause, options or stats\n"
       "  --thrust L,R         Hold both engines at fixed levels (0..1)\n"
+      "  --rope LEN           Start with the cable paid out to LEN px\n"
+      "  --at X,Y[,DEG]       Start the ship at world position X,Y px (tilted by DEG), not on a pad\n"
       "  --frames N           Exit after N frames\n"
       "  --screenshot FILE    Save a BMP of the last frame (with --frames)\n"
       "\n"
@@ -131,9 +139,19 @@ int parse_args(int argc, char** argv, Options& o) {
     else if (a == "-m" || a == "--mute") o.mute = true;
     else if (a == "--config-dir") set_config_dir_override(need("--config-dir"));
     else if (a == "--play") o.play = true;
+    else if (a == "--no-gamepad") o.no_pad = true;
     else if (a == "--screen") o.screen = need("--screen");
     else if (a == "--frames") o.frames = std::atoi(need("--frames"));
     else if (a == "--screenshot") o.screenshot = need("--screenshot");
+    else if (a == "--rope") o.rope_len = static_cast<float>(std::atof(need("--rope")));
+    else if (a == "--at") {
+      const char* v = need("--at");
+      o.at_set = std::sscanf(v, "%f,%f,%f", &o.at_x, &o.at_y, &o.at_deg) >= 2;
+      if (!o.at_set) {
+        std::fprintf(stderr, "dualthrust: bad --at '%s' (use X,Y[,DEG])\n", v);
+        return 2;
+      }
+    }
     else if (a == "--thrust") {
       const char* v = need("--thrust");
       if (std::sscanf(v, "%f,%f", &o.hold[0], &o.hold[1]) != 2) {
@@ -178,9 +196,11 @@ void print_diagnostics(const char* argv0, const Options& o) {
   std::fflush(stdout);
 }
 
-// Engine levels 0..1 from triggers / shoulders / sticks (up = thrust) and the keyboard
-void read_thrust(SDL_GameController* pad, float out[2]) {
-  out[0] = out[1] = 0.f;
+// Engine levels 0..1 per control channel from triggers / shoulders / sticks (up = thrust) and the keyboard.
+//   0 left trigger, 1 right trigger, 2 left stick up, 3 right stick up
+// Ships with only two engines (`channels` = 2) fold the sticks into the left and right engines, as always.
+void read_thrust(SDL_GameController* pad, int channels, float out[4]) {
+  float trig[2] = {0.f, 0.f}, stick[2] = {0.f, 0.f};
   if (pad) {
     auto trigger = [&](SDL_GameControllerAxis ax) {
       return clampf(SDL_GameControllerGetAxis(pad, ax) / 32767.f, 0.f, 1.f);
@@ -190,21 +210,36 @@ void read_thrust(SDL_GameController* pad, float out[2]) {
       int raw = SDL_GameControllerGetAxis(pad, ax);
       return raw >= -DEAD ? 0.f : clampf((-raw - DEAD) / static_cast<float>(32768 - DEAD), 0.f, 1.f);
     };
-    out[0] = std::max(trigger(SDL_CONTROLLER_AXIS_TRIGGERLEFT), stick_up(SDL_CONTROLLER_AXIS_LEFTY));
-    out[1] = std::max(trigger(SDL_CONTROLLER_AXIS_TRIGGERRIGHT), stick_up(SDL_CONTROLLER_AXIS_RIGHTY));
+    trig[0] = trigger(SDL_CONTROLLER_AXIS_TRIGGERLEFT);
+    trig[1] = trigger(SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+    stick[0] = stick_up(SDL_CONTROLLER_AXIS_LEFTY);
+    stick[1] = stick_up(SDL_CONTROLLER_AXIS_RIGHTY);
+    // shoulder buttons: full thrust (handhelds without analog triggers)
+    if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) trig[0] = 1.f;
+    if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) trig[1] = 1.f;
   }
-  if (pad) {  // shoulder buttons: full thrust (handhelds without analog triggers)
-    if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) out[0] = 1.f;
-    if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) out[1] = 1.f;
-  }
-  // Keyboard, one hand per engine: Ctrl (or A / D, arrows) = full thrust, Shift = half thrust
+  // Keyboard, one hand per engine: Ctrl (or A / D, arrows) = full thrust, Shift = half thrust;
+  // the big ships' two extra thrusters: W / Up and Down / Right Alt
   const Uint8* keys = SDL_GetKeyboardState(nullptr);
   const bool full[2] = {keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT],
                         keys[SDL_SCANCODE_RCTRL] || keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT]};
   const bool half[2] = {keys[SDL_SCANCODE_LSHIFT] != 0, keys[SDL_SCANCODE_RSHIFT] != 0};
   for (int i = 0; i < 2; ++i) {
-    if (full[i]) out[i] = 1.f;
-    else if (half[i]) out[i] = std::max(out[i], 0.5f);
+    if (full[i]) trig[i] = 1.f;
+    else if (half[i]) trig[i] = std::max(trig[i], 0.5f);
+  }
+  if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP]) stick[0] = 1.f;
+  if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_RALT]) stick[1] = 1.f;
+
+  out[0] = trig[0];
+  out[1] = trig[1];
+  out[2] = out[3] = 0.f;
+  if (channels >= 4) {
+    out[2] = stick[0];
+    out[3] = stick[1];
+  } else {
+    out[0] = std::max(out[0], stick[0]);
+    out[1] = std::max(out[1], stick[1]);
   }
 }
 
@@ -272,6 +307,18 @@ int main(int argc, char** argv) {
   game.cave.generate(opt.seed);
   std::printf("Cave ready (%d pads)\n", static_cast<int>(game.cave.pads.size()));
   game.rng = Rng(SDL_GetTicks() | 1u);
+  // Debug and screenshot runs leave the saved statistics alone
+  game.stats_enabled = opt.frames == 0 && !opt.screenshot;
+  if (game.stats_enabled) {
+    game.stats = load_stats();
+    game.stats.caves += 1;
+    game.stats_dirty = true;
+  }
+  auto flush_stats = [&] {
+    if (!game.stats_enabled || !game.stats_dirty) return;
+    if (save_stats(game.stats)) game.stats_dirty = false;
+  };
+  double stats_age = 0.0;  // real seconds since the last save
 
   UserConfig user = load_config();
   if (opt.ship >= 0) user.ship = opt.ship;
@@ -294,12 +341,17 @@ int main(int argc, char** argv) {
   };
   auto first_pad_x = [&] { return 0.5f * (game.cave.pads[0].x0 + game.cave.pads[0].x1); };
   new_game_at(first_pad_x());
+  if (opt.at_set) {
+    place_ship(game, {opt.at_x, opt.at_y}, opt.at_deg * PI / 180.f);
+    snap_camera(game);
+  }
+  if (opt.rope_len > 0.f) debug_rope(game, opt.rope_len);
   std::printf("  ship:       %s (%d)\n  swap L/R:   %s\n  fullscreen: %s\nReady.\n", SHIP_DEFS[user.ship].name,
               user.ship, user.swap_engines ? "yes" : "no", user.fullscreen ? "yes" : "no");
   std::fflush(stdout);
 
   UiState ui;
-  ui.device = SDL_NumJoysticks() > 0 ? InputDevice::Gamepad : InputDevice::Keyboard;
+  ui.device = SDL_NumJoysticks() > 0 && !opt.no_pad ? InputDevice::Gamepad : InputDevice::Keyboard;
   ui.fullscreen = user.fullscreen;
   ui.swap_engines = user.swap_engines;
   ui.sound = user.sound && !opt.mute;
@@ -308,6 +360,7 @@ int main(int argc, char** argv) {
   ui.sfx_vol = std::clamp(user.sfx, 0, SLIDER_MAX);
   if (opt.play) ui.screen = Screen::Play;
   else if (opt.screen == "pause") { ui.screen = Screen::Pause; ui.page = MenuPage::Pause; }
+  else if (opt.screen == "stats") { ui.screen = Screen::Pause; ui.page = MenuPage::Stats; ui.options_back = MenuPage::Pause; }
   else if (opt.screen == "options") { ui.screen = Screen::Pause; ui.page = MenuPage::Options; ui.options_back = MenuPage::Pause; }
   Audio audio;
   audio.init();
@@ -348,6 +401,7 @@ int main(int argc, char** argv) {
   auto new_cave = [&] {
     game.cave.generate(SDL_GetTicks());
     new_game_at(first_pad_x());
+    if (game.stats_enabled) { game.stats.caves += 1; game.stats_dirty = true; }
   };
   // Respawn on a random pad after a crash — never regenerates the cave
   auto respawn_after_crash = [&] {
@@ -409,10 +463,11 @@ int main(int argc, char** argv) {
       case MenuAction::Start: start_game(); break;
       case MenuAction::Resume: ui.screen = Screen::Play; break;
       case MenuAction::NewCave: new_cave(); ui.screen = Screen::Play; break;
-      case MenuAction::Options: ui.options_back = ui.page; open_page(MenuPage::Options); break;
+      case MenuAction::Options: ui.options_back = ui.page; ui.back_cursor = ui.cursor; open_page(MenuPage::Options); break;
+      case MenuAction::Stats: ui.options_back = ui.page; ui.back_cursor = ui.cursor; open_page(MenuPage::Stats); break;
       case MenuAction::MainMenu: ui.screen = Screen::Title; open_page(MenuPage::Title); break;
       case MenuAction::Quit: persist_config(); running = false; break;
-      case MenuAction::Back: open_page(ui.options_back, 1); break;  // back on its Options entry
+      case MenuAction::Back: open_page(ui.options_back, ui.back_cursor); break;  // back on the entry it came from
       case MenuAction::Ship: cycle_ship(delta); break;
       case MenuAction::Zoom: zoom_to(game.cam.zoom + delta, true); break;
       case MenuAction::SwapEngines: toggle_swap(); break;
@@ -431,16 +486,18 @@ int main(int argc, char** argv) {
 #endif
         break;
       case MenuPage::Pause: ui.screen = Screen::Play; break;
-      case MenuPage::Options: open_page(ui.options_back, 1); break;
+      case MenuPage::Options:
+      case MenuPage::Stats: open_page(ui.options_back, ui.back_cursor); break;
     }
   };
   auto open_pause = [&] {
+    flush_stats();
     ui.screen = Screen::Pause;
     open_page(MenuPage::Pause);
   };
 
   SDL_GameController* pad = nullptr;
-  for (int i = 0; i < SDL_NumJoysticks() && !pad; ++i)
+  for (int i = 0; i < SDL_NumJoysticks() && !pad && !opt.no_pad; ++i)
     if (SDL_IsGameController(i)) pad = SDL_GameControllerOpen(i);
 
   Uint64 prev = SDL_GetPerformanceCounter();
@@ -475,6 +532,10 @@ int main(int argc, char** argv) {
             if (k == SDLK_TAB) zoom_to(game.cam.zoom + 1, true);
             if (k == SDLK_s) cycle_ship(+1);
             if (k == SDLK_x) toggle_swap();
+            if (k == SDLK_SPACE) toggle_legs(game);
+            if (k == SDLK_r) toggle_grip(game);
+            if (k == SDLK_q) set_winch(game, true);
+            if (k == SDLK_e) set_winch(game, false);
             if (enter) respawn_after_crash();
             if (k == SDLK_g) new_cave();
           } else {
@@ -495,8 +556,15 @@ int main(int argc, char** argv) {
             if (b == SDL_CONTROLLER_BUTTON_BACK) cycle_ship(+1);
             if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) zoom_to(game.cam.zoom - 1, false);    // closer
             if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) zoom_to(game.cam.zoom + 1, false);  // farther
-            if (b == SDL_CONTROLLER_BUTTON_A || b == SDL_CONTROLLER_BUTTON_B) respawn_after_crash();
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_LEFT) set_winch(game, true);
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) set_winch(game, false);
+            if (b == SDL_CONTROLLER_BUTTON_B) respawn_after_crash();
+            if (b == SDL_CONTROLLER_BUTTON_A) {  // respawn after a crash, else the hook grabs / lets go
+              if (game.ecs.get<Flight>(game.ship).state == FlightState::Crashed) respawn_after_crash();
+              else toggle_grip(game);
+            }
             if (b == SDL_CONTROLLER_BUTTON_Y) new_cave();
+            if (b == SDL_CONTROLLER_BUTTON_X) toggle_legs(game);
           } else {
             if (b == SDL_CONTROLLER_BUTTON_START) {
               if (ui.screen == Screen::Title) start_game();
@@ -519,7 +587,7 @@ int main(int argc, char** argv) {
           if (ui.screen == Screen::Play && ev.wheel.y != 0) zoom_to(game.cam.zoom + (ev.wheel.y > 0 ? -1 : 1), false);
           break;
         case SDL_CONTROLLERDEVICEADDED:
-          if (!pad) pad = SDL_GameControllerOpen(ev.cdevice.which);
+          if (!pad && !opt.no_pad) pad = SDL_GameControllerOpen(ev.cdevice.which);
           break;
         case SDL_CONTROLLERDEVICEREMOVED:
           if (pad && ev.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))) {
@@ -531,16 +599,19 @@ int main(int argc, char** argv) {
     }
 
     // Input → thruster levels (L/R swapped on request)
-    float in[2] = {0.f, 0.f};
+    float in[4] = {0.f, 0.f, 0.f, 0.f};
     if (ui.screen == Screen::Play) {
-      read_thrust(pad, in);
+      read_thrust(pad, ship_channels(game), in);
       in[0] = std::max(in[0], opt.hold[0]);
       in[1] = std::max(in[1], opt.hold[1]);
     }
-    if (ui.swap_engines) std::swap(in[0], in[1]);
-    set_thrust(game, in[0], in[1]);
+    if (ui.swap_engines) {
+      std::swap(in[0], in[1]);
+      std::swap(in[2], in[3]);
+    }
+    set_thrusts(game, in);
     const bool flying = game.ecs.get<Flight>(game.ship).state == FlightState::Flying;
-    audio.set_engines(flying ? in[0] : 0.f, flying ? in[1] : 0.f);
+    audio.set_engines(flying ? std::max(in[0], in[2]) : 0.f, flying ? std::max(in[1], in[3]) : 0.f);  // the rumble is stereo: left / right
 
     const Uint64 now = SDL_GetPerformanceCounter();
     const float dt = std::min(static_cast<float>((now - prev) / freq), 0.05f);
@@ -564,7 +635,6 @@ int main(int argc, char** argv) {
         // (parked low and to the left, out from behind the menu text)
         game.cam.x = p.x - game.cam.vw * 0.36f + 80.f * std::sin(static_cast<float>(ui.time) * 0.13f);
         game.cam.y = p.y - game.cam.vh * 0.74f + 20.f * std::sin(static_cast<float>(ui.time) * 0.09f);
-        game.cam.prev_ship_x = p.x;
       } else {
         update_camera(game, dt);
       }
@@ -572,8 +642,17 @@ int main(int argc, char** argv) {
       accumulator = 0.f;
     }
 
-    for (const SimEvent& ev : game.fired) audio.trigger(ev.kind, ev.strength);
+    bool milestone = false;  // landing / crash: worth saving the statistics right away
+    for (const SimEvent& ev : game.fired) {
+      audio.trigger(ev.kind, ev.strength);
+      milestone |= ev.kind == SimEventKind::Landed || ev.kind == SimEventKind::Crashed || ev.kind == SimEventKind::Delivered;
+    }
     game.fired.clear();
+    stats_age += dt;
+    if (milestone || (game.stats_dirty && stats_age > 30.0)) {
+      flush_stats();
+      stats_age = 0.0;
+    }
 
     const double t1 = stamp();
     gfx.draw(game, ui);
@@ -610,6 +689,7 @@ int main(int argc, char** argv) {
 #endif
 
   persist_config();
+  flush_stats();
   if (pad) SDL_GameControllerClose(pad);
   audio.shutdown();
   gfx.shutdown();

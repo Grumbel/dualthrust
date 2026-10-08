@@ -152,6 +152,52 @@ void Audio::render(float* out, int frames) {
           s = (std::sin(t * TAU * f) * 0.7f + noise() * 0.25f * std::exp(-t * 40.f)) * std::exp(-t * 11.f) * 0.5f;
           break;
         }
+        // --- Pilot feedback: short beeps ---
+        case SimEventKind::HookOut:  // winch out: two rising beeps
+        case SimEventKind::HookIn: {  // winch in: two falling beeps
+          life = 0.3f;
+          const bool out = v.kind == SimEventKind::HookOut;
+          const float f1 = out ? 660.f : 990.f, f2 = out ? 990.f : 660.f;
+          s = (t < 0.09f ? std::sin(t * TAU * f1) * (1.f - t / 0.09f)
+                         : (t > 0.12f && t < 0.24f ? std::sin(t * TAU * f2) * (1.f - (t - 0.12f) / 0.12f) : 0.f)) * 0.16f;
+          break;
+        }
+        case SimEventKind::Grab: {  // latch clunk, then a confirming chirp
+          life = 0.4f;
+          s = std::sin(t * TAU * (90.f * std::exp(-t * 20.f) + 55.f)) * std::exp(-t * 28.f) * 0.55f +
+              (t > 0.07f ? std::sin(t * TAU * 1320.f) * std::exp(-(t - 0.07f) * 22.f) * 0.2f : 0.f);
+          break;
+        }
+        case SimEventKind::Release: {  // falling blip
+          life = 0.25f;
+          s = std::sin(t * TAU * (900.f * std::exp(-t * 9.f) + 300.f)) * std::exp(-t * 14.f) * 0.2f;
+          break;
+        }
+        case SimEventKind::NoTarget: {  // low double buzz
+          life = 0.3f;
+          const float gate = (t < 0.1f || (t > 0.15f && t < 0.25f)) ? 1.f : 0.f;
+          const float ph = std::fmod(t * 140.f, 1.f);
+          s = (ph < 0.5f ? 0.14f : -0.14f) * gate;
+          break;
+        }
+        case SimEventKind::Delivered: {  // cheerful rising arpeggio C6 E6 G6 C7
+          life = 1.2f;
+          static constexpr float notes[4] = {1046.5f, 1318.5f, 1568.f, 2093.f};
+          for (int n = 0; n < 4; ++n) {
+            const float tn = t - n * 0.09f;
+            if (tn > 0.f) s += std::sin(tn * TAU * notes[n]) * std::exp(-tn * (n == 3 ? 4.f : 9.f)) * 0.14f;
+          }
+          break;
+        }
+        case SimEventKind::LegsOut:  // servo whirr: a short sweep down / up with a little grit
+        case SimEventKind::LegsIn: {
+          life = 0.3f;
+          const bool out = v.kind == SimEventKind::LegsOut;
+          const float f = out ? 330.f - 400.f * t : 200.f + 400.f * t;
+          const float env = std::min(t / 0.02f, 1.f) * std::max(0.f, 1.f - t / 0.28f);
+          s = (std::sin(t * TAU * f) * 0.12f + noise() * 0.03f) * env;
+          break;
+        }
         case SimEventKind::Crashed: {  // rumbling explosion
           life = 2.6f;
           float f = 55.f * std::exp(-t * 1.4f) + 22.f;
