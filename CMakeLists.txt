@@ -44,6 +44,22 @@ else()
   endif()
 endif()
 
+# Box2D 3.x (C, MIT). Native builds use the installed package (find_package); cross builds (R36S, WebAssembly)
+# compile the sources given by -DDUALTHRUST_BOX2D_SRC=<dir>, so they need no prebuilt target library.
+if(DUALTHRUST_BOX2D_SRC)
+  set(BOX2D_SAMPLES OFF CACHE BOOL "" FORCE)
+  set(BOX2D_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+  set(BOX2D_BENCHMARKS OFF CACHE BOOL "" FORCE)
+  set(BOX2D_DOCS OFF CACHE BOOL "" FORCE)
+  set(BUILD_SHARED_LIBS OFF)
+  add_subdirectory("${DUALTHRUST_BOX2D_SRC}" box2d EXCLUDE_FROM_ALL)
+  if(NOT TARGET box2d::box2d)
+    add_library(box2d::box2d ALIAS box2d)
+  endif()
+else()
+  find_package(box2d CONFIG REQUIRED)
+endif()
+
 add_executable(dualthrust
   src/main.cpp
   src/audio.cpp
@@ -51,7 +67,9 @@ add_executable(dualthrust
   src/backend_sdl.cpp
   src/cave.cpp
   src/config.cpp
+  src/physics.cpp
   src/render.cpp
+  src/stats.cpp
   src/systems.cpp
 )
 target_compile_options(dualthrust PRIVATE -Wall -Wextra)
@@ -61,7 +79,7 @@ target_compile_definitions(dualthrust PRIVATE DUALTHRUST_VERSION="${PROJECT_VERS
 if(DUALTHRUST_CXXABI_SHIM)
   target_sources(dualthrust PRIVATE "${DUALTHRUST_CXXABI_SHIM}")
 endif()
-target_link_libraries(dualthrust PRIVATE SDL2::SDL2)
+target_link_libraries(dualthrust PRIVATE SDL2::SDL2 box2d::box2d)
 
 if(TARGET SDL2::SDL2main)
   target_link_libraries(dualthrust PRIVATE SDL2::SDL2main)
@@ -75,6 +93,14 @@ if(DUALTHRUST_BUILD_TESTS AND NOT EMSCRIPTEN)
   target_link_libraries(gles2_texture_rebind PRIVATE SDL2::SDL2)
   add_test(NAME gles2_texture_rebind COMMAND gles2_texture_rebind)
   set_tests_properties(gles2_texture_rebind PROPERTIES SKIP_RETURN_CODE 2)
+endif()
+
+# Rigid-body checks (headless, no SDL)
+if(DUALTHRUST_BUILD_TESTS AND NOT EMSCRIPTEN)
+  add_executable(physics_test tests/physics_test.cpp src/physics.cpp src/systems.cpp src/cave.cpp src/stats.cpp src/config.cpp)
+  target_include_directories(physics_test PRIVATE src)
+  target_link_libraries(physics_test PRIVATE box2d::box2d)
+  add_test(NAME physics_test COMMAND physics_test)
 endif()
 
 if(EMSCRIPTEN)

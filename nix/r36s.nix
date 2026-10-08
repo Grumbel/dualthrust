@@ -22,6 +22,8 @@
 , zip
   # Unpacked sysroot tree (usr/, lib/): flake input github:grumnix/arkos-sysroot
 , sysrootSrc
+  # Box2D 3.x sources (nixpkgs' box2d.src); compiled as part of the game with the cross compiler
+, box2dSrc
   # Optional already-built sysroot store path to use instead (dev shortcut, needs --impure).
 , sysrootOverride ? null
 }:
@@ -243,6 +245,7 @@ let
         "-DCMAKE_BUILD_TYPE=Release"
         # GCC 15 headers vs ArkOS libstdc++: shim missing ABI symbols.
         "-DDUALTHRUST_CXXABI_SHIM=${../mk/r36s/cxxabi_shim.cpp}"
+        "-DDUALTHRUST_BOX2D_SRC=${box2dSrc}"
         "-DPROJECT_VERSION_FULL=${version}"
       ];
 

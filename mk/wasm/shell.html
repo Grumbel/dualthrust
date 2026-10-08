@@ -86,14 +86,17 @@
     var statusElement = document.getElementById('status');
     var progressBar = document.getElementById('progress-bar');
 
-    /* The game keeps its settings in $HOME/.config/dualthrust (HOME is /home/web_user here). That
-       directory is an IndexedDB mount, loaded before the game starts and written back by the game
-       after every change (FS.syncfs). */
-    var CONFIG_MOUNT = '/home/web_user/.config';
+    /* The game keeps its settings in $HOME/.config/dualthrust and its statistics in
+       $HOME/.local/state/dualthrust (HOME is /home/web_user here). Both directories are IndexedDB
+       mounts, loaded before the game starts and written back by the game after every change
+       (FS.syncfs writes all mounts). */
+    var PERSISTENT_MOUNTS = ['/home/web_user/.config', '/home/web_user/.local/state'];
 
     function mountConfig() {
-      FS.mkdirTree(CONFIG_MOUNT);
-      FS.mount(FS.filesystems.IDBFS, {}, CONFIG_MOUNT);
+      PERSISTENT_MOUNTS.forEach(function(dir) {
+        FS.mkdirTree(dir);
+        FS.mount(FS.filesystems.IDBFS, {}, dir);
+      });
       Module.addRunDependency('dualthrust-config');
       FS.syncfs(true, function(err) {
         if (err) console.warn('dualthrust: loading the settings failed', err);

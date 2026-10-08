@@ -13,6 +13,7 @@
 { pkgs
 , sdlSrc
 , sdlVersion
+, box2dSrc
 , version
 , gitRev
 }:
@@ -72,6 +73,7 @@ let
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=$out \
         -DSDL2_ROOT=${sdl2Wasm} \
+        -DDUALTHRUST_BOX2D_SRC=${box2dSrc} \
         -DPROJECT_VERSION_FULL=${version} \
         -DDUALTHRUST_GIT_REV=${gitRev}
       cmake --build build --parallel ''${NIX_BUILD_CORES:-1}

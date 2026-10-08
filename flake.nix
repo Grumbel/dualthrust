@@ -33,6 +33,7 @@
       mkWasm = pkgs: import ./nix/wasm.nix {
         inherit pkgs version gitRev;
         sdlSrc = sdl2-src;
+        box2dSrc = pkgs.box2d.src;
         sdlVersion = "2.30.3";
       };
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
@@ -47,6 +48,7 @@
           r36s = import ./nix/r36s.nix {
             inherit (pkgs) lib stdenv stdenvNoCC cmake pkg-config writeShellScript zip pkgsCross;
             sysrootSrc = arkos-sysroot;
+            box2dSrc = pkgs.box2d.src;
             # `DUALTHRUST_ARKOS_SYSROOT=/nix/store/…-arkos-sysroot-… nix build --impure .#…` uses an
             # already-built sysroot instead of the input (e.g. one a pingus build unpacked).
             sysrootOverride =
@@ -67,7 +69,7 @@
             src = self;
 
             nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.pkg-config ];
-            buildInputs = [ pkgs.SDL2 ];
+            buildInputs = [ pkgs.SDL2 pkgs.box2d ];
 
             cmakeFlags = [
               "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
