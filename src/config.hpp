@@ -24,5 +24,7 @@ std::string state_dir_path();
 // Prints an error and returns false if either directory is unresolvable; main exits then.
 bool check_user_dirs();
 std::string config_file_path();
+bool make_dirs(const std::string& dir);  // mkdir -p
+void flush_user_files();                 // web build: write the IndexedDB-backed directories back; else a no-op
 UserConfig load_config();
 void save_config(const UserConfig& c);

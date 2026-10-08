@@ -19,6 +19,8 @@ namespace {
 
 std::string g_dir_override;
 
+}  // namespace
+
 // mkdir -p
 bool make_dirs(const std::string& dir) {
   for (size_t i = 1; i <= dir.size(); ++i) {
@@ -29,7 +31,12 @@ bool make_dirs(const std::string& dir) {
   return true;
 }
 
-}  // namespace
+void flush_user_files() {
+#ifdef __EMSCRIPTEN__
+  // The config and state directories are IndexedDB mounts (see mk/wasm/shell.html): write them back to the browser.
+  EM_ASM(FS.syncfs(false, function(err) { if (err) console.warn('dualthrust: saving files failed', err); }));
+#endif
+}
 
 void set_config_dir_override(const std::string& dir) { g_dir_override = dir; }
 
@@ -103,8 +110,5 @@ void save_config(const UserConfig& c) {
   std::fprintf(f, "# dualthrust config (XDG)\nfullscreen=%d\nswap_engines=%d\nsound=%d\nship=%d\nzoom=%d\ncrt=%d\nmusic=%d\nsfx=%d\n",
                c.fullscreen ? 1 : 0, c.swap_engines ? 1 : 0, c.sound ? 1 : 0, c.ship, c.zoom, c.crt ? 1 : 0, c.music, c.sfx);
   std::fclose(f);
-#ifdef __EMSCRIPTEN__
-  // The config directory is an IndexedDB mount (see mk/wasm/shell.html): write it back to the browser.
-  EM_ASM(FS.syncfs(false, function(err) { if (err) console.warn('dualthrust: saving settings failed', err); }));
-#endif
+  flush_user_files();
 }
