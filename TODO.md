@@ -14,7 +14,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-055.1-pad-pointer-fullmap-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-055.1-pad-pointer-fullmap-9a093cd` → tip `d69c7d8`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
