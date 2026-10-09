@@ -238,6 +238,7 @@ void Gfx::build_minimap(const Cave& cave, const std::vector<uint8_t>& revealed) 
       if (str >= 250)
         px[static_cast<size_t>(gy * Cave::GW + gx)] = edge_hi;
       else {
+        const float t = str / 255.f;
         const uint8_t eg = static_cast<uint8_t>(40 + 215 * t);
         px[static_cast<size_t>(gy * Cave::GW + gx)] = pack({static_cast<uint8_t>(eg * 2 / 3), eg, static_cast<uint8_t>(eg * 3 / 4), 255});
       }
