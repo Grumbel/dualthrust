@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-044.1-strafe-menu-cam-pad-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-044.1-strafe-menu-cam-pad-9a093cd` → tip `35c3c00`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
