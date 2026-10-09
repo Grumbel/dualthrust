@@ -14,7 +14,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-053.1-fix-home-pad-save-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-053.1-fix-home-pad-save-9a093cd` → tip `ec93fee`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
