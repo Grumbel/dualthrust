@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <utility>
+#include <algorithm>
 
 namespace {
 
@@ -48,9 +50,12 @@ constexpr int CHUNK_CELLS = 30;
 constexpr int CHUNK = CHUNK_CELLS * TILE;
 constexpr int CHUNKS_X = static_cast<int>(Cave::WORLD_W) / CHUNK, CHUNKS_Y = static_cast<int>(Cave::WORLD_H) / CHUNK;
 
-// Minimap: one texel per cave cell; panel is a 4:3 window around the ship
-constexpr int MM_W = 240, MM_H = 180;
-constexpr float MM_K = 1.f / Cave::CELL;  // screen px per world px
+// Minimap: one texel per cave cell; on-screen panel is fixed, source window zooms.
+constexpr int MM_ZOOM_W[] = {120, 240, 480};  // cells wide: near / mid / far
+constexpr int MM_ZOOM_H[] = {90, 180, 360};
+constexpr int MM_ZOOM_COUNT = 3;
+constexpr int MM_W = 240, MM_H = 180;  // default mid + panel aspect reference
+constexpr float MM_K = 1.f / Cave::CELL;  // cells per world px
 
 uint32_t pack(Rgba c) {  // RGBA32 byte order is R,G,B,A in memory
   uint32_t v;
@@ -1054,12 +1059,15 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   }
 }
 
-void Gfx::draw_minimap(Game& g, double t) {
+void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
   if (!minimap_ || minimap_generation_ != g.cave.generation || g.reveal_dirty) {
     build_minimap(g.cave, g.revealed);
     g.reveal_dirty = false;
   }
-  // Source window stays MM_W x MM_H cells; the on-screen panel scales with the UI.
+  // On-screen panel size is fixed; source window (cells) follows minimap_zoom.
+  const int z = std::clamp(ui.minimap_zoom, 0, MM_ZOOM_COUNT - 1);
+  const int src_w = std::min(MM_ZOOM_W[z], Cave::GW);
+  const int src_h = std::min(MM_ZOOM_H[z], Cave::GH);
   const int mm_w = L(MM_W), mm_h = L(MM_H), pad = L(4);
   // Bottom-left corner (out of the way of centred HUD / notices)
   const int x = L(14), y = h_ - mm_h - L(14);
@@ -1067,17 +1075,17 @@ void Gfx::draw_minimap(Game& g, double t) {
 
   // The window scrolls with the ship and stops at the map's edges
   const Transform& tf = g.ecs.get<Transform>(g.ship);
-  const float ox = clampf(tf.pos.x * MM_K - MM_W * 0.5f, 0.f, static_cast<float>(Cave::GW - MM_W));
-  const float oy = clampf(tf.pos.y * MM_K - MM_H * 0.5f, 0.f, static_cast<float>(Cave::GH - MM_H));
+  const float ox = clampf(tf.pos.x * MM_K - src_w * 0.5f, 0.f, static_cast<float>(Cave::GW - src_w));
+  const float oy = clampf(tf.pos.y * MM_K - src_h * 0.5f, 0.f, static_cast<float>(Cave::GH - src_h));
   const int ix = static_cast<int>(ox), iy = static_cast<int>(oy);
-  be_->copy_part(minimap_, SDL_Rect{ix, iy, MM_W, MM_H}, SDL_Rect{x, y, mm_w, mm_h}, {255, 255, 255, 255});
+  be_->copy_part(minimap_, SDL_Rect{ix, iy, src_w, src_h}, SDL_Rect{x, y, mm_w, mm_h}, {255, 255, 255, 255});
   outline(x - pad, y - pad, mm_w + 2 * pad, mm_h + 2 * pad, with_alpha(pal::MID, 140));
 
   // Sonar ring + reflection arcs on the chart
   if (g.sonar.active) {
     const float fade = clampf(g.sonar.fade, 0.f, 1.f);
-    const float sx_k = static_cast<float>(mm_w) / static_cast<float>(MM_W);
-    const float sy_k = static_cast<float>(mm_h) / static_cast<float>(MM_H);
+    const float sx_k = static_cast<float>(mm_w) / static_cast<float>(src_w);
+    const float sy_k = static_cast<float>(mm_h) / static_cast<float>(src_h);
     const float ox_w = g.sonar.origin.x * MM_K - ix;
     const float oy_w = g.sonar.origin.y * MM_K - iy;
     auto mm_pt = [&](float ang, float rr) {
@@ -1144,16 +1152,28 @@ void Gfx::draw_minimap(Game& g, double t) {
     }
   }
 
-  // Map coordinates (world px) -> panel px; dots that fall outside are skipped
-  const float sx_k = static_cast<float>(mm_w) / static_cast<float>(MM_W);
-  const float sy_k = static_cast<float>(mm_h) / static_cast<float>(MM_H);
-  auto dot = [&](float wx, float wy, int size, Rgba c) {
-    const int px = x + static_cast<int>((wx * MM_K - ix) * sx_k) - size / 2;
-    const int py = y + static_cast<int>((wy * MM_K - iy) * sy_k) - size / 2;
-    if (px < x || py < y || px + size > x + mm_w || py + size > y + mm_h) return;
-    fill(px, py, size, size, c);
+  // Map coordinates (world px) -> panel px
+  const float sx_k = static_cast<float>(mm_w) / static_cast<float>(src_w);
+  const float sy_k = static_cast<float>(mm_h) / static_cast<float>(src_h);
+  auto to_panel = [&](float wx, float wy) -> std::pair<int, int> {
+    return {x + static_cast<int>((wx * MM_K - ix) * sx_k),
+            y + static_cast<int>((wy * MM_K - iy) * sy_k)};
   };
-  const int d_pad = L(5), d_cargo = L(4), d_ship = L(5);
+  auto on_panel = [&](int px, int py) {
+    return px >= x && py >= y && px < x + mm_w && py < y + mm_h;
+  };
+  // Filled downward triangle (landing pad marker)
+  auto tri_down = [&](int cx, int cy, int s, Rgba c) {
+    if (!on_panel(cx, cy)) return;
+    SDL_Point pts[3] = {{cx, cy + s}, {cx - s, cy - s / 2}, {cx + s, cy - s / 2}};
+    be_->polygon(pts, 3, c);
+  };
+  // Filled diamond (signals / cargo)
+  auto diamond = [&](int cx, int cy, int s, Rgba c) {
+    if (!on_panel(cx, cy)) return;
+    SDL_Point pts[4] = {{cx, cy - s}, {cx + s, cy}, {cx, cy + s}, {cx - s, cy}};
+    be_->polygon(pts, 4, c);
+  };
   auto is_rev = [&](float wx, float wy) {
     const int gx = static_cast<int>(wx / Cave::CELL), gy = static_cast<int>(wy / Cave::CELL);
     if (!Cave::in_grid(gx, gy) || g.revealed.empty()) return true;
@@ -1162,34 +1182,74 @@ void Gfx::draw_minimap(Game& g, double t) {
   int dest_pi = -1;
   if (g.ecs.get<Rope>(g.ship).held != NULL_ENTITY)
     dest_pi = g.ecs.get<Cargo>(g.ecs.get<Rope>(g.ship).held).dest_pad;
+
+  // Landing pads: downward triangle (▼) — larger when dest, brighter when visited
+  const int pad_s = L(5);
   for (int pi = 0; pi < static_cast<int>(g.cave.pads.size()); ++pi) {
     const LandingPad& p = g.cave.pads[static_cast<size_t>(pi)];
     if (!p.active) continue;
-    const float cx = 0.5f * (p.x0 + p.x1);
-    if (!is_rev(cx, p.y)) continue;
+    const float cxw = 0.5f * (p.x0 + p.x1);
+    if (!is_rev(cxw, p.y)) continue;
     const bool is_dest = (pi == dest_pi);
     Rgba col = is_dest ? pal::HOT : (p.visited ? pal::BRIGHT : pal::WARN);
-    dot(cx, p.y, is_dest ? d_pad + L(2) : d_pad, col);
+    auto [px, py] = to_panel(cxw, p.y);
+    tri_down(px, py, is_dest ? pad_s + L(2) : pad_s, col);
   }
+  // Signals: diamond
   for (const Game::Signal& sig : g.signals) {
     if (!sig.found) continue;
-    dot(sig.pos.x, sig.pos.y, L(4), pal::CARGO);
+    auto [px, py] = to_panel(sig.pos.x, sig.pos.y);
+    diamond(px, py, L(4), pal::CARGO);
   }
   // Echoes that just answered a ping flash on the chart
   for (const Game::Echo& e : g.echoes) {
     if (e.cool < 6.5f || e.cool > 8.f) continue;
-    dot(e.pos.x, e.pos.y, L(3), with_alpha(pal::BRIGHT, 200));
+    auto [px, py] = to_panel(e.pos.x, e.pos.y);
+    diamond(px, py, L(3), with_alpha(pal::BRIGHT, 200));
   }
+  // Cargo: small square
   g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) {
-    if (is_rev(ct.pos.x, ct.pos.y)) dot(ct.pos.x, ct.pos.y, d_cargo, pal::CARGO);
+    if (!is_rev(ct.pos.x, ct.pos.y)) return;
+    auto [px, py] = to_panel(ct.pos.x, ct.pos.y);
+    const int s = L(4);
+    if (on_panel(px, py)) fill(px - s / 2, py - s / 2, s, s, pal::CARGO);
   });
+
   // Viewport box, clipped to the panel
   const int vw = static_cast<int>(g.cam.vw * MM_K * sx_k), vh = static_cast<int>(g.cam.vh * MM_K * sy_k);
   const int bx = x + static_cast<int>((g.cam.x * MM_K - ix) * sx_k);
   const int by = y + static_cast<int>((g.cam.y * MM_K - iy) * sy_k);
   const int cx0 = std::max(bx, x), cy0 = std::max(by, y), cx1 = std::min(bx + vw, x + mm_w), cy1 = std::min(by + vh, y + mm_h);
   if (cx1 > cx0 && cy1 > cy0) outline(cx0, cy0, cx1 - cx0, cy1 - cy0, with_alpha(pal::BRIGHT, 120));
-  if (std::fmod(t, 0.6) < 0.35) dot(tf.pos.x, tf.pos.y, d_ship, pal::HOT);
+
+  // Ship: filled triangle pointing along the nose (angle 0 = up / -Y)
+  {
+    auto [sx, sy] = to_panel(tf.pos.x, tf.pos.y);
+    if (on_panel(sx, sy)) {
+      const float ang = tf.angle;
+      // Nose direction in world (and panel — same axes)
+      const float nx = std::sin(ang), ny = -std::cos(ang);
+      const float px = -ny, py = nx;  // perpendicular
+      const float tip = static_cast<float>(L(7));
+      const float back = tip * 0.55f, half = tip * 0.55f;
+      SDL_Point pts[3] = {
+          {sx + static_cast<int>(nx * tip), sy + static_cast<int>(ny * tip)},
+          {sx + static_cast<int>(-nx * back + px * half), sy + static_cast<int>(-ny * back + py * half)},
+          {sx + static_cast<int>(-nx * back - px * half), sy + static_cast<int>(-ny * back - py * half)},
+      };
+      // Always draw ship (pulse brightness only)
+      const bool flash = std::fmod(t, 0.6) < 0.4;
+      be_->polygon(pts, 3, flash ? pal::HOT : with_alpha(pal::HOT, 200));
+      // Outline for contrast on bright rock
+      line(pts[0].x, pts[0].y, pts[1].x, pts[1].y, pal::BRIGHT);
+      line(pts[1].x, pts[1].y, pts[2].x, pts[2].y, pal::BRIGHT);
+      line(pts[2].x, pts[2].y, pts[0].x, pts[0].y, pal::BRIGHT);
+    }
+  }
+
+  // Zoom level cue under the panel
+  static const char* ZOOM_LABEL[] = {"NEAR", "MID", "FAR"};
+  text(x, y + mm_h + L(2), ZOOM_LABEL[z], with_alpha(pal::MID, 180));
 }
 
 // The value shown beside a choice or slider item
@@ -1708,7 +1768,7 @@ void Gfx::draw(Game& g, const UiState& ui, const BindMap& binds) {
     if (ui.toast_timer > 0.f && !ui.in_menu())  // short message above the minimap, fading out
       text_centered(w_ / 2, h_ - L(MM_H) - L(14) - cell_h() - L(18), ui.toast,
                     with_alpha(pal::BRIGHT, static_cast<uint8_t>(255 * clampf(ui.toast_timer / 0.5f, 0.f, 1.f))));
-    draw_minimap(g, t);
+    draw_minimap(g, ui, t);
   }
   if (title && ui.page == MenuPage::Title) draw_title(g, ui);
   else if (ui.in_menu()) draw_menu(g, ui, binds);

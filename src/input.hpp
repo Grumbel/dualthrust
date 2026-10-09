@@ -35,6 +35,7 @@ enum class Action : int {
   ThrustLSd,  // left stick down half (append for bind-index stability)
   ThrustRSd,  // right stick down half
   Hangar,     // pad terminal: ship select + teleport (landed only)
+  MinimapZoom,  // cycle minimap zoom (near / mid / far)
   Count
 };
 
@@ -90,6 +91,7 @@ inline constexpr ActionInfo ACTION_INFO[] = {
     {Action::ThrustLSd, "THRUST LS DN", "LSd", true},
     {Action::ThrustRSd, "THRUST RS DN", "RSd", true},
     {Action::Hangar, "HANGAR", "HANGAR", false},
+    {Action::MinimapZoom, "MINIMAP ZOOM", "MZOOM", false},
 };
 static_assert(sizeof(ACTION_INFO) / sizeof(ACTION_INFO[0]) == ACTION_COUNT, "ACTION_INFO size");
 
@@ -149,6 +151,7 @@ inline void set_default_binds(BindMap& m) {
   K(Action::PrevPad, 0, SDL_SCANCODE_LEFTBRACKET);   // [
   K(Action::Respawn, 0, SDL_SCANCODE_RETURN);
   K(Action::Hangar, 0, SDL_SCANCODE_H);
+  K(Action::MinimapZoom, 0, SDL_SCANCODE_V);  // V: cycle minimap zoom
   // Half-thrust on Shift is special-cased in read_thrust (not a separate action)
 
   // Gamepad
@@ -173,6 +176,7 @@ inline void set_default_binds(BindMap& m) {
   B(Action::Respawn, 0, SDL_CONTROLLER_BUTTON_B);
   B(Action::Respawn, 1, SDL_CONTROLLER_BUTTON_A);  // A also respawns when crashed (handled in play logic)
   B(Action::Hangar, 0, SDL_CONTROLLER_BUTTON_Y);  // Y: open hangar when landed on a pad
+  B(Action::MinimapZoom, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);  // R3: cycle minimap zoom
 }
 
 // Remove a pad button from every action (used to drop legacy RIGHTSTICK→respawn/ship binds).

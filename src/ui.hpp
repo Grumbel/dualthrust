@@ -137,6 +137,7 @@ struct UiState {
   // Hangar: 0 = ship row, 1..N = visited pad teleport, then HANGAR_ITEMS footer
   int hangar_cursor = 0;
   bool show_map = false;     // hold MapView: full fog-of-war chart (freezes the sim while held)
+  int minimap_zoom = 1;      // 0 = near, 1 = mid (default), 2 = far — source window in cells
 
   bool in_menu() const { return screen != Screen::Play; }
 };

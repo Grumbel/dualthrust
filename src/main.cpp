@@ -791,6 +791,13 @@ int main(int argc, char** argv) {
             if (action_pressed_key(binds, Action::NextPad, sc)) cycle_pad(game, +1);
             if (action_pressed_key(binds, Action::PrevPad, sc)) cycle_pad(game, -1);
             if (action_pressed_key(binds, Action::Hangar, sc)) open_hangar();
+            if (action_pressed_key(binds, Action::MinimapZoom, sc)) {
+              ui.minimap_zoom = (ui.minimap_zoom + 1) % 3;
+              static const char* lab[] = {"NEAR", "MID", "FAR"};
+              char buf[24];
+              std::snprintf(buf, sizeof buf, "MAP %s", lab[ui.minimap_zoom]);
+              show_toast(buf);
+            }
             if (action_pressed_key(binds, Action::SwapEngines, sc)) toggle_swap();
             if (action_pressed_key(binds, Action::Legs, sc)) toggle_legs(game);
             if (action_pressed_key(binds, Action::Grip, sc)) toggle_grip(game);
@@ -895,6 +902,13 @@ int main(int argc, char** argv) {
             if (action_pressed_button(binds, Action::NextPad, b)) cycle_pad(game, +1);
             if (action_pressed_button(binds, Action::PrevPad, b)) cycle_pad(game, -1);
             if (action_pressed_button(binds, Action::Hangar, b)) open_hangar();
+            if (action_pressed_button(binds, Action::MinimapZoom, b)) {
+              ui.minimap_zoom = (ui.minimap_zoom + 1) % 3;
+              static const char* lab[] = {"NEAR", "MID", "FAR"};
+              char buf[24];
+              std::snprintf(buf, sizeof buf, "MAP %s", lab[ui.minimap_zoom]);
+              show_toast(buf);
+            }
             if (action_pressed_button(binds, Action::ZoomCycle, b)) zoom_to(game.cam.zoom + 1, true);
             if (action_pressed_button(binds, Action::ZoomCloser, b)) zoom_to(game.cam.zoom - 1, false);
             if (action_pressed_button(binds, Action::ZoomFarther, b)) zoom_to(game.cam.zoom + 1, false);
