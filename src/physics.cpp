@@ -386,13 +386,17 @@ ShipBodies Physics::create_ship(const ShipDef& d, Vec2 pos, float angle, Vec2 ve
       const b2Polygon dp = b2MakeOffsetRoundedBox(hg.hw / PPM, 2.f / PPM, to_b2({0.f, hg.belly_y - 1.f}), b2MakeRot(0.f), R);
       b2CreatePolygonShape(s.hull, &sd, &dp);
     }
+    // Engine bells are tagged Part::Engine so only nozzle contacts damage thrusters
     if (d.thruster_n == 0) {
+      int ei = 0;
       for (float side : {-1.f, 1.f}) {
         const float ex = side * d.engine_offset_x;
         const b2Vec2 bell[] = {to_b2({ex - bw, back}), to_b2({ex + bw, back}), to_b2({ex + rw, rim}),
                                to_b2({ex - rw, rim})};
         const b2Polygon bp = rounded_hull(bell, 4, R * 0.5f);
-        b2CreatePolygonShape(s.hull, &sd, &bp);
+        b2ShapeDef esd = sd;
+        esd.userData = engine_tag(ei++);
+        b2CreatePolygonShape(s.hull, &esd, &bp);
       }
     } else {  // a bell around each thruster, along its exhaust
       for (int i = 0; i < d.thruster_n; ++i) {
@@ -402,7 +406,9 @@ ShipBodies Physics::create_ship(const ShipDef& d, Vec2 pos, float angle, Vec2 ve
         const Vec2 b0 = tp.pos - f * 2.f, b1 = tp.pos + f * 12.f;
         const b2Vec2 bell[] = {to_b2(b0 - p * w0), to_b2(b0 + p * w0), to_b2(b1 + p * w1), to_b2(b1 - p * w1)};
         const b2Polygon bp = rounded_hull(bell, 4, R * 0.5f);
-        b2CreatePolygonShape(s.hull, &sd, &bp);
+        b2ShapeDef esd = sd;
+        esd.userData = engine_tag(i);
+        b2CreatePolygonShape(s.hull, &esd, &bp);
       }
     }
   }

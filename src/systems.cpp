@@ -476,7 +476,9 @@ void impact_system(Game& g) {
       const Vec2 pos{ev.point.x * PPM, ev.point.y * PPM};
       const float speed = ev.approachSpeed * PPM;
       if (f.state == FlightState::Crashed) continue;
-      const float limit = ship_part == Part::Hull ? tune::CRASH_HULL_SPEED : tune::CRASH_FOOT_SPEED;
+      const float limit = (ship_part == Part::Hull || ship_part == Part::Engine)
+                              ? tune::CRASH_HULL_SPEED
+                              : tune::CRASH_FOOT_SPEED;
       if (speed > limit) {
         f.state = FlightState::Crashed;
         f.timer = f.settle = 0.f;
@@ -490,36 +492,20 @@ void impact_system(Game& g) {
         if (fl.state == FlightState::Crashed) continue;
         const float hit = clampf((speed - tune::HIT_MIN_SPEED) / 80.f, 0.3f, 1.f);
         fl.hurt = std::min(1.f, fl.hurt + tune::HURT_FROM_HIT * hit);
-        // Per-engine damage: hull hits wound the nearest nozzle(s); foot hits are gentler
-        if (g.ecs.has<Thrusters>(g.ship) && g.ecs.has<Hull>(g.ship) && g.ecs.has<Transform>(g.ship)) {
+        // Engine damage only when the nozzle shape itself hits rock
+        if (ship_part == Part::Engine && g.ecs.has<Thrusters>(g.ship)) {
+          const b2ShapeId eng_shape = a_terrain ? ev.shapeIdB : ev.shapeIdA;
+          int ei = shape_engine_index(eng_shape);
           Thrusters& th = g.ecs.get<Thrusters>(g.ship);
-          const ShipDef& def = *g.ecs.get<Hull>(g.ship).def;
-          const Transform& tf = g.ecs.get<Transform>(g.ship);
-          const Vec2 local = rotate(pos - tf.pos, -tf.angle);
-          const int n_eng = std::min(thruster_count(def), Thrusters::MAX);
-          if (n_eng > 0) {
-            int order[Thrusters::MAX];
-            float dist[Thrusters::MAX];
-            for (int ei = 0; ei < n_eng; ++ei) {
-              order[ei] = ei;
-              const ThrusterPose tp = thruster_pose(def, ei);
-              const float dx = local.x - tp.pos.x, dy = local.y - tp.pos.y;
-              dist[ei] = dx * dx + dy * dy;
-            }
-            for (int a = 0; a < n_eng - 1; ++a)
-              for (int b = a + 1; b < n_eng; ++b)
-                if (dist[order[b]] < dist[order[a]]) std::swap(order[a], order[b]);
-            const float base = tune::ENGINE_DAMAGE_FROM_HIT * hit *
-                               (ship_part == Part::Hull ? 1.f : 0.35f);
-            const float before = th.damage[order[0]];
-            th.damage[order[0]] = std::min(1.f, th.damage[order[0]] + base);
-            if (n_eng > 1)
-              th.damage[order[1]] = std::min(1.f, th.damage[order[1]] + base * 0.45f);
-            if (before < tune::ENGINE_DEAD && th.damage[order[0]] >= tune::ENGINE_DEAD)
-              notice(g, "ENGINE OUT");
-            else if (before < tune::ENGINE_SPUTTER && th.damage[order[0]] >= tune::ENGINE_SPUTTER)
-              notice(g, "ENGINE HURT");
-          }
+          const int n_eng = std::min(thruster_count(*g.ecs.get<Hull>(g.ship).def), Thrusters::MAX);
+          if (ei < 0 || ei >= n_eng) ei = 0;
+          const float base = tune::ENGINE_DAMAGE_FROM_HIT * hit;
+          const float before = th.damage[ei];
+          th.damage[ei] = std::min(1.f, th.damage[ei] + base);
+          if (before < tune::ENGINE_DEAD && th.damage[ei] >= tune::ENGINE_DEAD)
+            notice(g, "ENGINE OUT");
+          else if (before < tune::ENGINE_SPUTTER && th.damage[ei] >= tune::ENGINE_SPUTTER)
+            notice(g, "ENGINE HURT");
         }
       }
     }

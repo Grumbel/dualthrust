@@ -26,10 +26,24 @@ inline Vec2 from_b2(b2Vec2 v) { return {v.x * PPM, v.y * PPM}; }
 inline constexpr uint64_t CAT_TERRAIN = 1, CAT_SHIP = 2, CAT_CARGO = 4, CAT_HOOK = 8;
 
 // Shape user data tags (Box2D hands the pointer back in contact events)
-enum class Part : intptr_t { Terrain = 0, Hull = 1, Foot = 2, Strut = 3, Cargo = 4, Hook = 5 };
-inline bool is_ship_part(Part p) { return p == Part::Hull || p == Part::Foot || p == Part::Strut; }
+enum class Part : intptr_t { Terrain = 0, Hull = 1, Foot = 2, Strut = 3, Cargo = 4, Hook = 5, Engine = 6 };
+inline bool is_ship_part(Part p) {
+  return p == Part::Hull || p == Part::Foot || p == Part::Strut || p == Part::Engine;
+}
 inline void* part_tag(Part p) { return reinterpret_cast<void*>(static_cast<intptr_t>(p)); }
-inline Part shape_part(b2ShapeId s) { return static_cast<Part>(reinterpret_cast<intptr_t>(b2Shape_GetUserData(s))); }
+// Engine shapes pack nozzle index in the high byte: low byte = Part::Engine, high = index.
+inline void* engine_tag(int index) {
+  return reinterpret_cast<void*>(static_cast<intptr_t>(Part::Engine) | ((index & 0xFF) << 8));
+}
+inline Part shape_part(b2ShapeId s) {
+  const intptr_t v = reinterpret_cast<intptr_t>(b2Shape_GetUserData(s));
+  return static_cast<Part>(v & 0xFF);
+}
+inline int shape_engine_index(b2ShapeId s) {
+  const intptr_t v = reinterpret_cast<intptr_t>(b2Shape_GetUserData(s));
+  if ((v & 0xFF) != static_cast<intptr_t>(Part::Engine)) return -1;
+  return static_cast<int>((v >> 8) & 0xFF);
+}
 
 // The ship's bodies: hull plus two legs (0 = left, 1 = right) on prismatic joints, and the hook on its cable
 // (a distance joint used as a rope: free between ~0 and its maximum length). `grip` joins the hook to a crate.
