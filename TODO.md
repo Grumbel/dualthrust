@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-033.1-pad-active-indicator-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-033.1-pad-active-indicator-9a093cd` → tip `99341f5`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
