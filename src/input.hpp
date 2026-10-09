@@ -154,7 +154,7 @@ inline void set_default_binds(BindMap& m) {
   B(Action::WinchIn, 0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
   B(Action::Grip, 0, SDL_CONTROLLER_BUTTON_A);
   // Zoom in/out/cycle unbound on pad by default (D-pad left/right are winch; rebind in Controls)
-  B(Action::NextShip, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+  // Right-stick click unbound by default (used to cycle ship / feel like a respawn)
   B(Action::Sonar, 0, SDL_CONTROLLER_BUTTON_LEFTSTICK);
   B(Action::MapView, 0, SDL_CONTROLLER_BUTTON_BACK);  // Select: hold for the full revealed map
   B(Action::NextPad, 0, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);  // triggers still drive thrust

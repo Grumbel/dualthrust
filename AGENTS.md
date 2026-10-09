@@ -21,7 +21,7 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 - Screens: title (Start/Options/Statistics/Quit) → play ⇄ pause (Resume/Respawn/New Cave/Options/Statistics/Main Menu/Quit); Options: Ship, Zoom, UI Scale,
   Swap Engines, Music + Effects sliders, CRT Effect, Fullscreen, Controls, Back. Pages are data in `ui.hpp`; left/right change values
 - On-screen hints follow the last-used device (`UiState::device`: keyboard events/wheel vs gamepad buttons/axes)
-- Zoom: Tab cycles Near/Medium/Far; = / - and mouse wheel zoom in/out (no default gamepad binds); `-z near|medium|far`. Ship: S or Select.
+- Zoom: Tab cycles Near/Medium/Far; = / - and mouse wheel zoom in/out (no default gamepad binds); `-z near|medium|far`. Ship: S (keyboard); Options → Ship on pad.
 - M: sound on/off (saved in config; `-m/--mute` for one run)
 - Space (keyboard) or X (gamepad): retract / extend the landing legs
 - Q/E or D-pad left/right (one press): hook cable fully out / fully in (no in-betweens); R or A (gamepad): hook grabs / releases a crate (A respawns when crashed)
