@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-039.1-crash-wreckage-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-039.1-crash-wreckage-9a093cd` → tip `c685ec1`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
