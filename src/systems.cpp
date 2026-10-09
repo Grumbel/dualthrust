@@ -757,19 +757,20 @@ void update_sonar(Game& g, float dt) {
   if (!g.sonar.active) return;
   SonarPing& s = g.sonar;
   s.prev_radius = s.radius;
-  const bool expanding = s.radius < s.max_radius - 1e-3f;
-  if (expanding) {
-    s.radius = std::min(s.radius + s.speed * dt, s.max_radius);
-  } else {
-    // Hold radius; dissolve opacity only (no slowdown / drift)
-    s.fade -= dt / 0.5f;
-    if (s.fade <= 0.f) {
-      s.active = false;
-      return;
-    }
-    return;  // nothing left to paint
-  }
-  const float r0 = s.prev_radius, r1 = s.radius;
+  // Keep expanding at full speed; opacity falls off past max_radius (no hard stop)
+  s.radius += s.speed * dt;
+  const float fade_start = s.max_radius * 0.9f;
+  const float fade_end = s.max_radius * 1.4f;
+  if (s.radius <= fade_start)
+    s.fade = 1.f;
+  else if (s.radius >= fade_end) {
+    s.active = false;
+    return;
+  } else
+    s.fade = 1.f - (s.radius - fade_start) / (fade_end - fade_start);
+  // Paint only while the wavefront is still in the useful range
+  if (s.prev_radius >= s.max_radius) return;
+  const float r0 = s.prev_radius, r1 = std::min(s.radius, s.max_radius);
   // Bounding box of the annulus in cell coordinates
   const float pad = Cave::CELL * 2.f;
   const int gx0 = std::max(0, static_cast<int>((s.origin.x - r1 - pad) / Cave::CELL));
@@ -800,19 +801,22 @@ void update_sonar(Game& g, float dt) {
     return best;
   };
 
-  // LOS to a target cell: solid before the target blocks; the target cell itself may be solid (the echo face).
+  // LOS with a small solid budget so thin pillars / corners do not fully block the ping.
   auto clear_path = [&](int tgx, int tgy) -> bool {
     const float tx = (tgx + 0.5f) * Cave::CELL, ty = (tgy + 0.5f) * Cave::CELL;
     const float dx = tx - s.origin.x, dy = ty - s.origin.y;
     const float dist = std::sqrt(dx * dx + dy * dy);
     if (dist < 1.f) return true;
     const int steps = std::max(2, static_cast<int>(dist / (Cave::CELL * 0.4f)));
+    int solid_budget = 2;  // may punch through this many solid cells (peek around corners)
     for (int i = 1; i <= steps; ++i) {
       const float u = static_cast<float>(i) / static_cast<float>(steps);
       const float x = s.origin.x + dx * u, y = s.origin.y + dy * u;
       const int gx = static_cast<int>(x / Cave::CELL), gy = static_cast<int>(y / Cave::CELL);
       if (gx == tgx && gy == tgy) return true;
-      if (g.cave.is_solid_cell(gx, gy)) return false;
+      if (g.cave.is_solid_cell(gx, gy)) {
+        if (--solid_budget < 0) return false;
+      }
     }
     return true;
   };

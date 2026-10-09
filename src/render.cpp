@@ -834,7 +834,8 @@ void Gfx::draw_minimap(Game& g, double t) {
   }
   // Source window stays MM_W x MM_H cells; the on-screen panel scales with the UI.
   const int mm_w = L(MM_W), mm_h = L(MM_H), pad = L(4);
-  const int x = (w_ - mm_w) / 2, y = h_ - mm_h - L(14);
+  // Bottom-left corner (out of the way of centred HUD / notices)
+  const int x = L(14), y = h_ - mm_h - L(14);
   fill(x - pad, y - pad, mm_w + 2 * pad, mm_h + 2 * pad, with_alpha(pal::BG, 170));
 
   // The window scrolls with the ship and stops at the map's edges
@@ -1074,7 +1075,7 @@ void Gfx::draw_sonar(const Game& g) const {
   const Vec2 o = g.sonar.origin;
   const float r = g.sonar.radius;
   if (r < 1.f) return;
-  // Opacity-only fade (radius holds at max); ring expands at constant speed until then
+  // Ring keeps expanding; fade softens it past max range
   const float fade = clampf(g.sonar.fade, 0.f, 1.f);
   if (fade < 0.02f) return;
   const int segments = std::clamp(static_cast<int>(r / 8.f), 24, 96);
