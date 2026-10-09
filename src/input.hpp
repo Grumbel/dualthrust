@@ -30,6 +30,8 @@ enum class Action : int {
   SwapEngines,
   Sonar,
   MapView,
+  NextPad,
+  PrevPad,
   Count
 };
 
@@ -80,6 +82,8 @@ inline constexpr ActionInfo ACTION_INFO[] = {
     {Action::SwapEngines, "SWAP ENGINES", "SWAP", false},
     {Action::Sonar, "SONAR", "SONAR", false},
     {Action::MapView, "MAP", "MAP", false},
+    {Action::NextPad, "NEXT PAD", "PAD+", false},
+    {Action::PrevPad, "PREV PAD", "PAD-", false},
 };
 static_assert(sizeof(ACTION_INFO) / sizeof(ACTION_INFO[0]) == ACTION_COUNT, "ACTION_INFO size");
 
@@ -135,13 +139,14 @@ inline void set_default_binds(BindMap& m) {
   K(Action::SwapEngines, 0, SDL_SCANCODE_X);
   K(Action::Sonar, 0, SDL_SCANCODE_C);
   K(Action::MapView, 0, SDL_SCANCODE_Z);
+  K(Action::NextPad, 0, SDL_SCANCODE_RIGHTBRACKET);  // ]
+  K(Action::PrevPad, 0, SDL_SCANCODE_LEFTBRACKET);   // [
   // Half-thrust on Shift is special-cased in read_thrust (not a separate action)
 
   // Gamepad
   A(Action::ThrustL, 0, SDL_CONTROLLER_AXIS_TRIGGERLEFT, +1);
-  B(Action::ThrustL, 1, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
   A(Action::ThrustR, 0, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, +1);
-  B(Action::ThrustR, 1, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+  // Shoulders reserved for pad teleport (see NextPad / PrevPad)
   A(Action::ThrustLS, 0, SDL_CONTROLLER_AXIS_LEFTY, -1);   // stick up
   A(Action::ThrustRS, 0, SDL_CONTROLLER_AXIS_RIGHTY, -1);
   B(Action::Pause, 0, SDL_CONTROLLER_BUTTON_START);
@@ -157,6 +162,8 @@ inline void set_default_binds(BindMap& m) {
   B(Action::NextShip, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
   B(Action::Sonar, 0, SDL_CONTROLLER_BUTTON_LEFTSTICK);
   B(Action::MapView, 0, SDL_CONTROLLER_BUTTON_BACK);  // Select: hold for the full revealed map
+  B(Action::NextPad, 0, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);  // triggers still drive thrust
+  B(Action::PrevPad, 0, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 }
 
 // Clear every slot on either device that matches `src`, then write `src` into the first free

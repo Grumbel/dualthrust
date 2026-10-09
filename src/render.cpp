@@ -736,7 +736,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
 
   const int bars = channel_count(d);
   const int bar_h = L(10), bar_w = L(120), bar_step = L(18);
-  fill(m8, m8, L(210), bar_step * (bars + 1) + L(4) + lh * 7 + L(28), with_alpha(pal::MENU, 120));
+  fill(m8, m8, L(210), bar_step * (bars + 1) + L(4) + lh * 8 + L(28), with_alpha(pal::MENU, 120));
   int y = m16;
   for (int i = 0; i < bars; ++i) {
     fill(m20, y, bar_w, bar_h, pal::DIM);
@@ -781,6 +781,14 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   else
     std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", bname);
   text(m20, y, legbuf, rp.held != NULL_ENTITY ? pal::CARGO : pal::MID);
+  y += lh;
+  {
+    char pb[24], qb[24];
+    action_bind_label(binds, Action::PrevPad, !pad, pb, sizeof pb);
+    action_bind_label(binds, Action::NextPad, !pad, qb, sizeof qb);
+    std::snprintf(legbuf, sizeof legbuf, "PAD %s/%s", pb, qb);
+    text(m20, y, legbuf, pal::MID);
+  }
   y += lh + L(4);
 
   const float alt = g.cave.floor_below(tf.pos.x, tf.pos.y) - tf.pos.y;

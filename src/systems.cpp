@@ -3,6 +3,8 @@
 
 #include "systems.hpp"
 
+#include <vector>
+
 #include <cmath>
 
 #include <array>
@@ -665,6 +667,47 @@ float home_pad_x(const Game& g) {
   if (!g.cave.pads.empty())
     return 0.5f * (g.cave.pads[0].x0 + g.cave.pads[0].x1);
   return Cave::WORLD_W * 0.5f;
+}
+
+// Teleport between active (sonar-discovered) pads. delta = +1 next, -1 previous.
+bool cycle_pad(Game& g, int delta) {
+  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return false;
+  // Active pad indices in map order
+  std::vector<int> active;
+  active.reserve(g.cave.pads.size());
+  for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i)
+    if (g.cave.pads[static_cast<size_t>(i)].active) active.push_back(i);
+  if (active.size() < 2) {
+    notice(g, active.empty() ? "NO PADS" : "ONLY ONE PAD");
+    return false;
+  }
+  // Current: last_pad if active, else nearest active to the ship
+  int cur = -1;
+  if (g.last_pad >= 0) {
+    for (int i = 0; i < static_cast<int>(active.size()); ++i)
+      if (active[static_cast<size_t>(i)] == g.last_pad) { cur = i; break; }
+  }
+  if (cur < 0) {
+    const float sx = ship_transform(g).pos.x;
+    float best_d = 1e12f;
+    for (int i = 0; i < static_cast<int>(active.size()); ++i) {
+      const LandingPad& p = g.cave.pads[static_cast<size_t>(active[static_cast<size_t>(i)])];
+      const float d = std::abs(0.5f * (p.x0 + p.x1) - sx);
+      if (d < best_d) { best_d = d; cur = i; }
+    }
+  }
+  const int n = static_cast<int>(active.size());
+  const int next = (cur + delta % n + n) % n;
+  const int pi = active[static_cast<size_t>(next)];
+  const LandingPad& pad = g.cave.pads[static_cast<size_t>(pi)];
+  g.last_pad = pi;
+  // respawn_ship / build_bodies already release any held crate
+  respawn_ship(g, 0.5f * (pad.x0 + pad.x1));
+  snap_camera(g);
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "PAD %d/%d", next + 1, n);
+  notice(g, buf);
+  return true;
 }
 
 void fire_sonar(Game& g) {

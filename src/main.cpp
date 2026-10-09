@@ -568,6 +568,8 @@ int main(int argc, char** argv) {
             if (action_pressed_key(binds, Action::ZoomCloser, sc))
               zoom_to(game.cam.zoom - 1, false);
             if (action_pressed_key(binds, Action::NextShip, sc)) cycle_ship(+1);
+            if (action_pressed_key(binds, Action::NextPad, sc)) cycle_pad(game, +1);
+            if (action_pressed_key(binds, Action::PrevPad, sc)) cycle_pad(game, -1);
             if (action_pressed_key(binds, Action::SwapEngines, sc)) toggle_swap();
             if (action_pressed_key(binds, Action::Legs, sc)) toggle_legs(game);
             if (action_pressed_key(binds, Action::Grip, sc)) toggle_grip(game);
@@ -631,6 +633,8 @@ int main(int argc, char** argv) {
           if (ui.screen == Screen::Play) {
             if (action_pressed_button(binds, Action::Pause, b)) open_pause();
             if (action_pressed_button(binds, Action::NextShip, b)) cycle_ship(+1);
+            if (action_pressed_button(binds, Action::NextPad, b)) cycle_pad(game, +1);
+            if (action_pressed_button(binds, Action::PrevPad, b)) cycle_pad(game, -1);
             if (action_pressed_button(binds, Action::ZoomCloser, b)) zoom_to(game.cam.zoom - 1, false);
             if (action_pressed_button(binds, Action::ZoomFarther, b)) zoom_to(game.cam.zoom + 1, false);
             if (action_pressed_button(binds, Action::WinchOut, b)) set_winch(game, true);
