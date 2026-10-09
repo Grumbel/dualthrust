@@ -431,7 +431,6 @@ void ground_system(Game& g, float dt) {
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
-namespace {
 
 // Crates for the current cave (new ones when the cave changed)
 void ensure_cargo(Game& g) {
@@ -492,8 +491,6 @@ void build_bodies(Game& g, Vec2 pos, float angle, Vec2 vel, float ang_vel) {
   t.angle = angle;
   g.ecs.get<Motion>(g.ship) = {vel, ang_vel};
 }
-
-}  // namespace
 
 void create_ship(Game& g, int def_index) {
   g.ship = g.ecs.create();

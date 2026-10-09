@@ -260,7 +260,6 @@ int main(int argc, char** argv) {
 
   // --- World ---
   Game game;
-  bool restored_world = false;
   unsigned world_seed = opt.seed;
   // Peek seed from a previous session so we regenerate the same cave layout
   if (opt.frames == 0 && !opt.screenshot && world_save_exists()) {
@@ -333,7 +332,6 @@ int main(int argc, char** argv) {
   if (opt.frames == 0 && !opt.screenshot && !opt.at_set) {
     int ship_from_save = user.ship;
     if (load_world(game, &ship_from_save)) {
-      restored_world = true;
       if (ship_from_save != user.ship) {
         user.ship = ship_from_save;
         set_ship_def(game, user.ship);
