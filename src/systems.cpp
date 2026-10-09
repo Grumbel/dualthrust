@@ -994,7 +994,7 @@ void update_explore(Game& g, float dt) {
 void update_sonar(Game& g, float dt) {
   if (!g.sonar.active) return;
   SonarPing& s = g.sonar;
-  const SonarModeDef& mode = tune::sonar_mode();
+  const tune::SonarModeDef& mode = tune::sonar_mode();
 
   // Age reflection pulses (drawn even while fading)
   for (SonarReflection& e : s.echoes) e.age += dt;

@@ -178,11 +178,6 @@ void Gfx::build_minimap(const Cave& cave, const std::vector<uint8_t>& revealed) 
   auto solid_at = [&](int gx, int gy) {
     return Cave::in_grid(gx, gy) && cave.solid[static_cast<size_t>(gy * Cave::GW + gx)] != 0;
   };
-  auto rev_at = [&](int gx, int gy) {
-    if (!has_fog) return true;
-    if (!Cave::in_grid(gx, gy)) return false;
-    return revealed[static_cast<size_t>(gy * Cave::GW + gx)] != 0;
-  };
   auto noise_at = [&](int gx, int gy) -> uint32_t {
     const uint32_t h = fog_hash(static_cast<uint32_t>(gx * 73856093u) ^ static_cast<uint32_t>(gy * 19349663u));
     const uint8_t n = static_cast<uint8_t>(h & 255u);
@@ -1168,7 +1163,6 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
           std::snprintf(val, sizeof val, "%.1f", v);
         else
           std::snprintf(val, sizeof val, "%.2f", v);
-        const char* shown = sel ? val : val;
         char buf[64];
         if (sel)
           std::snprintf(buf, sizeof buf, "< %s >", val);
