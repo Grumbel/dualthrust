@@ -2,6 +2,7 @@
 // Copyright 2026 Ingo Ruhnke <grumbel@gmail.com>
 
 #include "render.hpp"
+#include "debug.hpp"
 
 #include <cmath>
 
@@ -1091,6 +1092,63 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
                            ? (kbd ? "ESC CANCEL" : "START CANCEL")
                            : (kbd ? "ENTER REBIND  TAB DEVICE  ESC BACK" : "A REBIND  Y DEVICE  B BACK");
     text_centered(w_ / 2, py + panel_h - cell_h() - L(14), hint, pal::MID);
+    return;
+  }
+
+  if (ui.page == MenuPage::Debug) {
+    const int lh = cell_h() + L(6);
+    const int rows = DEBUG_PARAM_COUNT + item_count(DEBUG_ITEMS);
+    const int panel_w = std::min(w_ - L(16), L(560));
+    // Scroll so the selected row stays visible when the list is taller than the panel
+    const int max_vis = std::max(8, (h_ - L(100)) / lh);
+    const int panel_h = L(70) + std::min(rows, max_vis) * lh + L(40);
+    const int px = w_ / 2 - panel_w / 2, py = std::max(L(4), h_ / 2 - panel_h / 2);
+    fill(0, 0, w_, h_, with_alpha(pal::BG, 120));
+    fill(px, py, panel_w, panel_h, pal::MENU);
+    outline(px, py, panel_w, panel_h, pal::BRIGHT);
+    outline(px + L(3), py + L(3), panel_w - L(6), panel_h - L(6), with_alpha(pal::MID, 90));
+    text_centered(w_ / 2, py + L(14), "DEBUG", pal::BRIGHT);
+    fill(px + L(20), py + L(14) + cell_h() + L(6), panel_w - L(40), 1, with_alpha(pal::MID, 140));
+
+    int scroll = 0;
+    if (rows > max_vis) {
+      scroll = std::clamp(ui.debug_cursor - max_vis / 2, 0, rows - max_vis);
+    }
+    DebugParam* params = debug_params(const_cast<Game&>(g));
+    char val[32];
+    int row_y = py + L(14) + cell_h() + L(16);
+    for (int vis = 0; vis < std::min(rows, max_vis); ++vis) {
+      const int i = scroll + vis;
+      const bool sel = ui.debug_cursor == i;
+      const int ly = row_y + vis * lh;
+      if (sel) {
+        fill(px + L(10), ly - L(3), panel_w - L(20), cell_h() + L(6), with_alpha(pal::MID, 40));
+        if (std::fmod(ui.time, 0.8) < 0.55) text(px + L(28) - cell_w() - L(4), ly, ">", pal::WARN);
+      }
+      const Rgba col = sel ? pal::WARN : pal::MID;
+      if (i < DEBUG_PARAM_COUNT) {
+        text(px + L(28), ly, params[i].name, col);
+        const float v = debug_param_value(const_cast<Game&>(g), params[i]);
+        if (v >= 100.f || (v == std::floor(v) && std::fabs(v) >= 10.f))
+          std::snprintf(val, sizeof val, "%.0f", v);
+        else if (v >= 10.f)
+          std::snprintf(val, sizeof val, "%.1f", v);
+        else
+          std::snprintf(val, sizeof val, "%.2f", v);
+        const char* shown = sel ? val : val;
+        char buf[40];
+        if (sel)
+          std::snprintf(buf, sizeof buf, "< %s >", val);
+        else
+          std::snprintf(buf, sizeof buf, "%s", val);
+        text(px + panel_w - L(28) - text_width(buf), ly, buf, col);
+      } else {
+        text(px + L(28), ly, DEBUG_ITEMS[i - DEBUG_PARAM_COUNT].label, col);
+      }
+    }
+    const bool kbd = ui.device != InputDevice::Gamepad;
+    text_centered(w_ / 2, py + panel_h - cell_h() - L(12),
+                  kbd ? "LEFT/RIGHT TWEAK  ESC BACK" : "D-PAD TWEAK  B BACK", pal::MID);
     return;
   }
 

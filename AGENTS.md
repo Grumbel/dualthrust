@@ -28,6 +28,7 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 - Enter (keyboard) or A/B (gamepad): respawn after crash (a landed ship lifts off when thrust is applied)
 - Y or G: new cave
 - F: fullscreen
+- F3 or Options → Debug: live-tweak gravity, thrust/mass multipliers, fuel, sonar range, legs, rope, crash limits
 
 ## World
 

@@ -139,7 +139,7 @@ void forces_system(Game& g) {
         // Mild sputter when limping or hurt (fun feedback, not a hard fail)
         if ((f.fuel < tune::FUEL_LIMP || f.hurt > 0.2f) && (tp.channel & 1))
           level *= 0.75f + 0.25f * std::sin(g.time * 17.f + float(i));
-        const float force = d.mass * d.max_thrust / PPM * level * tp.power * power;
+        const float force = d.mass * g.dbg_mass_mul * d.max_thrust * g.dbg_thrust_mul / PPM * level * tp.power * power;
         const b2Vec2 at = b2Body_GetWorldPoint(sb.hull, to_b2(tp.pos));
         b2Body_ApplyForce(sb.hull, b2MulSV(force, b2RotateVector(q, {tp.push.x, tp.push.y})), at, true);
       }
@@ -147,7 +147,7 @@ void forces_system(Game& g) {
 
     if (!b2Body_IsAwake(sb.hull)) return;  // resting: springs are balanced; do not keep the bodies awake
     const LegGeom lgeo = leg_geom(d);
-    const float m_eff = d.mass * 0.5f;
+    const float m_eff = d.mass * g.dbg_mass_mul * 0.5f;
     const float omega = 2.f * PI * tune::LEG_HERTZ;
     const float k = f.state == FlightState::Crashed ? 0.f : m_eff * omega * omega;
     const float c = 2.f * tune::LEG_DAMPING * m_eff * omega;
@@ -440,7 +440,9 @@ void build_bodies(Game& g, Vec2 pos, float angle, Vec2 vel, float ang_vel) {
   g.phys.destroy_ship(body.b);
   g.ecs.get<Rope>(g.ship) = {};
   g.phys.stream(g.cave, pos, 9);  // the ground must exist before the ship does
-  body.b = g.phys.create_ship(*g.ecs.get<Hull>(g.ship).def, pos, angle, vel, ang_vel);
+  const ShipDef& def = *g.ecs.get<Hull>(g.ship).def;
+  body.b = g.phys.create_ship(def, pos, angle, vel, ang_vel);
+  if (g.dbg_mass_mul != 1.f) g.phys.apply_ship_mass(body.b, def, g.dbg_mass_mul);
   Transform& t = g.ecs.get<Transform>(g.ship);
   t.pos = pos;
   t.angle = angle;
@@ -786,7 +788,7 @@ void fire_sonar(Game& g) {
   if (fl.fuel > 0.f)
     fl.fuel = std::max(0.f, fl.fuel - tune::FUEL_SONAR);
   const Vec2 p = ship_transform(g).pos;
-  g.sonar = SonarPing{true, p, 0.f, 0.f, 960.f, 780.f, 1.f};
+  g.sonar = SonarPing{true, p, 0.f, 0.f, tune::SONAR_MAX_RADIUS, tune::SONAR_SPEED, 1.f};
   g.sonar_cool = tune::SONAR_COOLDOWN;
   g.events.push_back({SimEventKind::SonarPing, p, {}, 200.f});
 }

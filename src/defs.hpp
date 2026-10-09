@@ -14,39 +14,41 @@ inline constexpr const char* APP_VERSION = DUALTHRUST_VERSION;
 
 namespace tune {
 inline constexpr float SIM_STEP = 1.f / 120.f;  // fixed real-time step
-inline constexpr float TIME_SCALE = 0.62f;      // sim seconds per real second
+inline float TIME_SCALE = 0.62f;      // sim seconds per real second
 inline constexpr int MAX_STEPS_PER_FRAME = 8;
 
-inline constexpr float GRAVITY = 120.f;
-inline constexpr float LINEAR_DRAG = 0.08f;
-inline constexpr float ANGULAR_DRAG = 1.2f;
-inline constexpr float MAX_ANGULAR_VEL = 8.f;
+inline float GRAVITY = 120.f;
+inline float LINEAR_DRAG = 0.08f;
+inline float ANGULAR_DRAG = 1.2f;
+inline float MAX_ANGULAR_VEL = 8.f;
 
 // HUD guides for a gentle touchdown (the physics decides what actually happens)
-inline constexpr float LAND_MAX_VY = 55.f;
-inline constexpr float LAND_MAX_VX = 40.f;
-inline constexpr float LAND_MAX_ANGLE = 0.22f;
+inline float LAND_MAX_VY = 55.f;
+inline float LAND_MAX_VX = 40.f;
+inline float LAND_MAX_ANGLE = 0.22f;
 
 // Impacts (normal speed, px/s): hull or engine bells above CRASH_HULL_SPEED, feet above CRASH_FOOT_SPEED destroy
 // the ship; anything above HIT_MIN_SPEED makes a bounce effect.
-inline constexpr float CRASH_HULL_SPEED = 120.f;
-inline constexpr float CRASH_FOOT_SPEED = 260.f;
-inline constexpr float HIT_MIN_SPEED = 30.f;
+inline float CRASH_HULL_SPEED = 120.f;
+inline float CRASH_FOOT_SPEED = 260.f;
+inline float HIT_MIN_SPEED = 30.f;
 
 // Landed = touching rock, almost still and without thrust for SETTLE_TIME (sim seconds). Hysteresis: a ship
 // that slides faster than UNSETTLE_SPEED (e.g. down a slope) counts as flying again.
-inline constexpr float SETTLE_SPEED = 10.f;
-inline constexpr float SETTLE_ANGVEL = 0.25f;
-inline constexpr float SETTLE_MAX_ANGLE = 1.2f;  // rad: leaning more than this is toppled, not landed
-inline constexpr float UNSETTLE_SPEED = 30.f;
-inline constexpr float SETTLE_TIME = 0.5f;
+inline float SETTLE_SPEED = 10.f;
+inline float SETTLE_ANGVEL = 0.25f;
+inline float SETTLE_MAX_ANGLE = 1.2f;  // rad: leaning more than this is toppled, not landed
+inline float UNSETTLE_SPEED = 30.f;
+inline float SETTLE_TIME = 0.5f;
 
 // Fuel (0..1): light drain, generous refill. Engines limp below ~20% instead of cutting out.
-inline constexpr float FUEL_BURN = 0.028f;      // fraction per second at summed channel level 1.0
-inline constexpr float FUEL_REFUEL = 0.55f;     // fraction per second on a pad
-inline constexpr float FUEL_SONAR = 0.012f;     // small ping cost (never blocks scanning)
-inline constexpr float FUEL_LIMP = 0.22f;       // below this, thrust power floors here (sputter, not stop)
-inline constexpr float SONAR_COOLDOWN = 0.9f;   // seconds between pings
+inline float FUEL_BURN = 0.028f;      // fraction per second at summed channel level 1.0
+inline float FUEL_REFUEL = 0.55f;     // fraction per second on a pad
+inline float FUEL_SONAR = 0.012f;     // small ping cost (never blocks scanning)
+inline float FUEL_LIMP = 0.22f;       // below this, thrust power floors here (sputter, not stop)
+inline float SONAR_COOLDOWN = 0.9f;   // seconds between pings
+inline float SONAR_MAX_RADIUS = 900.f; // world px — painting stops here
+inline float SONAR_SPEED = 720.f;      // world px per sim second
 
 // Score (session): exploration-friendly rewards, not win conditions
 inline constexpr int SCORE_PAD_LANDING = 100;
@@ -56,24 +58,24 @@ inline constexpr int SCORE_REVEAL_CELL = 1;     // per newly solid-revealed cell
 inline constexpr int SCORE_DEST_BONUS = 150;    // delivering cargo to its preferred pad
 inline constexpr int SCORE_ECHO = 15;           // ambient life answering a ping
 inline constexpr int SCORE_MILESTONE = 50;      // exploration tier / all-signals / all-pads
-inline constexpr float SIGNAL_PROX = 220.f;     // world px: passive cue near an unfound signal
-inline constexpr float HURT_FROM_HIT = 0.12f;   // soft damage added on a hard bounce
-inline constexpr float HURT_REPAIR = 0.35f;     // repair rate per second while on an active pad
+inline float SIGNAL_PROX = 220.f;     // world px: passive cue near an unfound signal
+inline float HURT_FROM_HIT = 0.12f;   // soft damage added on a hard bounce
+inline float HURT_REPAIR = 0.35f;     // repair rate per second while on an active pad
 inline constexpr float RESIDUE_TTL = 1.4f;      // seconds a scan glow lingers on rock
 
 // Landing legs: spring along the strut (Hz, damping ratio), leg body mass as a fraction of the ship's
-inline constexpr float LEG_HERTZ = 1.0f;
-inline constexpr float LEG_DAMPING = 0.3f;
-inline constexpr float LEG_MASS_FRACTION = 0.06f;
+inline float LEG_HERTZ = 1.0f;
+inline float LEG_DAMPING = 0.3f;
+inline float LEG_MASS_FRACTION = 0.06f;
 
 // Friction coefficients (mixed as sqrt(a * b) by Box2D)
-inline constexpr float ROCK_FRICTION = 0.6f;
-inline constexpr float PAD_FRICTION = 1.0f;
-inline constexpr float HULL_FRICTION = 0.4f;
-inline constexpr float FOOT_FRICTION = 0.6f;
+inline float ROCK_FRICTION = 0.6f;
+inline float PAD_FRICTION = 1.0f;
+inline float HULL_FRICTION = 0.4f;
+inline float FOOT_FRICTION = 0.6f;
 
 inline constexpr size_t MAX_PARTICLES = 1500;
-inline constexpr float EXHAUST_RATE = 150.f;  // particles / sec / engine at full thrust
+inline float EXHAUST_RATE = 150.f;  // particles / sec / engine at full thrust
 }  // namespace tune
 
 namespace pal {
@@ -251,6 +253,8 @@ inline constexpr ShipDef SHIP_DEFS[] = {
     {"Atlas", 70.f, 46.f, 56.f, 40.f, 3.6f, 12500.f, 410.f, false, STYLE_DECK | STYLE_TANKS | STYLE_DOME, ATLAS_T, 4},
     {"Dragonfly", 66.f, 30.f, 50.f, 24.f, 2.4f, 6000.f, 430.f, false, STYLE_DECK | STYLE_FINS | STYLE_DOME, DRAGONFLY_T, 4},
     {"Colossus", 100.f, 52.f, 90.f, 44.f, 5.0f, 22000.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, COLOSSUS_T, 4},
+    // 1950s sci-fi needle rocket: very tall, narrow, classic tail fins + nose dish
+    {"Rocket", 14.f, 96.f, 9.f, 88.f, 1.55f, 4200.f, 400.f, false, STYLE_FINS | STYLE_STRIPES | STYLE_DISH},
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;
@@ -302,12 +306,12 @@ inline constexpr int CARGO_DEF_COUNT = static_cast<int>(sizeof(CARGO_DEFS) / siz
 
 // Rope and hook (px, px/s)
 namespace rope {
-inline constexpr float MIN_LEN = 16.f;   // hook tucked under the belly
-inline constexpr float OUT_LEN = 300.f;  // cable fully deployed
-inline constexpr float REEL_SPEED = 130.f;
-inline constexpr float REEL_SPEED_LOADED = 70.f;
-inline constexpr float HOOK_MASS_FRACTION = 0.12f;  // of the ship's mass
-inline constexpr float GRAB_REACH = 22.f;           // hook centre to the crate's edge
+inline float MIN_LEN = 16.f;   // hook tucked under the belly
+inline float OUT_LEN = 300.f;  // cable fully deployed
+inline float REEL_SPEED = 130.f;
+inline float REEL_SPEED_LOADED = 70.f;
+inline float HOOK_MASS_FRACTION = 0.12f;  // of the ship's mass
+inline float GRAB_REACH = 22.f;           // hook centre to the crate's edge
 inline constexpr int CARGO_COUNT = 12;
 // A crate on the hook is calmed so it hangs instead of flailing: air drag, friction in the pivot, and it no longer
 // collides with the ship (a swinging crate would otherwise snag legs and engines and yank the ship around)

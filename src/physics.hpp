@@ -67,6 +67,10 @@ class Physics {
   // Ship rigid bodies at pos (px) / angle / velocity (px/s)
   ShipBodies create_ship(const ShipDef& def, Vec2 pos, float angle, Vec2 vel, float ang_vel);
   void destroy_ship(ShipBodies& s);
+  // Re-apply hull/leg/hook mass after a debug mass multiplier change (scale relative to ShipDef)
+  void apply_ship_mass(ShipBodies& s, const ShipDef& def, float mass_mul);
+  // Push current tune::GRAVITY into the world (debug menu)
+  void sync_gravity();
   // A crate; created disabled when there is no ground under it yet (see Game's cargo activation)
   b2BodyId create_cargo(Vec2 pos, float angle, const CargoDef& def);
 

@@ -61,6 +61,7 @@ steadier but slower to turn.
 | Dart, Gnat | Small and quick; Dart is the fastest, Gnat the lightest |
 | Hauler, Orca | Heavy, with fuel tanks: the best for towing crates |
 | Spire, Moth | Tall and narrow, wide and light |
+| Rocket | 1950s sci-fi needle rocket: very tall, narrow, classic fins |
 
 | Frigate | Big, four thrusters: mains on the triggers, two **side thrusters on the sticks** to strafe without tilting |
 | Atlas | Big, mains on the triggers, two **top boosters on the sticks** that push the ship *down*: brake, descend, steer |

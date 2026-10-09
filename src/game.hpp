@@ -126,6 +126,10 @@ struct Game {
   float sonar_cool = 0.f;    // seconds until the next ping is allowed
   int last_pad = -1;         // index of last pad the ship settled on (-1 = none yet)
 
+  // Debug menu multipliers (1 = stock). Applied live; mass rebuild happens when mass_mul changes.
+  float dbg_mass_mul = 1.f;
+  float dbg_thrust_mul = 1.f;
+
   // Fog of war: one byte per cave cell, 0 = unknown, 1..255 = reveal strength (sonar distance fade).
   // Size GW*GH after the first cave generate; reset when the cave regenerates.
   std::vector<uint8_t> revealed;

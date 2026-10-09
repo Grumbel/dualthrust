@@ -10,13 +10,14 @@
 enum class InputDevice { Keyboard, Gamepad };
 
 enum class Screen { Title, Play, Pause };
-enum class MenuPage { Title, Pause, Options, Stats, Controls };
+enum class MenuPage { Title, Pause, Options, Stats, Controls, Debug };
 
 enum class MenuAction {
   Start, Resume, Respawn, NewCave, Options, Stats, MainMenu, Quit, Back,  // actions
   Ship, Zoom, UiScale, SwapEngines, Crt, Fullscreen,       // choices (on/off or a list), changed with left/right
   Music, Effects,                                         // sliders 0..SLIDER_MAX
   Controls, ResetBinds,                                   // open Controls page / restore defaults
+  Debug, ResetTune,                                       // open Debug page / restore tune defaults
 };
 enum class ItemKind { Action, Choice, Slider };
 
@@ -62,12 +63,19 @@ inline constexpr MenuItem OPTION_ITEMS[] = {
     {MenuAction::Crt, "CRT EFFECT", ItemKind::Choice},
     {MenuAction::Fullscreen, "FULLSCREEN", ItemKind::Choice},
     {MenuAction::Controls, "CONTROLS", ItemKind::Action},
+    {MenuAction::Debug, "DEBUG", ItemKind::Action},
     {MenuAction::Back, "BACK", ItemKind::Action},
 };
 
 // Controls page: one row per rebindable action, then Reset / Back. Values are drawn from BindMap.
 inline constexpr MenuItem CONTROL_ITEMS[] = {
     {MenuAction::ResetBinds, "RESET DEFAULTS", ItemKind::Action},
+    {MenuAction::Back, "BACK", ItemKind::Action},
+};
+
+// Debug page: param rows are drawn from DebugParam table; footer is these items.
+inline constexpr MenuItem DEBUG_ITEMS[] = {
+    {MenuAction::ResetTune, "RESET DEFAULTS", ItemKind::Action},
     {MenuAction::Back, "BACK", ItemKind::Action},
 };
 
@@ -87,6 +95,7 @@ inline const MenuPageDef& page_def(MenuPage p) {
       {"OPTIONS", OPTION_ITEMS, item_count(OPTION_ITEMS)},
       {"STATISTICS", STATS_ITEMS, item_count(STATS_ITEMS)},
       {"CONTROLS", CONTROL_ITEMS, item_count(CONTROL_ITEMS)},
+      {"DEBUG", DEBUG_ITEMS, item_count(DEBUG_ITEMS)},  // param rows are custom-drawn
   };
   return defs[static_cast<int>(p)];
 }
@@ -114,6 +123,7 @@ struct UiState {
   int rebind_action = 0;     // Action as int
   bool rebind_keyboard = true;
   int controls_cursor = 0;   // 0..ACTION_COUNT-1 = action rows, then footer items
+  int debug_cursor = 0;      // 0..DEBUG_PARAM_COUNT-1 = param rows, then DEBUG_ITEMS footer
   bool show_map = false;     // hold MapView: full fog-of-war chart
 
   bool in_menu() const { return screen != Screen::Play; }

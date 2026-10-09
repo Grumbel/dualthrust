@@ -23,6 +23,7 @@
 #include "stats.hpp"
 #include "systems.hpp"
 #include "ui.hpp"
+#include "debug.hpp"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -451,10 +452,20 @@ int main(int argc, char** argv) {
         ui.rebind_keyboard = ui.device != InputDevice::Gamepad;
         open_page(MenuPage::Controls);
         break;
+      case MenuAction::Debug:
+        ui.options_back = ui.page;
+        ui.back_cursor = ui.cursor;
+        ui.debug_cursor = 0;
+        open_page(MenuPage::Debug);
+        break;
       case MenuAction::ResetBinds:
         set_default_binds(binds);
         persist_binds();
         show_toast("BINDS RESET");
+        break;
+      case MenuAction::ResetTune:
+        debug_reset_all(game);
+        show_toast("TUNE RESET");
         break;
       case MenuAction::MainMenu: ui.screen = Screen::Title; open_page(MenuPage::Title); break;
       case MenuAction::Quit: persist_config(); running = false; break;
@@ -488,7 +499,8 @@ int main(int argc, char** argv) {
       case MenuPage::Pause: ui.screen = Screen::Play; break;
       case MenuPage::Options:
       case MenuPage::Stats:
-      case MenuPage::Controls: open_page(ui.options_back, ui.back_cursor); break;
+      case MenuPage::Controls:
+      case MenuPage::Debug: open_page(ui.options_back, ui.back_cursor); break;
       default: break;
     }
   };
@@ -565,7 +577,38 @@ int main(int argc, char** argv) {
             break;
           }
 
+          if (ui.page == MenuPage::Debug && ui.screen != Screen::Play) {
+            const int n = DEBUG_PARAM_COUNT + item_count(DEBUG_ITEMS);
+            if (k == SDLK_UP || k == SDLK_w) ui.debug_cursor = (ui.debug_cursor + n - 1) % n;
+            else if (k == SDLK_DOWN || k == SDLK_s) ui.debug_cursor = (ui.debug_cursor + 1) % n;
+            else if (k == SDLK_LEFT || k == SDLK_a) {
+              if (ui.debug_cursor < DEBUG_PARAM_COUNT) debug_param_nudge(game, ui.debug_cursor, -1);
+            } else if (k == SDLK_RIGHT || k == SDLK_d) {
+              if (ui.debug_cursor < DEBUG_PARAM_COUNT) debug_param_nudge(game, ui.debug_cursor, +1);
+            } else if (k == SDLK_ESCAPE) menu_back();
+            else if (enter || k == SDLK_SPACE) {
+              if (ui.debug_cursor >= DEBUG_PARAM_COUNT) {
+                const MenuItem& item = DEBUG_ITEMS[ui.debug_cursor - DEBUG_PARAM_COUNT];
+                if (item.action == MenuAction::ResetTune) {
+                  debug_reset_all(game);
+                  show_toast("TUNE RESET");
+                } else if (item.action == MenuAction::Back) {
+                  menu_back();
+                }
+              }
+            }
+            break;
+          }
+
           if (ui.screen == Screen::Play) {
+            if (k == SDLK_F3) {
+              ui.options_back = MenuPage::Pause;
+              ui.back_cursor = 0;
+              ui.debug_cursor = 0;
+              ui.screen = Screen::Pause;
+              open_page(MenuPage::Debug);
+              break;
+            }
             if (action_pressed_key(binds, Action::Pause, sc)) open_pause();
             if (action_pressed_key(binds, Action::ZoomFarther, sc) || k == SDLK_TAB)
               zoom_to(game.cam.zoom + 1, true);
@@ -625,6 +668,29 @@ int main(int argc, char** argv) {
                   set_default_binds(binds);
                   persist_binds();
                   show_toast("BINDS RESET");
+                } else if (item.action == MenuAction::Back) {
+                  menu_back();
+                }
+              }
+            }
+            break;
+          }
+
+          if (ui.page == MenuPage::Debug && ui.screen != Screen::Play) {
+            const int n = DEBUG_PARAM_COUNT + item_count(DEBUG_ITEMS);
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) ui.debug_cursor = (ui.debug_cursor + n - 1) % n;
+            else if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) ui.debug_cursor = (ui.debug_cursor + 1) % n;
+            else if (b == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
+              if (ui.debug_cursor < DEBUG_PARAM_COUNT) debug_param_nudge(game, ui.debug_cursor, -1);
+            } else if (b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+              if (ui.debug_cursor < DEBUG_PARAM_COUNT) debug_param_nudge(game, ui.debug_cursor, +1);
+            } else if (b == SDL_CONTROLLER_BUTTON_B) menu_back();
+            else if (b == SDL_CONTROLLER_BUTTON_A) {
+              if (ui.debug_cursor >= DEBUG_PARAM_COUNT) {
+                const MenuItem& item = DEBUG_ITEMS[ui.debug_cursor - DEBUG_PARAM_COUNT];
+                if (item.action == MenuAction::ResetTune) {
+                  debug_reset_all(game);
+                  show_toast("TUNE RESET");
                 } else if (item.action == MenuAction::Back) {
                   menu_back();
                 }

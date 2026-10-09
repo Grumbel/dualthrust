@@ -23,6 +23,13 @@
 
 ## Notes
 
+- Ship **Rocket**: tall 1950s sci-fi needle (half_h 96, narrow, tail fins + dish). Select via Options → Ship.
+- Debug menu (Options → Debug, or F3 in play): live-tweaks gravity, time scale, mass/thrust multipliers,
+  fuel burn/refuel/limp, sonar range/speed/cooldown, leg spring, crash speeds, friction, rope length/reel,
+  grab reach. RESET DEFAULTS restores stock. Mass mul rebuilds Box2D mass data immediately; gravity
+  updates the world. Drag/friction on existing bodies need a respawn to fully re-apply.
+
+
 - Respawn: after a crash, Enter / B (and A on the gamepad) respawn immediately on the home pad.
   Intentional respawn while alive is pause-menu only (Respawn item). New Cave is pause-menu only.
 

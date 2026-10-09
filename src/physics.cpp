@@ -533,3 +533,28 @@ void Physics::destroy_ship(ShipBodies& s) {
   if (B2_IS_NON_NULL(s.hull)) b2DestroyBody(s.hull);
   s.hull = b2_nullBodyId;
 }
+
+void Physics::apply_ship_mass(ShipBodies& s, const ShipDef& d, float mass_mul) {
+  if (!B2_IS_NON_NULL(s.hull)) return;
+  const float mul = std::max(0.05f, mass_mul);
+  const float leg_mass = d.mass * mul * tune::LEG_MASS_FRACTION;
+  const LegGeom lg = leg_geom(d);
+  const float m_hull = d.mass * mul - 2.f * leg_mass;
+  const float leg_x_m = lg.foot_x / PPM;
+  const float inertia =
+      std::max(d.inertia * mul / (PPM * PPM) - 2.f * leg_mass * leg_x_m * leg_x_m, d.inertia * mul / (PPM * PPM) * 0.3f);
+  b2Body_SetMassData(s.hull, {m_hull, to_b2({0.f, com_y(d)}), inertia});
+  for (int i = 0; i < 2; ++i) {
+    if (B2_IS_NON_NULL(s.leg[i]))
+      b2Body_SetMassData(s.leg[i], {leg_mass, {0.f, 0.f}, leg_mass * 0.04f});
+  }
+  if (B2_IS_NON_NULL(s.hook)) {
+    const float hm = d.mass * mul * rope::HOOK_MASS_FRACTION;
+    b2Body_SetMassData(s.hook, {hm, {0.f, 0.f}, hm * 0.02f});
+  }
+}
+
+void Physics::sync_gravity() {
+  if (!ready()) return;
+  b2World_SetGravity(world_, {0.f, tune::GRAVITY / PPM});
+}
