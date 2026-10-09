@@ -85,7 +85,7 @@ bool save_world(const Game& g, int ship_index) {
 
   // Ordered cargo list for stable indices
   std::vector<Entity> cargo_ents;
-  g.ecs.view<Cargo>([&](Entity e, Cargo&) { cargo_ents.push_back(e); });
+  g.ecs.view<Cargo>([&](Entity e, const Cargo&) { cargo_ents.push_back(e); });
 
   int held_idx = -1;
   if (rope && rope->held != NULL_ENTITY) {

@@ -342,8 +342,7 @@ int main(int argc, char** argv) {
         // Simpler: create_ship already used user.ship; if save differs, switch and reload world pose.
         load_world(game, nullptr);
       }
-      std::printf("  world:      restored from %s
-", world_file_path().c_str());
+      std::printf("  world:      restored from %s\n", world_file_path().c_str());
     } else {
       new_game_at(first_pad_x());
       if (game.stats_enabled) { game.stats.caves += 1; game.stats_dirty = true; }
