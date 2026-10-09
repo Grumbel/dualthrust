@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-047.1-flake-cmake-flags-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-047.1-flake-cmake-flags-9a093cd` → tip `7093cac`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
