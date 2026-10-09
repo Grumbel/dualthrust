@@ -306,49 +306,54 @@ inline LegGeom leg_geom(const ShipDef& d) {
 // stably on its legs, even on a slope. Thrust acts along the ship's axis, so this does not change how it flies.
 inline float com_y(const ShipDef& d) { return 0.45f * leg_geom(d).foot_y; }
 
-// Big ships with four thrusters, two on the triggers and two on the sticks
+// Big ships: channels 0/1 = primary (sticks), 2/3 = secondary (triggers)
 inline constexpr ThrusterDef FRIGATE_T[] = {
-    {-62.f, 34.f, 0.f, 1.f, 0},   {62.f, 34.f, 0.f, 1.f, 1},                    // main engines: triggers
-    {-70.f, 26.f, 1.5708f, 0.5f, 2}, {70.f, 26.f, -1.5708f, 0.5f, 3},          // side thrusters: sticks strafe
+    {-62.f, 34.f, 0.f, 1.f, 0},   {62.f, 34.f, 0.f, 1.f, 1},                    // main engines: sticks
+    {-70.f, 26.f, 1.5708f, 0.5f, 2}, {70.f, 26.f, -1.5708f, 0.5f, 3},          // side thrusters: triggers
 };
 inline constexpr ThrusterDef ATLAS_T[] = {
-    {-56.f, 40.f, 0.f, 1.f, 0},   {56.f, 40.f, 0.f, 1.f, 1},                    // main engines: triggers
-    {-44.f, -2.f, 3.1416f, 0.6f, 2}, {44.f, -2.f, 3.1416f, 0.6f, 3},         // top boosters push down: sticks brake / steer
+    {-56.f, 40.f, 0.f, 1.f, 0},   {56.f, 40.f, 0.f, 1.f, 1},                    // main engines: sticks
+    {-44.f, -2.f, 3.1416f, 0.6f, 2}, {44.f, -2.f, 3.1416f, 0.6f, 3},         // top boosters: triggers brake / steer
 };
 inline constexpr ThrusterDef DRAGONFLY_T[] = {
     {-50.f, 24.f, 0.f, 1.f, 0},   {50.f, 24.f, 0.f, 1.f, 1},
-    {-22.f, 26.f, 0.61f, 0.6f, 2}, {22.f, 26.f, -0.61f, 0.6f, 3},              // crossed at 35°: together lift, alone strafe
+    {-22.f, 26.f, 0.61f, 0.6f, 2}, {22.f, 26.f, -0.61f, 0.6f, 3},              // crossed at 35°: triggers
 };
 inline constexpr ThrusterDef COLOSSUS_T[] = {
     {-90.f, 44.f, 0.f, 1.f, 0},   {90.f, 44.f, 0.f, 1.f, 1},
-    {-44.f, 24.f, 0.f, 0.8f, 2},  {44.f, 24.f, 0.f, 0.8f, 3},                  // inboard engines: fine attitude control
+    {-44.f, 24.f, 0.f, 0.8f, 2},  {44.f, 24.f, 0.f, 0.8f, 3},                  // inboard: triggers
 };
 
-// Stick up fires one side, stick down the other (bidirectional verniers).
+// Vernier: mains on sticks; strafe verniers on triggers.
 inline constexpr ThrusterDef VERNIER_T[] = {
-    {-34.f, 28.f, 0.f, 1.0f, 0}, {34.f, 28.f, 0.f, 1.0f, 1},                 // mains: triggers
-    {-52.f, 4.f, -1.5708f, 0.65f, 2},                                          // LS up → strafe left
-    {52.f, 4.f, 1.5708f, 0.65f, 4},                                           // LS down → strafe right
+    {-34.f, 28.f, 0.f, 1.0f, 0}, {34.f, 28.f, 0.f, 1.0f, 1},                 // mains: sticks
+    {-52.f, 4.f, -1.5708f, 0.65f, 2}, {52.f, 4.f, 1.5708f, 0.65f, 3},       // LT/RT → strafe
 };
-// Both sticks bidirectional: LS lateral, RS nose/belly.
+// Bidraft: mains sticks; stick-down halves for lateral; triggers for nose/belly.
 inline constexpr ThrusterDef BIDRAFT_T[] = {
     {-38.f, 30.f, 0.f, 1.0f, 0}, {38.f, 30.f, 0.f, 1.0f, 1},                 // mains
-    {-56.f, 2.f, -1.5708f, 0.55f, 2}, {56.f, 2.f, 1.5708f, 0.55f, 4},       // LS up/down → left/right
-    {0.f, -36.f, 0.f, 0.5f, 3}, {0.f, 36.f, 3.1416f, 0.5f, 5},               // RS up/down → nose/belly
+    {0.f, -36.f, 0.f, 0.5f, 2}, {0.f, 36.f, 3.1416f, 0.5f, 3},               // LT/RT → nose/belly
+    {-56.f, 2.f, -1.5708f, 0.55f, 4}, {56.f, 2.f, 1.5708f, 0.55f, 5},       // stick-down → left/right
 };
-// Pure dual-stick craft: no triggers required — each stick is a opposing pair (hover + translate).
+// Seesaw: pure stick craft — LS/RS up on primary, stick-down on 4/5.
 inline constexpr ThrusterDef SEESAW_T[] = {
-    {-40.f, 20.f, -0.4f, 0.85f, 2}, {40.f, 20.f, 0.4f, 0.85f, 4},            // LS up/down → lift-left / lift-right
-    {-40.f, 20.f, -2.7408f, 0.85f, 3}, {40.f, 20.f, 2.7408f, 0.85f, 5},      // RS up/down → brake-left / brake-right
+    {-40.f, 20.f, -0.4f, 0.85f, 0}, {40.f, 20.f, 0.4f, 0.85f, 4},            // LS up / LS down
+    {-40.f, 20.f, -2.7408f, 0.85f, 1}, {40.f, 20.f, 2.7408f, 0.85f, 5},      // RS up / RS down
 };
 
-// Deliberately unbalanced: fat left bell, weak canted right. Equal triggers spin you.
-// Sticks give a little recovery (LS leftward, RS weak rightward vernier).
+// Deliberately unbalanced: fat left bell, weak canted right. Equal primary input spins you.
+// Secondary (triggers) give a little recovery.
 inline constexpr ThrusterDef LURCH_T[] = {
     {-48.f, 30.f, 0.05f, 1.35f, 0},   // heavy left main (slight outward cant)
     {18.f, 36.f, -0.35f, 0.45f, 1},   // small, aft-biased right main (inward cant)
-    {-56.f, 8.f, -1.40f, 0.40f, 2},   // LS up: left-side recovery thruster
-    {52.f, 10.f, 1.25f, 0.35f, 3},    // RS up: weaker right recovery
+    {-56.f, 8.f, -1.40f, 0.40f, 2},   // secondary: left-side recovery
+    {52.f, 10.f, 1.25f, 0.35f, 3},    // secondary: weaker right recovery
+};
+
+// Titan: very tall heavy rocket. Twin primary mains (sticks); small top RCS for L/R (triggers).
+inline constexpr ThrusterDef TITAN_T[] = {
+    {-32.f, 108.f, 0.f, 1.25f, 0}, {32.f, 108.f, 0.f, 1.25f, 1},           // primary twin bells
+    {-20.f, -102.f, -1.50f, 0.32f, 2}, {20.f, -102.f, 1.50f, 0.32f, 3},   // top L/R verniers
 };
 
 inline constexpr ShipDef SHIP_DEFS[] = {
@@ -377,6 +382,9 @@ inline constexpr ShipDef SHIP_DEFS[] = {
     {"Seesaw", 48.f, 28.f, 34.f, 24.f, 1.35f, 1800.f, 410.f, false, STYLE_DECK | STYLE_STRIPES | STYLE_DOME, SEESAW_T, 4},
     // Asymmetric hull: wide left tank, skinny right — engines match the imbalance
     {"Lurch", 46.f, 34.f, 48.f, 30.f, 1.55f, 2400.f, 420.f, false, STYLE_TANKS | STYLE_FINS | STYLE_STRIPES, LURCH_T, 4},
+    // Super-heavy needle: taller than Rocket, twin mains + nose RCS
+    {"Titan", 24.f, 128.f, 32.f, 108.f, 3.2f, 16000.f, 520.f, false,
+     STYLE_FINS | STYLE_STRIPES | STYLE_DISH | STYLE_TANKS, TITAN_T, 4},
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;

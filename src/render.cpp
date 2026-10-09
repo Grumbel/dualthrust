@@ -886,7 +886,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     float v = clampf(th.level[i], 0.f, 1.f);
     fill(m20, y, static_cast<int>(bar_w * v), bar_h, mix(pal::MID, pal::HOT, smoothstep((v - 0.6f) / 0.4f)));
     outline(m20, y, bar_w, bar_h, with_alpha(pal::MID, 120));
-    static const char* labels[] = {"L", "R", "LS", "RS", "LSd", "RSd"};
+    static const char* labels[] = {"L", "R", "LT", "RT", "LSd", "RSd"};  // sticks primary, triggers secondary
     text(L(148), y - L(3), labels[i < 6 ? i : 0], pal::MID);
     y += bar_step;
   }

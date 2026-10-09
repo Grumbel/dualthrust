@@ -249,30 +249,59 @@ inline float action_value(const BindMap& m, Action a, SDL_GameController* pad, c
   return v;
 }
 
-// Half thrust on Shift (historical): applied on top of key binds for L/R only.
+// Stick = primary (channels 0/1), triggers = secondary (channels 2/3).
+// Keyboard L/R keys stay on primary so desktop play does not need a pad.
+inline float action_value_pad(const BindMap& m, Action a, SDL_GameController* pad) {
+  if (!pad) return 0.f;
+  const int i = static_cast<int>(a);
+  float v = 0.f;
+  for (int s = 0; s < BIND_SLOTS; ++s) v = std::max(v, src_value(m.pad[i][s], pad, nullptr));
+  return v;
+}
+inline float action_value_kbd(const BindMap& m, Action a, const Uint8* keys) {
+  if (!keys) return 0.f;
+  const int i = static_cast<int>(a);
+  float v = 0.f;
+  for (int s = 0; s < BIND_SLOTS; ++s) v = std::max(v, src_value(m.kbd[i][s], nullptr, keys));
+  return v;
+}
+
 inline void read_thrust_bound(const BindMap& m, SDL_GameController* pad, int channels, float out[6]) {
   const Uint8* keys = SDL_GetKeyboardState(nullptr);
   for (int i = 0; i < 6; ++i) out[i] = 0.f;
-  out[0] = action_value(m, Action::ThrustL, pad, keys);
-  out[1] = action_value(m, Action::ThrustR, pad, keys);
-  out[2] = action_value(m, Action::ThrustLS, pad, keys);
-  out[3] = action_value(m, Action::ThrustRS, pad, keys);
-  out[4] = action_value(m, Action::ThrustLSd, pad, keys);
-  out[5] = action_value(m, Action::ThrustRSd, pad, keys);
-  // Shift = half thrust on the classic L/R keys when no full bind is active from Shift itself
+
+  const float stick_l = std::max(action_value(m, Action::ThrustLS, pad, keys),
+                                 action_value(m, Action::ThrustLSd, pad, keys));
+  const float stick_r = std::max(action_value(m, Action::ThrustRS, pad, keys),
+                                 action_value(m, Action::ThrustRSd, pad, keys));
+  const float key_l = action_value_kbd(m, Action::ThrustL, keys);
+  const float key_r = action_value_kbd(m, Action::ThrustR, keys);
+  const float trig_l = action_value_pad(m, Action::ThrustL, pad);
+  const float trig_r = action_value_pad(m, Action::ThrustR, pad);
+
+  // Primary mains
+  out[0] = std::max(stick_l, key_l);
+  out[1] = std::max(stick_r, key_r);
+  // Secondary verniers / boosters
+  out[2] = trig_l;
+  out[3] = trig_r;
+  out[4] = out[5] = 0.f;
+
+  // Shift = half primary (keyboard convenience)
   if (keys) {
     if (keys[SDL_SCANCODE_LSHIFT]) out[0] = std::max(out[0], 0.5f);
     if (keys[SDL_SCANCODE_RSHIFT]) out[1] = std::max(out[1], 0.5f);
   }
+
   if (channels <= 2) {
-    // Classic pair: fold stick channels into L/R
-    out[0] = std::max(out[0], std::max(out[2], out[4]));
-    out[1] = std::max(out[1], std::max(out[3], out[5]));
-    out[2] = out[3] = out[4] = out[5] = 0.f;
-  } else if (channels <= 4) {
-    // Four-channel ships without down-half: drop LSd/RSd into nothing (or ignore)
-    // Keep 0..3; zero unused downs unless a thruster listens on 4/5
-    // (callers still pass full out; thrusters only read their channel)
+    // Classic pair has no secondary nozzles — triggers assist primary at reduced power
+    out[0] = std::max(out[0], trig_l * 0.85f);
+    out[1] = std::max(out[1], trig_r * 0.85f);
+    out[2] = out[3] = 0.f;
+  } else if (channels > 4) {
+    // Stick-down halves stay on 4/5 for ships that use them (Bidraft, Seesaw)
+    out[4] = action_value(m, Action::ThrustLSd, pad, keys);
+    out[5] = action_value(m, Action::ThrustRSd, pad, keys);
   }
 }
 
