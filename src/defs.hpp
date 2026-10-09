@@ -141,7 +141,8 @@ enum ShipStyle : unsigned {
 // One thruster of a ship with its own control channel. Ships without a list have the classic pair (see
 // thruster_pose): left and right engines on the channels 0 and 1.
 //   channel 0 = L trigger, 1 = R trigger, 2 = LS up, 3 = RS up, 4 = LS down, 5 = RS down
-//   angle: direction of the push in radians off the nose (0 = toward the nose, +90° = to the right, 180° = down)
+//   angle: direction of the *push* in radians off the nose (0 = toward the nose / -y, +90° = +x right, 180° = down).
+//   Exhaust/flame is the opposite of push. Side RCS: left mount uses +90° (flame left/out), right mount -90°.
 struct ThrusterDef {
   float x, y;     // hull-local mount
   float angle;
@@ -310,7 +311,7 @@ inline float com_y(const ShipDef& d) { return 0.45f * leg_geom(d).foot_y; }
 // Big ships: channels 0/1 = primary (sticks), 2/3 = secondary (triggers)
 inline constexpr ThrusterDef FRIGATE_T[] = {
     {-62.f, 34.f, 0.f, 1.f, 0},   {62.f, 34.f, 0.f, 1.f, 1},                    // main engines: sticks
-    {-70.f, 26.f, -1.5708f, 0.5f, 2}, {70.f, 26.f, 1.5708f, 0.5f, 3},         // side thrusters: outward strafe
+    {-70.f, 26.f, 1.5708f, 0.5f, 2}, {70.f, 26.f, -1.5708f, 0.5f, 3},         // side: exhaust outward (push inward)
 };
 inline constexpr ThrusterDef ATLAS_T[] = {
     {-56.f, 40.f, 0.f, 1.f, 0},   {56.f, 40.f, 0.f, 1.f, 1},                    // main engines: sticks
@@ -328,13 +329,13 @@ inline constexpr ThrusterDef COLOSSUS_T[] = {
 // Vernier: mains on sticks; strafe verniers on triggers.
 inline constexpr ThrusterDef VERNIER_T[] = {
     {-34.f, 28.f, 0.f, 1.0f, 0}, {34.f, 28.f, 0.f, 1.0f, 1},                 // mains: sticks
-    {-52.f, 4.f, -1.5708f, 0.65f, 2}, {52.f, 4.f, 1.5708f, 0.65f, 3},       // LT/RT → strafe
+    {-52.f, 4.f, 1.5708f, 0.65f, 2}, {52.f, 4.f, -1.5708f, 0.65f, 3},       // LT/RT → exhaust outward
 };
 // Bidraft: mains sticks; stick-down halves for lateral; triggers for nose/belly.
 inline constexpr ThrusterDef BIDRAFT_T[] = {
     {-38.f, 30.f, 0.f, 1.0f, 0}, {38.f, 30.f, 0.f, 1.0f, 1},                 // mains
     {0.f, -36.f, 0.f, 0.5f, 2}, {0.f, 36.f, 3.1416f, 0.5f, 3},               // LT/RT → nose/belly
-    {-56.f, 2.f, -1.5708f, 0.55f, 4}, {56.f, 2.f, 1.5708f, 0.55f, 5},       // stick-down → left/right
+    {-56.f, 2.f, 1.5708f, 0.55f, 4}, {56.f, 2.f, -1.5708f, 0.55f, 5},       // stick-down → exhaust outward
 };
 // Seesaw: pure stick craft — LS/RS up on primary, stick-down on 4/5.
 inline constexpr ThrusterDef SEESAW_T[] = {
@@ -347,14 +348,14 @@ inline constexpr ThrusterDef SEESAW_T[] = {
 inline constexpr ThrusterDef LURCH_T[] = {
     {-48.f, 30.f, 0.05f, 1.35f, 0},   // heavy left main (slight outward cant)
     {18.f, 36.f, -0.35f, 0.45f, 1},   // small, aft-biased right main (inward cant)
-    {-56.f, 8.f, -1.40f, 0.40f, 2},   // secondary: left-side recovery
-    {52.f, 10.f, 1.25f, 0.35f, 3},    // secondary: weaker right recovery
+    {-56.f, 8.f, 1.40f, 0.40f, 2},    // secondary: left nozzle, exhaust outward
+    {52.f, 10.f, -1.25f, 0.35f, 3},   // secondary: right nozzle, exhaust outward
 };
 
 // Titan: very tall heavy rocket. Twin primary mains (sticks); small top RCS for L/R (triggers).
 inline constexpr ThrusterDef TITAN_T[] = {
     {-32.f, 108.f, 0.f, 1.25f, 0}, {32.f, 108.f, 0.f, 1.25f, 1},           // primary twin bells
-    {-20.f, -102.f, -1.50f, 0.32f, 2}, {20.f, -102.f, 1.50f, 0.32f, 3},   // top L/R verniers
+    {-20.f, -102.f, 1.50f, 0.32f, 2}, {20.f, -102.f, -1.50f, 0.32f, 3},   // top L/R, exhaust outward
 };
 
 inline constexpr ShipDef SHIP_DEFS[] = {
