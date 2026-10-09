@@ -704,7 +704,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
 
   const int bars = channel_count(d);
   const int bar_h = L(10), bar_w = L(120), bar_step = L(18);
-  fill(m8, m8, L(210), bar_step * bars + L(4) + lh * 6 + L(28), with_alpha(pal::MENU, 120));
+  fill(m8, m8, L(210), bar_step * (bars + 1) + L(4) + lh * 7 + L(28), with_alpha(pal::MENU, 120));
   int y = m16;
   for (int i = 0; i < bars; ++i) {
     fill(m20, y, bar_w, bar_h, pal::DIM);
@@ -715,8 +715,19 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     y += bar_step;
   }
   y += L(4);
+  // Fuel gauge (drains with thrust, refills on pads)
+  fill(m20, y, bar_w, bar_h, pal::DIM);
+  const float fuel = clampf(fl.fuel, 0.f, 1.f);
+  fill(m20, y, static_cast<int>(bar_w * fuel), bar_h,
+       fuel > 0.25f ? pal::PAD : mix(pal::HOT, pal::WARN, fuel / 0.25f));
+  outline(m20, y, bar_w, bar_h, with_alpha(pal::MID, 120));
+  text(L(148), y - L(3), "FUEL", fuel > 0.25f ? pal::MID : pal::HOT);
+  y += bar_step;
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%s%s", d.name, d.engines_top ? " TOP" : "");
+  text(m20, y, buf, pal::BRIGHT);
+  y += lh;
+  std::snprintf(buf, sizeof(buf), "SCORE %d", g.score);
   text(m20, y, buf, pal::BRIGHT);
   y += lh;
   char bname[24];

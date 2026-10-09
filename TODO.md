@@ -9,13 +9,14 @@
   - Done: rope (distance-joint cable with a winch, hook) and cargo crates (cyan on the minimap, delivery to pads counted).
   - Rope ideas: wrap around rock corners (a chain of bodies would, a distance joint does not), a magnet/auto-grab, crate
     weights shown on the HUD, cargo with destinations.
-  - Next: tune the feel on the handheld (leg Hz/damping, crash limits, `TIME_SCALE`), pads as score/refuel spots.
+  - Done: pads as score/refuel spots (fuel gauge, session score).
+  - Next: tune the feel on the handheld (leg Hz/damping, crash limits, `TIME_SCALE`).
 
 ## Open
 
 - [ ] Real-hardware pass through the PortMaster launcher and the controller mapping (R36S)
 - [ ] Audio in the browser and gamepads in the browser are untested
-- [ ] Fuel / score (no win conditions or money for now; the statistics are the only record)
+- [x] Fuel / score (tank burns with thrust, refills on pads; pad landings +100, cargo +250; HUD bar + score)
 - [ ] Box2D on the R36S and in the browser: builds, but not run on the device / in a browser yet
 - [x] UI scale option (1X/2X/3X/4X; auto by display height; R36S → 1X, desktop → 2X)
 

@@ -42,7 +42,7 @@ void burst(Game& g, Vec2 pos, Vec2 normal, int count, float speed, float spread,
 void exhaust_system(Game& g, float dt) {
   g.ecs.view<Thrusters, Transform, Motion, Hull, Flight>(
       [&](Entity, Thrusters& th, Transform& t, Motion& m, Hull& h, Flight& f) {
-        if (f.state != FlightState::Flying) return;
+        if (f.state != FlightState::Flying || f.fuel <= 0.f) return;
         const ShipDef& d = *h.def;
         for (int i = 0; i < thruster_count(d); ++i) {
           const ThrusterPose tp = thruster_pose(d, i);
@@ -125,7 +125,7 @@ void forces_system(Game& g) {
     const ShipBodies& sb = body.b;
     const b2Rot q = b2Body_GetRotation(sb.hull);
 
-    if (f.state != FlightState::Crashed) {
+    if (f.state != FlightState::Crashed && f.fuel > 0.f) {
       for (int i = 0; i < thruster_count(d); ++i) {
         const ThrusterPose tp = thruster_pose(d, i);
         const float level = th.level[tp.channel];
@@ -239,7 +239,8 @@ void cargo_system(Game& g, float dt) {
       if (std::abs(bottom - p.y) < 12.f && t.pos.x >= p.x0 && t.pos.x <= p.x1) {
         c.picked = false;
         stat_add(g, &Stats::cargo_delivered, 1);
-        notice(g, "CARGO DELIVERED");
+        g.score += tune::SCORE_CARGO;
+        notice(g, "+250 CARGO");
         beep(g, SimEventKind::Delivered);
         return;
       }
@@ -313,7 +314,11 @@ void ground_system(Game& g, float dt) {
         const bool pad = touching_pad(g.cave, f.contact_pt);
         g.events.push_back({SimEventKind::Landed, f.contact_pt, {0.f, -1.f}, 0.f});
         stat_add(g, &Stats::landings, 1);
-        if (pad) stat_add(g, &Stats::pad_landings, 1);
+        if (pad) {
+          stat_add(g, &Stats::pad_landings, 1);
+          g.score += tune::SCORE_PAD_LANDING;
+          notice(g, "+100 PAD");
+        }
         std::printf("LANDED%s\n", pad ? " (pad)" : "");
       }
     } else if (f.state == FlightState::Landed) {
@@ -332,6 +337,13 @@ void ground_system(Game& g, float dt) {
     }
     if (f.state != FlightState::Crashed)
       stat_add(g, &Stats::thrust_time, (th.level[0] + th.level[1] + th.level[2] + th.level[3]) * real_dt);
+
+    // Fuel: burn while thrusting; refill while settled on a pad
+    const float demand = th.level[0] + th.level[1] + th.level[2] + th.level[3];
+    if (f.state != FlightState::Crashed && f.fuel > 0.f && demand > 0.02f)
+      f.fuel = std::max(0.f, f.fuel - tune::FUEL_BURN * demand * 0.25f * dt);
+    if (f.state == FlightState::Landed && touching_pad(g.cave, f.contact_pt))
+      f.fuel = std::min(1.f, f.fuel + tune::FUEL_REFUEL * dt);
   });
 }
 
@@ -602,10 +614,17 @@ void reset_fog(Game& g) {
 }
 
 void fire_sonar(Game& g) {
-  if (g.sonar.active) return;
-  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
+  if (g.sonar.active || g.sonar_cool > 0.f) return;
+  Flight& fl = g.ecs.get<Flight>(g.ship);
+  if (fl.state == FlightState::Crashed) return;
+  if (fl.fuel < tune::FUEL_SONAR) {
+    notice(g, "LOW FUEL");
+    return;
+  }
+  fl.fuel = std::max(0.f, fl.fuel - tune::FUEL_SONAR);
   const Vec2 p = ship_transform(g).pos;
   g.sonar = SonarPing{true, p, 0.f, 0.f, 960.f, 780.f};
+  g.sonar_cool = tune::SONAR_COOLDOWN;
   g.events.push_back({SimEventKind::SonarPing, p, {}, 200.f});
 }
 
@@ -682,6 +701,7 @@ void update_sonar(Game& g, float dt) {
 void step_sim(Game& g, float dt) {
   g.time += dt;
   g.notice_timer = std::max(0.f, g.notice_timer - dt / tune::TIME_SCALE);
+  g.sonar_cool = std::max(0.f, g.sonar_cool - dt);
   // Ground is needed around the ship and around every crate that is moving
   static std::vector<Vec2> anchors;
   anchors.assign(1, ship_transform(g).pos);

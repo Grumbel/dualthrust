@@ -31,6 +31,7 @@ struct Flight {
   float settle = 0.f;    // how long the ship has been resting (Flying -> Landed at SETTLE_TIME)
   int contacts = 0;      // touching contact manifolds on hull and legs this tick
   Vec2 contact_pt;       // lowest touching point (px)
+  float fuel = 1.f;      // 0..1 tank; empty engines produce no force
 };
 // Box2D bodies of the ship, and the landing gear on top of them
 struct Body { ShipBodies b; };
@@ -118,6 +119,8 @@ struct Game {
   std::vector<SimEvent> fired;  // copy of this tick's events for the audio layer; drained by main
   std::vector<Entity> dead;
   float time = 0.f;  // accumulated sim time
+  int score = 0;             // this session (resets on quit; not permanent stats)
+  float sonar_cool = 0.f;    // seconds until the next ping is allowed
 
   // Fog of war: one byte per cave cell, 0 = unknown, non-zero = revealed by sonar.
   // Size GW*GH after the first cave generate; reset when the cave regenerates.
