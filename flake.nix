@@ -73,7 +73,6 @@
 
             cmakeFlags = [
               "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
-              "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -g -DNDEBUG"
               "-DPROJECT_VERSION_FULL=${version}"
               "-GNinja"
             ];
@@ -110,7 +109,7 @@
       apps = forAllSystems ({ pkgs }: {
         default = {
           type = "app";
-          program = "${self.packages.${pkgs.system}.default}/bin/dualthrust";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/dualthrust";
         };
         # serve the WebAssembly build locally and open a browser
         dualthrust-wasm = (mkWasm pkgs).serveApp;
@@ -118,7 +117,7 @@
 
       devShells = forAllSystems ({ pkgs }: {
         default = pkgs.mkShell.override { stdenv = pkgs.ccacheStdenv; } {
-          inputsFrom = [ self.packages.${pkgs.system}.default ];
+          inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.default ];
           packages = [
             pkgs.cmake
             pkgs.ninja

@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-046.1-side-thruster-outward-9a093cd` → tip `fa915a7`
+- Bundle line: `dualthrust-047.1-flake-cmake-flags-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
