@@ -49,8 +49,8 @@ inline float FUEL_LIMP = 0.22f;       // below this, thrust power floors here (s
 inline float SONAR_COOLDOWN = 0.9f;   // seconds between pings
 inline float SONAR_MAX_RADIUS = 900.f; // world px — painting stops here
 inline float SONAR_SPEED = 720.f;      // world px per sim second
-inline float SONAR_FADE_TIME = 0.9f;   // seconds of fade-out after the wave reaches max range
-inline float EXPLORE_RADIUS = 260.f;   // passive minimap uncover around the ship (world px)
+inline float SONAR_FADE_TIME = 0.9f;   // fade while still expanding past max range
+inline float EXPLORE_RADIUS = 900.f;   // ~FAR zoom vertical size (1080); circle about one FAR screen across
 inline float EXPLORE_FADE = 0.75f;     // full strength out to this fraction of EXPLORE_RADIUS
 inline bool PASSIVE_EXPLORE = true;    // ship proximity paints the fog map each tick
 

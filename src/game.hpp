@@ -108,13 +108,13 @@ struct SonarReflection {
 
 struct SonarPing {
   bool active = false;
-  bool fading = false;       // true once the wavefront has reached max_radius
+  bool fading = false;       // true once past max_radius; ring still expands while fade drops
   Vec2 origin;
   float radius = 0.f;
   float prev_radius = 0.f;
   float max_radius = 900.f;
   float speed = 720.f;
-  float fade = 1.f;          // 1 during expand; 1→0 during fade-out
+  float fade = 1.f;          // 1 until max_radius; then 1→0 while radius keeps growing
   std::vector<SonarReflection> echoes;
   // Avoid double-echoing the same target in one ping
   std::vector<uint8_t> pad_hit;     // size = pads, 1 if already reflected

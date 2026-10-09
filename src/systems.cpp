@@ -994,25 +994,26 @@ void update_sonar(Game& g, float dt) {
   // Age reflection pulses (drawn even while fading)
   for (SonarReflection& e : s.echoes) e.age += dt;
 
-  if (s.fading) {
+  // Ring always keeps expanding; past max_radius it only fades (never freezes in mid-air)
+  s.prev_radius = s.radius;
+  s.radius += s.speed * dt;
+  if (s.radius >= s.max_radius) {
+    s.fading = true;
     const float fade_t = std::max(0.05f, tune::SONAR_FADE_TIME);
     s.fade = std::max(0.f, s.fade - dt / fade_t);
-    if (s.fade <= 0.02f) {
-      s.active = false;
-      s.fading = false;
-      s.fade = 0.f;
-      s.echoes.clear();
-    }
+  } else {
+    s.fading = false;
+    s.fade = 1.f;
+  }
+  if (s.fade <= 0.02f) {
+    s.active = false;
+    s.fading = false;
+    s.fade = 0.f;
+    s.echoes.clear();
     return;
   }
 
-  s.prev_radius = s.radius;
-  s.radius += s.speed * dt;
-  s.fade = 1.f;
-  if (s.radius >= s.max_radius) {
-    s.radius = s.max_radius;
-    s.fading = true;
-  }
+  // Paint / reflect only while the wavefront is still sweeping the useful range
   if (s.prev_radius >= s.max_radius) return;
   const float r0 = s.prev_radius, r1 = std::min(s.radius, s.max_radius);
 

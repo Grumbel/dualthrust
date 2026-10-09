@@ -44,7 +44,7 @@ struct DebugDefaults {
   float sonar_max_radius = 900.f;
   float sonar_speed = 720.f;
   float sonar_fade_time = 0.9f;
-  float explore_radius = 260.f;
+  float explore_radius = 900.f;
   float explore_fade = 0.75f;
   int sonar_mode = 0;
   bool passive_explore = true;
@@ -89,7 +89,7 @@ inline DebugParam* debug_params(Game& g) {
       {"SONAR SPEED", &tune::SONAR_SPEED, 100.f, 2000.f, 40.f},
       {"SONAR COOL", &tune::SONAR_COOLDOWN, 0.f, 5.f, 0.1f},
       {"SONAR FADE", &tune::SONAR_FADE_TIME, 0.15f, 3.f, 0.05f},
-      {"EXPLORE R", &tune::EXPLORE_RADIUS, 80.f, 600.f, 20.f},
+      {"EXPLORE R", &tune::EXPLORE_RADIUS, 80.f, 2000.f, 20.f},
       {"EXPLORE FADE", &tune::EXPLORE_FADE, 0.3f, 0.95f, 0.05f},
       {"PASSIVE MAP", nullptr, 0.f, 1.f, 1.f, DebugParam::Kind::PassiveExplore},
       {"SONAR MODE", nullptr, 0.f, 2.f, 1.f, DebugParam::Kind::SonarMode},

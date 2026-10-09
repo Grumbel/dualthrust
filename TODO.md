@@ -37,7 +37,7 @@
   fuel limps instead of cutting out; map exploration awards small score.
 
 - Map is 4:3 (7680×5760). Unexplored minimap cells are radio static, not flat black.
-- Fog of war: passive circular uncover around the ship (EXPLORE_RADIUS, LOS-limited). Minimap starts
+- Fog of war: passive circular uncover around the ship (EXPLORE_RADIUS ~900 ≈ FAR zoom size, LOS-limited). Minimap starts
   as radio static; flying opens the chart. Select/Z holds the full revealed map. Ship switch teleports
   to the nearest active pad.
 - Sonar is mode-table driven (`SONAR_MODES`): REFLECT (default search pulse + reflections), PAINT (classic
