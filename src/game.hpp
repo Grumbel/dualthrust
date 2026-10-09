@@ -138,7 +138,10 @@ struct Game {
     bool found = false;
   };
   std::vector<Signal> signals;
-  int cells_explored = 0;  // cells that reached full reveal (255) at least once
+  int cells_explored = 0;  // cells painted at least once this cave
+  int explore_tier = 0;    // 0..4 milestones for map coverage (25/50/75/100)
+  bool signals_cleared = false;
+  bool pads_cleared = false;
 
   // Brief phosphor ghosts left on rock faces the last ping painted (world-space residues)
   struct Residue {

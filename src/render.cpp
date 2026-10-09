@@ -864,28 +864,45 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   const int rx = w_ - text_width("SPEED OK") - m24;
   fill(rx - L(12), m8, w_ - rx + L(4), lh * 4 + m16, with_alpha(pal::MENU, 120));
   for (int i = 0; i < 3; ++i) text(rx, m16 + lh * i, status[i].s, status[i].ok ? pal::PAD : pal::HOT);
-  // Compass: direction to nearest undiscovered signal (exploration cue, not a hard objective)
+  // Compass: cargo destination while hauling, otherwise nearest unfound signal
   {
     float best_d = 1e12f;
     Vec2 best{};
     bool any = false;
-    for (const Game::Signal& sig : g.signals) {
-      if (sig.found) continue;
-      const float dx = sig.pos.x - tf.pos.x, dy = sig.pos.y - tf.pos.y;
-      const float d = dx * dx + dy * dy;
-      if (d < best_d) { best_d = d; best = {dx, dy}; any = true; }
+    const char* tag = "SIG";
+    Rgba col = pal::CARGO;
+    const Rope& rope = g.ecs.get<Rope>(g.ship);
+    if (rope.held != NULL_ENTITY) {
+      const Cargo& held = g.ecs.get<Cargo>(rope.held);
+      if (held.dest_pad >= 0 && held.dest_pad < static_cast<int>(g.cave.pads.size())) {
+        const LandingPad& dp = g.cave.pads[static_cast<size_t>(held.dest_pad)];
+        best = {0.5f * (dp.x0 + dp.x1) - tf.pos.x, dp.y - tf.pos.y};
+        best_d = best.x * best.x + best.y * best.y;
+        any = true;
+        tag = dp.active ? "DEST" : "DEST?";
+        col = pal::WARN;
+      }
+    }
+    if (!any) {
+      for (const Game::Signal& sig : g.signals) {
+        if (sig.found) continue;
+        const float dx = sig.pos.x - tf.pos.x, dy = sig.pos.y - tf.pos.y;
+        const float d = dx * dx + dy * dy;
+        if (d < best_d) { best_d = d; best = {dx, dy}; any = true; }
+      }
+      tag = "SIG";
+      col = pal::CARGO;
     }
     if (any) {
       const float len = std::sqrt(best_d);
       const float ang = std::atan2(best.y, best.x);
       char cbuf[32];
-      std::snprintf(cbuf, sizeof cbuf, "SIG %.0f", len / PPM);
-      text(rx, m16 + lh * 3, cbuf, pal::CARGO);
-      // small arrow next to the label
+      std::snprintf(cbuf, sizeof cbuf, "%s %.0f", tag, len / PPM);
+      text(rx, m16 + lh * 3, cbuf, col);
       const int ax = rx - L(18), ay = m16 + lh * 3 + cell_h() / 2;
       const int ex = ax + static_cast<int>(std::cos(ang) * L(10));
       const int ey = ay + static_cast<int>(std::sin(ang) * L(10));
-      line(ax, ay, ex, ey, pal::CARGO);
+      line(ax, ay, ex, ey, col);
     } else if (!g.signals.empty()) {
       text(rx, m16 + lh * 3, "SIG DONE", pal::PAD);
     }

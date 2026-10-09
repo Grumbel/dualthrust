@@ -658,6 +658,9 @@ void reset_fog(Game& g) {
   g.sonar = {};
   g.last_pad = -1;
   g.cells_explored = 0;
+  g.explore_tier = 0;
+  g.signals_cleared = false;
+  g.pads_cleared = false;
   g.signals.clear();
   g.residues.clear();
   g.echoes.clear();
@@ -790,6 +793,41 @@ void fire_sonar(Game& g) {
 
 
 // Activate any pad whose deck cells the sonar has revealed.
+
+void check_exploration_milestones(Game& g) {
+  if (g.revealed.empty()) return;
+  int lit = 0;
+  for (uint8_t v : g.revealed) if (v >= 80) ++lit;
+  const int pct = (lit * 100) / static_cast<int>(g.revealed.size());
+  static constexpr int TIERS[] = {25, 50, 75, 100};
+  for (int t = g.explore_tier; t < 4; ++t) {
+    if (pct < TIERS[t]) break;
+    g.explore_tier = t + 1;
+    g.score += tune::SCORE_MILESTONE;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "MAP %d%%", TIERS[t]);
+    notice(g, buf);
+  }
+  if (!g.signals_cleared && !g.signals.empty()) {
+    bool all = true;
+    for (const Game::Signal& s : g.signals) if (!s.found) { all = false; break; }
+    if (all) {
+      g.signals_cleared = true;
+      g.score += tune::SCORE_MILESTONE * 2;
+      notice(g, "ALL SIGNALS");
+    }
+  }
+  if (!g.pads_cleared && !g.cave.pads.empty()) {
+    bool all = true;
+    for (const LandingPad& p : g.cave.pads) if (!p.active) { all = false; break; }
+    if (all) {
+      g.pads_cleared = true;
+      g.score += tune::SCORE_MILESTONE * 2;
+      notice(g, "ALL PADS ONLINE");
+    }
+  }
+}
+
 void discover_pads(Game& g) {
   for (LandingPad& p : g.cave.pads) {
     if (p.active) continue;
@@ -973,6 +1011,7 @@ void update_sonar(Game& g, float dt) {
       g.score += bonus * tune::SCORE_REVEAL_CELL;
       g.cells_explored += new_cells;
     }
+    check_exploration_milestones(g);
   }
 }
 
@@ -987,6 +1026,18 @@ void step_sim(Game& g, float dt) {
       g.residues.pop_back();
     } else
       ++i;
+  }
+  // Passive cue: near an unfound signal, leave a faint residue so the pilot can home in
+  {
+    const Vec2 sp = ship_transform(g).pos;
+    for (const Game::Signal& sig : g.signals) {
+      if (sig.found) continue;
+      const float dx = sig.pos.x - sp.x, dy = sig.pos.y - sp.y;
+      const float d = std::sqrt(dx * dx + dy * dy);
+      if (d > tune::SIGNAL_PROX) continue;
+      if (g.residues.size() < 120 && std::fmod(g.time + d * 0.01f, 0.45f) < dt)
+        g.residues.push_back({sig.pos, 0.5f});
+    }
   }
   // Ambient life drifts slowly through open air
   for (Game::Echo& e : g.echoes) {
