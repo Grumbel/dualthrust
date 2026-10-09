@@ -236,7 +236,7 @@ void cargo_system(Game& g, float dt) {
     if (!c.picked || c.rest_time < 1.f) return;
     const float bottom = t.pos.y + c.def->half_h;
     for (const LandingPad& p : g.cave.pads)
-      if (std::abs(bottom - p.y) < 12.f && t.pos.x >= p.x0 && t.pos.x <= p.x1) {
+      if (p.active && std::abs(bottom - p.y) < 12.f && t.pos.x >= p.x0 && t.pos.x <= p.x1) {
         c.picked = false;
         stat_add(g, &Stats::cargo_delivered, 1);
         g.score += tune::SCORE_CARGO;
@@ -250,7 +250,7 @@ void cargo_system(Game& g, float dt) {
 // Does the lowest contact lie on a landing pad?
 bool touching_pad(const Cave& cave, Vec2 pt) {
   for (const LandingPad& p : cave.pads)
-    if (std::abs(pt.y - p.y) < Cave::CELL && pt.x >= p.x0 - 4.f && pt.x <= p.x1 + 4.f)
+    if (p.active && std::abs(pt.y - p.y) < Cave::CELL && pt.x >= p.x0 - 4.f && pt.x <= p.x1 + 4.f)
       return true;
   return false;
 }
@@ -318,6 +318,14 @@ void ground_system(Game& g, float dt) {
           stat_add(g, &Stats::pad_landings, 1);
           g.score += tune::SCORE_PAD_LANDING;
           notice(g, "+100 PAD");
+          for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i) {
+            const LandingPad& p = g.cave.pads[static_cast<size_t>(i)];
+            if (p.active && std::abs(f.contact_pt.y - p.y) < Cave::CELL &&
+                f.contact_pt.x >= p.x0 - 4.f && f.contact_pt.x <= p.x1 + 4.f) {
+              g.last_pad = i;
+              break;
+            }
+          }
         }
         std::printf("LANDED%s\n", pad ? " (pad)" : "");
       }
@@ -548,16 +556,23 @@ void respawn_ship(Game& g, float wx) {
     return false;
   };
 
-  // Prefer the pad nearest wx, then any pad, then any open spot near wx
+  // Prefer last visited pad, then active pad nearest wx, then any active pad, then open air near wx
   bool ok = false;
-  int best = -1;
-  float best_d = 1e12f;
-  for (int i = 0; i < static_cast<int>(cave.pads.size()); ++i) {
-    float dist = std::abs(wx - 0.5f * (cave.pads[i].x0 + cave.pads[i].x1));
-    if (dist < best_d) { best_d = dist; best = i; }
+  if (g.last_pad >= 0 && g.last_pad < static_cast<int>(cave.pads.size()) &&
+      cave.pads[static_cast<size_t>(g.last_pad)].active)
+    ok = try_pad(cave.pads[static_cast<size_t>(g.last_pad)]);
+  if (!ok) {
+    int best = -1;
+    float best_d = 1e12f;
+    for (int i = 0; i < static_cast<int>(cave.pads.size()); ++i) {
+      if (!cave.pads[static_cast<size_t>(i)].active) continue;
+      float dist = std::abs(wx - 0.5f * (cave.pads[static_cast<size_t>(i)].x0 + cave.pads[static_cast<size_t>(i)].x1));
+      if (dist < best_d) { best_d = dist; best = i; }
+    }
+    if (best >= 0) ok = try_pad(cave.pads[static_cast<size_t>(best)]);
   }
-  if (best >= 0) ok = try_pad(cave.pads[best]);
-  for (size_t i = 0; i < cave.pads.size() && !ok; ++i) ok = try_pad(cave.pads[i]);
+  for (size_t i = 0; i < cave.pads.size() && !ok; ++i)
+    if (cave.pads[i].active) ok = try_pad(cave.pads[i]);
   for (float y = Cave::WORLD_H * 0.2f; y < Cave::WORLD_H * 0.8f && !ok; y += 16.f)
     if (cave.is_open_box(wx, y + box_cy, need_w, box_hh)) { pos = {wx, y}; ok = true; }
   if (!ok) pos = {wx, Cave::WORLD_H * 0.4f};
@@ -611,6 +626,45 @@ void reset_fog(Game& g) {
   g.revealed.assign(static_cast<size_t>(Cave::GW) * Cave::GH, 0);
   g.reveal_dirty = true;
   g.sonar = {};
+  g.last_pad = -1;
+  for (LandingPad& p : g.cave.pads) p.active = false;
+}
+
+// Bring the pad nearest wx online and remember it as home (used at cave start).
+void activate_home_pad(Game& g, float wx) {
+  if (g.cave.pads.empty()) return;
+  int best = 0;
+  float best_d = 1e12f;
+  for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i) {
+    const LandingPad& p = g.cave.pads[static_cast<size_t>(i)];
+    const float d = std::abs(wx - 0.5f * (p.x0 + p.x1));
+    if (d < best_d) { best_d = d; best = i; }
+  }
+  LandingPad& home = g.cave.pads[static_cast<size_t>(best)];
+  home.active = true;
+  g.last_pad = best;
+  // Paint a small revealed blob so the home pad shows on the chart
+  const int gy = static_cast<int>(home.y / Cave::CELL);
+  for (float x = home.x0 - Cave::CELL; x <= home.x1 + Cave::CELL; x += Cave::CELL * 0.5f) {
+    const int gx = static_cast<int>(x / Cave::CELL);
+    for (int dy = -2; dy <= 1; ++dy) {
+      if (!Cave::in_grid(gx, gy + dy)) continue;
+      g.revealed[static_cast<size_t>((gy + dy) * Cave::GW + gx)] = 1;
+    }
+  }
+  g.reveal_dirty = true;
+}
+
+float home_pad_x(const Game& g) {
+  if (g.last_pad >= 0 && g.last_pad < static_cast<int>(g.cave.pads.size())) {
+    const LandingPad& p = g.cave.pads[static_cast<size_t>(g.last_pad)];
+    return 0.5f * (p.x0 + p.x1);
+  }
+  for (const LandingPad& p : g.cave.pads)
+    if (p.active) return 0.5f * (p.x0 + p.x1);
+  if (!g.cave.pads.empty())
+    return 0.5f * (g.cave.pads[0].x0 + g.cave.pads[0].x1);
+  return Cave::WORLD_W * 0.5f;
 }
 
 void fire_sonar(Game& g) {
@@ -626,6 +680,34 @@ void fire_sonar(Game& g) {
   g.sonar = SonarPing{true, p, 0.f, 0.f, 960.f, 780.f, 1.f};
   g.sonar_cool = tune::SONAR_COOLDOWN;
   g.events.push_back({SimEventKind::SonarPing, p, {}, 200.f});
+}
+
+
+// Activate any pad whose deck cells the sonar has revealed.
+void discover_pads(Game& g) {
+  for (LandingPad& p : g.cave.pads) {
+    if (p.active) continue;
+    const int gy = static_cast<int>(p.y / Cave::CELL);
+    for (float x = p.x0; x <= p.x1; x += Cave::CELL * 0.5f) {
+      const int gx = static_cast<int>(x / Cave::CELL);
+      if (!Cave::in_grid(gx, gy)) continue;
+      const size_t i = static_cast<size_t>(gy * Cave::GW + gx);
+      if (i < g.revealed.size() && g.revealed[i]) {
+        p.active = true;
+        notice(g, "PAD ONLINE");
+        break;
+      }
+      // also accept the cell just above the deck (open air the ping paints)
+      if (Cave::in_grid(gx, gy - 1)) {
+        const size_t j = static_cast<size_t>((gy - 1) * Cave::GW + gx);
+        if (j < g.revealed.size() && g.revealed[j]) {
+          p.active = true;
+          notice(g, "PAD ONLINE");
+          break;
+        }
+      }
+    }
+  }
 }
 
 void update_sonar(Game& g, float dt) {
@@ -720,7 +802,10 @@ void update_sonar(Game& g, float dt) {
     for (int oy = -1; oy <= 1; ++oy)
       for (int ox = -1; ox <= 1; ++ox) mark(gx + ox, gy + oy);
   });
-  if (painted) g.reveal_dirty = true;
+  if (painted) {
+    g.reveal_dirty = true;
+    discover_pads(g);
+  }
 }
 
 void step_sim(Game& g, float dt) {

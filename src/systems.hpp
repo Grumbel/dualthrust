@@ -8,7 +8,9 @@
 void create_ship(Game& g, int def_index);
 void set_ship_def(Game& g, int def_index);
 int ship_def_index(const Game& g);
-void respawn_ship(Game& g, float wx);  // onto the pad nearest wx, clears particles
+void respawn_ship(Game& g, float wx);  // last visited / active pad near wx, clears particles
+void activate_home_pad(Game& g, float wx);  // first pad online at cave start
+float home_pad_x(const Game& g);            // centre x of last visited (or first active) pad
 void place_ship(Game& g, Vec2 pos, float angle);  // debugging: at rest anywhere (px, radians)
 void snap_camera(Game& g);
 // Zoom: set the level (clamped); update_view animates the camera's viewport toward it and keeps it at the
@@ -24,7 +26,7 @@ void set_winch(Game& g, bool out);  // deploy the cable fully (true) or retract 
 void toggle_grip(Game& g);         // hook takes the crate in reach, or lets go of it  // retract / extend the landing legs
 inline Transform& ship_transform(Game& g) { return g.ecs.get<Transform>(g.ship); }
 
-// Fog of war / sonar: the minimap stays black until a ping paints solid cells and cargo.
+// Fog of war / sonar: the minimap stays noise until a ping paints open space and rock faces.
 void reset_fog(Game& g);                 // clear revealed, stop any ping (call after cave.generate)
 void fire_sonar(Game& g);                // start a ring from the ship; ignored if one is already running
 void update_sonar(Game& g, float dt);    // expand the ring and paint cells (sim seconds)

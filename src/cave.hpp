@@ -9,6 +9,7 @@
 
 struct LandingPad {
   float x0, x1, y;  // world surface y of the pad
+  bool active = false;  // true once a sonar ping has painted the deck
 };
 
 struct CargoSpot {

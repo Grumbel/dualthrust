@@ -296,6 +296,7 @@ int main(int argc, char** argv) {
                                 : auto_ui_scale_for_height(display_h);
   update_view(game, 0.f, aspect(), true);
   auto new_game_at = [&](float wx) {
+    activate_home_pad(game, wx);
     respawn_ship(game, wx);
     snap_camera(game);
   };
@@ -370,8 +371,9 @@ int main(int argc, char** argv) {
   // Respawn on a random pad after a crash — never regenerates the cave
   auto respawn_after_crash = [&] {
     if (game.ecs.get<Flight>(game.ship).state != FlightState::Crashed) return;
-    int pi = game.rng.range_i(0, static_cast<int>(game.cave.pads.size()) - 1);
-    new_game_at(0.5f * (game.cave.pads[pi].x0 + game.cave.pads[pi].x1));
+    // Stay in the same cave; return to the last visited (or home) pad
+    respawn_ship(game, home_pad_x(game));
+    snap_camera(game);
   };
   auto show_toast = [&](const char* text) {
     std::snprintf(ui.toast, sizeof ui.toast, "%s", text);
@@ -388,19 +390,8 @@ int main(int argc, char** argv) {
   };
   auto cycle_ship = [&](int delta) {
     set_ship_def(game, ship_def_index(game) + delta);
-    // New hull lands on the nearest pad (switching mid-flight is a teleport, not an in-place morph)
-    float wx = ship_transform(game).pos.x;
-    if (!game.cave.pads.empty()) {
-      float best = game.cave.pads[0].x0;
-      float best_d = 1e30f;
-      for (const LandingPad& p : game.cave.pads) {
-        const float cx = 0.5f * (p.x0 + p.x1);
-        const float d = std::abs(cx - wx);
-        if (d < best_d) { best_d = d; best = cx; }
-      }
-      wx = best;
-    }
-    respawn_ship(game, wx);
+    // New hull lands on the last visited pad (switching mid-flight is a teleport)
+    respawn_ship(game, home_pad_x(game));
     snap_camera(game);
     char buf[40];
     std::snprintf(buf, sizeof buf, "SHIP %s", game.ecs.get<Hull>(game.ship).def->name);

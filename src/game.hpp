@@ -122,6 +122,7 @@ struct Game {
   float time = 0.f;  // accumulated sim time
   int score = 0;             // this session (resets on quit; not permanent stats)
   float sonar_cool = 0.f;    // seconds until the next ping is allowed
+  int last_pad = -1;         // index of last pad the ship settled on (-1 = none yet)
 
   // Fog of war: one byte per cave cell, 0 = unknown, non-zero = revealed by sonar.
   // Size GW*GH after the first cave generate; reset when the cave regenerates.

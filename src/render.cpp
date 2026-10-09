@@ -397,6 +397,7 @@ void Gfx::draw_pads(const Game& g, double t) const {
   const auto& pads = g.cave.pads;
   for (int pi = 0; pi < static_cast<int>(pads.size()); ++pi) {
     const LandingPad& p = pads[pi];
+    if (!p.active) continue;  // sonar must light the pad before it appears in-world
     const int x0 = sx(g.cam, p.x0);
     const int x1 = x0 + Z(p.x1 - p.x0);
     const int y = sy(p.y);
@@ -879,6 +880,7 @@ void Gfx::draw_minimap(Game& g, double t) {
     return g.revealed[static_cast<size_t>(gy * Cave::GW + gx)] != 0;
   };
   for (const LandingPad& p : g.cave.pads) {
+    if (!p.active) continue;
     const float cx = 0.5f * (p.x0 + p.x1);
     if (is_rev(cx, p.y)) dot(cx, p.y, d_pad, pal::WARN);
   }

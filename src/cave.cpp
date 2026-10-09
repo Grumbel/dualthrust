@@ -259,7 +259,7 @@ bool Cave::on_pad(float wx, float wy) const {
 // Pad whose span contains wx and whose surface is 0..max_dist below wy
 const LandingPad* Cave::pad_below(float wx, float wy, float max_dist) const {
   for (const auto& p : pads)
-    if (wx >= p.x0 && wx <= p.x1 && p.y >= wy && p.y - wy <= max_dist) return &p;
+    if (p.active && wx >= p.x0 && wx <= p.x1 && p.y >= wy && p.y - wy <= max_dist) return &p;
   return nullptr;
 }
 
