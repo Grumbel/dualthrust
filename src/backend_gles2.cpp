@@ -148,9 +148,15 @@ class Gles2Backend : public Backend {
 
   ~Gles2Backend() override {
     if (white_) destroy_texture(white_);
-    if (vbo_) gl_.DeleteBuffers(1, &vbo_);
-    if (prog_) gl_.DeleteProgram(prog_);
-    if (ctx_) SDL_GL_DeleteContext(ctx_);
+    white_ = nullptr;
+    if (vbo_) { gl_.DeleteBuffers(1, &vbo_); vbo_ = 0; }
+    if (prog_) { gl_.DeleteProgram(prog_); prog_ = 0; }
+    // Drop the GL context while the window still exists (caller destroys the window after).
+    if (ctx_) {
+      SDL_GL_DeleteContext(ctx_);
+      ctx_ = nullptr;
+    }
+    win_ = nullptr;
   }
 
   bool init() {

@@ -1087,10 +1087,25 @@ int main(int argc, char** argv) {
   persist_config();
   persist_world();
   flush_stats();
-  if (pad) SDL_GameControllerClose(pad);
+
+  // Tear down in an order that avoids X11 BadWindow on X_TranslateCoords at exit:
+  // release input devices and audio first, drop the GL context while the window still
+  // exists, then hide/pump/destroy the window before SDL_Quit.
+  if (pad) {
+    SDL_GameControllerClose(pad);
+    pad = nullptr;
+  }
   audio.shutdown();
-  gfx.shutdown();
-  SDL_DestroyWindow(window);
+  gfx.shutdown();  // deletes GL context / SDL_Renderer; window must still be alive here
+  if (window) {
+    SDL_SetWindowGrab(window, SDL_FALSE);
+    SDL_HideWindow(window);
+    SDL_Event dump;
+    while (SDL_PollEvent(&dump)) {
+    }
+    SDL_DestroyWindow(window);
+    window = nullptr;
+  }
   SDL_Quit();
   return 0;
 }
