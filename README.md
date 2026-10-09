@@ -44,13 +44,14 @@ the cable itself.
 on pads), hard hits, crashes, caves visited, crates picked up and delivered. They are kept forever in
 `$XDG_STATE_HOME/dualthrust/stats` (default `~/.local/state/dualthrust/stats`).
 
-The cave is a bounded 7680 × 5760 px (4:3) map with rock on all sides. The minimap at the bottom is a zoomed-in chart of the stretch around you (one pixel per 16 world px; unexplored cells show radio static
-px) that scrolls with the ship and stops at the map edges. It shows the landing pads (yellow), the crates (cyan), your
-ship (blinking) and a box for what the main view shows.
+The cave is a bounded 7680 × 5760 px (4:3) map with rock on all sides. The minimap at the bottom is a zoomed-in chart
+of the stretch around you (one pixel per 16 world px; unexplored cells are green radio static) that scrolls with the
+ship and stops at the map edges. It shows revealed landing pads (yellow), crates (cyan), your ship (blinking) and a
+box for what the main view shows.
 
 ### Ships
 
-Eighteen presets, switched in Options, with **S**, or with **Select**. Heavier and wider ships are
+Eighteen presets, switched in Options or with **S** (lands on the nearest pad). Heavier and wider ships are
 steadier but slower to turn.
 
 | Preset | Notes |
