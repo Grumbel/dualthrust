@@ -244,15 +244,27 @@ void cargo_system(Game& g, float dt) {
     c.rest_time = (speed < 8.f && e != held) ? c.rest_time + dt : 0.f;
     if (!c.picked || c.rest_time < 1.f) return;
     const float bottom = t.pos.y + c.def->half_h;
-    for (const LandingPad& p : g.cave.pads)
-      if (p.active && std::abs(bottom - p.y) < 12.f && t.pos.x >= p.x0 && t.pos.x <= p.x1) {
-        c.picked = false;
-        stat_add(g, &Stats::cargo_delivered, 1);
-        g.score += tune::SCORE_CARGO;
+    for (int pi = 0; pi < static_cast<int>(g.cave.pads.size()); ++pi) {
+      const LandingPad& p = g.cave.pads[static_cast<size_t>(pi)];
+      if (!p.active || std::abs(bottom - p.y) >= 12.f || t.pos.x < p.x0 || t.pos.x > p.x1) continue;
+      c.picked = false;
+      stat_add(g, &Stats::cargo_delivered, 1);
+      g.score += tune::SCORE_CARGO;
+      if (c.dest_pad == pi) {
+        g.score += tune::SCORE_DEST_BONUS;
+        notice(g, "+400 DEST");
+      } else {
         notice(g, "+250 CARGO");
-        beep(g, SimEventKind::Delivered);
-        return;
       }
+      beep(g, SimEventKind::Delivered);
+      // Next trip: pick a different active pad if possible
+      c.dest_pad = -1;
+      for (int k = 0; k < static_cast<int>(g.cave.pads.size()); ++k) {
+        const int j = (pi + 1 + k) % static_cast<int>(g.cave.pads.size());
+        if (g.cave.pads[static_cast<size_t>(j)].active && j != pi) { c.dest_pad = j; break; }
+      }
+      return;
+    }
   });
 }
 
@@ -393,7 +405,10 @@ void ensure_cargo(Game& g) {
     const Vec2 pos{s.x, s.floor_y - def.half_h - 1.f};
     Entity e = g.ecs.create();
     g.ecs.add<Transform>(e, {pos, 0.f});
-    g.ecs.add<Cargo>(e, {g.phys.create_cargo(pos, 0.f, def), &def});
+    int dest = -1;
+    if (!g.cave.pads.empty())
+      dest = g.rng.range_i(0, static_cast<int>(g.cave.pads.size()) - 1);
+    g.ecs.add<Cargo>(e, {g.phys.create_cargo(pos, 0.f, def), &def, false, 0.f, dest});
   }
 }
 
@@ -645,10 +660,24 @@ void reset_fog(Game& g) {
   g.cells_explored = 0;
   g.signals.clear();
   g.residues.clear();
+  g.echoes.clear();
   for (LandingPad& p : g.cave.pads) p.active = false;
 }
 
 // Scatter a few deep-cave signals in open air for the pilot to find with sonar.
+void place_echoes(Game& g) {
+  g.echoes.clear();
+  constexpr int WANT = 14;
+  for (int tries = 0; tries < 500 && static_cast<int>(g.echoes.size()) < WANT; ++tries) {
+    const float x = g.rng.range(Cave::CELL * 10.f, Cave::WORLD_W - Cave::CELL * 10.f);
+    const float y = g.rng.range(Cave::CELL * 10.f, Cave::WORLD_H - Cave::CELL * 10.f);
+    if (g.cave.is_solid_world(x, y)) continue;
+    const float ang = g.rng.range(0.f, 6.2831853f);
+    const float spd = g.rng.range(12.f, 28.f);
+    g.echoes.push_back({Vec2{x, y}, Vec2{std::cos(ang) * spd, std::sin(ang) * spd}, g.rng.range(0.f, 6.f), 0.f});
+  }
+}
+
 void place_signals(Game& g) {
   g.signals.clear();
   constexpr int WANT = 8;
@@ -691,6 +720,7 @@ void activate_home_pad(Game& g, float wx) {
   }
   g.reveal_dirty = true;
   if (g.signals.empty()) place_signals(g);
+  if (g.echoes.empty()) place_echoes(g);
 }
 
 float home_pad_x(const Game& g) {
@@ -905,6 +935,19 @@ void update_sonar(Game& g, float dt) {
     for (int oy = -1; oy <= 1; ++oy)
       for (int ox = -1; ox <= 1; ++ox) mark(gx + ox, gy + oy, str);
   });
+  // Ambient echoes: answer the ping once, then stay quiet a while
+  for (Game::Echo& echo : g.echoes) {
+    if (echo.cool > 0.f) continue;
+    const float dx = echo.pos.x - s.origin.x, dy = echo.pos.y - s.origin.y;
+    const float d = std::sqrt(dx * dx + dy * dy);
+    if (d < r0 || d >= r1) continue;
+    echo.cool = 8.f;
+    g.score += tune::SCORE_ECHO;
+    if (g.residues.size() < 120)
+      g.residues.push_back({echo.pos, tune::RESIDUE_TTL * 1.2f});
+    // Soft chirp via existing grab/release-ish - use NoTarget-scale event? Delivered is heavy.
+    // Tiny score is enough; occasional notice would spam — skip notice.
+  }
   // Deep-cave signals: light up on first contact
   for (Game::Signal& sig : g.signals) {
     if (sig.found) continue;
@@ -944,6 +987,28 @@ void step_sim(Game& g, float dt) {
       g.residues.pop_back();
     } else
       ++i;
+  }
+  // Ambient life drifts slowly through open air
+  for (Game::Echo& e : g.echoes) {
+    e.cool = std::max(0.f, e.cool - dt);
+    e.phase += dt;
+    e.pos.x += e.vel.x * dt;
+    e.pos.y += e.vel.y * dt;
+    // Bounce off rock / world bounds
+    if (e.pos.x < Cave::CELL * 4.f || e.pos.x > Cave::WORLD_W - Cave::CELL * 4.f) e.vel.x = -e.vel.x;
+    if (e.pos.y < Cave::CELL * 4.f || e.pos.y > Cave::WORLD_H - Cave::CELL * 4.f) e.vel.y = -e.vel.y;
+    if (g.cave.is_solid_world(e.pos.x, e.pos.y)) {
+      e.vel.x = -e.vel.x;
+      e.vel.y = -e.vel.y;
+      e.pos.x += e.vel.x * dt * 2.f;
+      e.pos.y += e.vel.y * dt * 2.f;
+    }
+    // Gentle wander
+    if (std::fmod(e.phase, 3.f) < dt) {
+      const float ang = g.rng.range(0.f, 6.2831853f);
+      const float spd = g.rng.range(12.f, 28.f);
+      e.vel = {std::cos(ang) * spd, std::sin(ang) * spd};
+    }
   }
   // Ground is needed around the ship and around every crate that is moving
   static std::vector<Vec2> anchors;

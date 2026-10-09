@@ -765,7 +765,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
 
   const int bars = channel_count(d);
   const int bar_h = L(10), bar_w = L(120), bar_step = L(18);
-  fill(m8, m8, L(210), bar_step * (bars + 1) + L(4) + lh * 9 + L(28), with_alpha(pal::MENU, 120));
+  fill(m8, m8, L(210), bar_step * (bars + 1) + L(4) + lh * 10 + L(28), with_alpha(pal::MENU, 120));
   int y = m16;
   for (int i = 0; i < bars; ++i) {
     fill(m20, y, bar_w, bar_h, pal::DIM);
@@ -821,12 +821,25 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   y += lh;
   const Rope& rp = g.ecs.get<Rope>(g.ship);
   action_bind_label(binds, Action::Grip, !pad, bname, sizeof bname);
-  if (rp.held != NULL_ENTITY)
-    std::snprintf(legbuf, sizeof legbuf, "LOAD %.1f  %s", g.ecs.get<Cargo>(rp.held).def->mass, bname);
-  else
+  if (rp.held != NULL_ENTITY) {
+    const Cargo& held = g.ecs.get<Cargo>(rp.held);
+    std::snprintf(legbuf, sizeof legbuf, "LOAD %.1f  %s", held.def->mass, bname);
+    text(m20, y, legbuf, pal::CARGO);
+    y += lh;
+    if (held.dest_pad >= 0 && held.dest_pad < static_cast<int>(g.cave.pads.size())) {
+      const LandingPad& dp = g.cave.pads[static_cast<size_t>(held.dest_pad)];
+      const float cx = 0.5f * (dp.x0 + dp.x1);
+      const float dx = cx - tf.pos.x, dy = dp.y - tf.pos.y;
+      const float dist = std::sqrt(dx * dx + dy * dy);
+      std::snprintf(legbuf, sizeof legbuf, "DEST %s %.0f", dp.active ? "PAD" : "???", dist / PPM);
+      text(m20, y, legbuf, dp.active ? pal::WARN : pal::DIM);
+      y += lh;
+    }
+  } else {
     std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", bname);
-  text(m20, y, legbuf, rp.held != NULL_ENTITY ? pal::CARGO : pal::MID);
-  y += lh;
+    text(m20, y, legbuf, pal::MID);
+    y += lh;
+  }
   {
     char pb[24], qb[24];
     action_bind_label(binds, Action::PrevPad, !pad, pb, sizeof pb);
@@ -959,14 +972,25 @@ void Gfx::draw_minimap(Game& g, double t) {
     if (!Cave::in_grid(gx, gy) || g.revealed.empty()) return true;
     return g.revealed[static_cast<size_t>(gy * Cave::GW + gx)] >= 60;
   };
-  for (const LandingPad& p : g.cave.pads) {
+  int dest_pi = -1;
+  if (g.ecs.get<Rope>(g.ship).held != NULL_ENTITY)
+    dest_pi = g.ecs.get<Cargo>(g.ecs.get<Rope>(g.ship).held).dest_pad;
+  for (int pi = 0; pi < static_cast<int>(g.cave.pads.size()); ++pi) {
+    const LandingPad& p = g.cave.pads[static_cast<size_t>(pi)];
     if (!p.active) continue;
     const float cx = 0.5f * (p.x0 + p.x1);
-    if (is_rev(cx, p.y)) dot(cx, p.y, d_pad, pal::WARN);
+    if (!is_rev(cx, p.y)) continue;
+    const bool is_dest = (pi == dest_pi);
+    dot(cx, p.y, is_dest ? d_pad + L(2) : d_pad, is_dest ? pal::HOT : pal::WARN);
   }
   for (const Game::Signal& sig : g.signals) {
     if (!sig.found) continue;
     dot(sig.pos.x, sig.pos.y, L(4), pal::CARGO);
+  }
+  // Echoes that just answered a ping flash on the chart
+  for (const Game::Echo& e : g.echoes) {
+    if (e.cool < 6.5f || e.cool > 8.f) continue;
+    dot(e.pos.x, e.pos.y, L(3), with_alpha(pal::BRIGHT, 200));
   }
   g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) {
     if (is_rev(ct.pos.x, ct.pos.y)) dot(ct.pos.x, ct.pos.y, d_cargo, pal::CARGO);
@@ -1151,6 +1175,14 @@ void Gfx::draw_residues(const Game& g) const {
     const int s = std::max(2, Z(3));
     const int x = sx(g.cam, r.pos.x) - s / 2, y = sy(r.pos.y) - s / 2;
     fill(x, y, s, s, with_alpha(pal::CARGO, static_cast<uint8_t>(30 + 140 * u)));
+  }
+  // Ambient life: brief bright mote when it answers a ping
+  for (const Game::Echo& e : g.echoes) {
+    if (e.cool < 6.f || e.cool > 8.f) continue;
+    const float u = (e.cool - 6.f) / 2.f;
+    const int s = std::max(2, Z(4));
+    fill(sx(g.cam, e.pos.x) - s / 2, sy(e.pos.y) - s / 2, s, s,
+         with_alpha(pal::BRIGHT, static_cast<uint8_t>(80 + 140 * u)));
   }
 }
 

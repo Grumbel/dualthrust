@@ -57,6 +57,7 @@ struct Cargo {
   const CargoDef* def = nullptr;
   bool picked = false;      // lifted since it last stood on a pad: counts as delivered when it rests on one
   float rest_time = 0.f;    // how long it has been still
+  int dest_pad = -1;        // preferred active pad index for a delivery bonus (-1 = any)
 };
 
 // Short-lived visual: fades `from`→`to` over `ttl`, optionally affected by gravity and drag.
@@ -145,4 +146,13 @@ struct Game {
     float life = 0.f;
   };
   std::vector<Residue> residues;
+
+  // Ambient cave life: slow wanderers that answer a sonar ping (exploration flavour)
+  struct Echo {
+    Vec2 pos;
+    Vec2 vel;
+    float phase = 0.f;
+    float cool = 0.f;  // after answering a ping, stay quiet briefly
+  };
+  std::vector<Echo> echoes;
 };
