@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-029.1-engine-damage-audio-particles-9a093cd` → tip `bd3bd6e`
+- Bundle line: `dualthrust-029.1-engine-damage-audio-particles-9a093cd` → tip `bb568e1`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
