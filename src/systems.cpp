@@ -636,17 +636,15 @@ void update_sonar(Game& g, float dt) {
   if (expanding) {
     s.radius = std::min(s.radius + s.speed * dt, s.max_radius);
   } else {
-    // Soft stop: keep drifting outward slowly while the ring fades away
-    s.radius += s.speed * 0.35f * s.fade * dt;
-    s.fade -= dt / 0.55f;
+    // Hold radius; dissolve opacity only (no slowdown / drift)
+    s.fade -= dt / 0.5f;
     if (s.fade <= 0.f) {
       s.active = false;
       return;
     }
+    return;  // nothing left to paint
   }
-  // Only paint while the wavefront is still in the active range (not during the fade-out drift)
-  if (!expanding && s.prev_radius >= s.max_radius - 1e-3f) return;
-  const float r0 = s.prev_radius, r1 = std::min(s.radius, s.max_radius);
+  const float r0 = s.prev_radius, r1 = s.radius;
   // Bounding box of the annulus in cell coordinates
   const float pad = Cave::CELL * 2.f;
   const int gx0 = std::max(0, static_cast<int>((s.origin.x - r1 - pad) / Cave::CELL));

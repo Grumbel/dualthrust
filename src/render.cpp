@@ -171,36 +171,55 @@ uint32_t fog_hash(uint32_t x) {
 
 void Gfx::build_minimap(const Cave& cave, const std::vector<uint8_t>& revealed) {
   be_->destroy_texture(minimap_);
-  std::vector<uint32_t> px(static_cast<size_t>(Cave::GW) * Cave::GH);
-  const bool has_fog = revealed.size() == static_cast<size_t>(Cave::GW) * Cave::GH;
-  for (int i = 0; i < Cave::GW * Cave::GH; ++i) {
+  const int ncells = Cave::GW * Cave::GH;
+  std::vector<uint32_t> px(static_cast<size_t>(ncells));
+  const bool has_fog = revealed.size() == static_cast<size_t>(ncells);
+  auto solid_at = [&](int gx, int gy) {
+    return Cave::in_grid(gx, gy) && cave.solid[static_cast<size_t>(gy * Cave::GW + gx)] != 0;
+  };
+  auto rev_at = [&](int gx, int gy) {
+    if (!has_fog) return true;
+    if (!Cave::in_grid(gx, gy)) return false;
+    return revealed[static_cast<size_t>(gy * Cave::GW + gx)] != 0;
+  };
+  for (int i = 0; i < ncells; ++i) {
     if (has_fog && !revealed[static_cast<size_t>(i)]) {
-      // Unexplored: green-tinted radio noise (not flat black) so the chart reads as "unknown"
       const int gx = i % Cave::GW, gy = i / Cave::GW;
       const uint32_t h = fog_hash(static_cast<uint32_t>(gx * 73856093u) ^ static_cast<uint32_t>(gy * 19349663u));
       const uint8_t n = static_cast<uint8_t>(h & 255u);
       const uint8_t n2 = static_cast<uint8_t>((h >> 8) & 255u);
-      // Dense static with occasional brighter flecks
       const uint8_t v = static_cast<uint8_t>(18 + (n % 50) + ((n2 & 7) == 0 ? 40 : 0));
       px[static_cast<size_t>(i)] = pack({static_cast<uint8_t>(v / 3), v, static_cast<uint8_t>(v / 2), 220});
       continue;
     }
-    // Explored open air is pure black; rock faces are bright so edges read clearly on the chart
     if (cave.solid[static_cast<size_t>(i)]) {
-      const int gx = i % Cave::GW, gy = i / Cave::GW;
-      // Surface (touches open) is brightest; one cell deeper is a dimmer shell
+      // Core rock fill (visible so mass reads, not only a 1px edge)
+      px[static_cast<size_t>(i)] = pack({20, 90, 40, 255});
+    } else {
+      px[static_cast<size_t>(i)] = pack({0, 0, 0, 255});
+    }
+  }
+  // Second pass: thick high-contrast edge — surface solid + open neighbour, 2 cells deep
+  const uint32_t edge_hi = pack({160, 255, 180, 255});   // BRIGHT face
+  const uint32_t edge_md = pack({80, 200, 110, 255});    // outer rim on the open side
+  for (int gy = 0; gy < Cave::GH; ++gy) {
+    for (int gx = 0; gx < Cave::GW; ++gx) {
+      if (!rev_at(gx, gy)) continue;
+      if (!solid_at(gx, gy)) continue;
       bool surface = false;
       for (int oy = -1; oy <= 1 && !surface; ++oy)
         for (int ox = -1; ox <= 1 && !surface; ++ox)
-          if ((ox || oy) && Cave::in_grid(gx + ox, gy + oy) &&
-              !cave.solid[static_cast<size_t>((gy + oy) * Cave::GW + (gx + ox))])
-            surface = true;
-      if (surface)
-        px[static_cast<size_t>(i)] = pack(pal::BRIGHT);  // hard edge
-      else
-        px[static_cast<size_t>(i)] = pack(with_alpha(pal::MID, 200));  // slight penetration
-    } else {
-      px[static_cast<size_t>(i)] = pack({0, 0, 0, 255});
+          if ((ox || oy) && !solid_at(gx + ox, gy + oy)) surface = true;
+      if (!surface) continue;
+      px[static_cast<size_t>(gy * Cave::GW + gx)] = edge_hi;
+      // rim into open air so the outline is ~2 px thick on the chart
+      for (int oy = -1; oy <= 1; ++oy)
+        for (int ox = -1; ox <= 1; ++ox) {
+          if (!ox && !oy) continue;
+          const int nx = gx + ox, ny = gy + oy;
+          if (!rev_at(nx, ny) || solid_at(nx, ny)) continue;
+          px[static_cast<size_t>(ny * Cave::GW + nx)] = edge_md;
+        }
     }
   }
   minimap_ = be_->create_texture(Cave::GW, Cave::GH, reinterpret_cast<const uint8_t*>(px.data()), false);
@@ -817,6 +836,33 @@ void Gfx::draw_minimap(Game& g, double t) {
   be_->copy_part(minimap_, SDL_Rect{ix, iy, MM_W, MM_H}, SDL_Rect{x, y, mm_w, mm_h}, {255, 255, 255, 255});
   outline(x - pad, y - pad, mm_w + 2 * pad, mm_h + 2 * pad, with_alpha(pal::MID, 140));
 
+  // Sonar ring on the chart (same window mapping as the dots)
+  if (g.sonar.active && g.sonar.radius > 1.f) {
+    const float fade = clampf(g.sonar.fade, 0.f, 1.f);
+    if (fade > 0.05f) {
+      const float sx_k = static_cast<float>(mm_w) / static_cast<float>(MM_W);
+      const float sy_k = static_cast<float>(mm_h) / static_cast<float>(MM_H);
+      const float ox_w = g.sonar.origin.x * MM_K - ix;
+      const float oy_w = g.sonar.origin.y * MM_K - iy;
+      const float rr = g.sonar.radius * MM_K;
+      const Rgba rc = with_alpha(pal::CARGO, static_cast<uint8_t>(60 + 160 * fade));
+      const int segs = 48;
+      int px0 = x + static_cast<int>((ox_w + rr) * sx_k);
+      int py0 = y + static_cast<int>(oy_w * sy_k);
+      for (int i = 1; i <= segs; ++i) {
+        const float a = (static_cast<float>(i) / segs) * 6.2831853f;
+        const int px1 = x + static_cast<int>((ox_w + rr * std::cos(a)) * sx_k);
+        const int py1 = y + static_cast<int>((oy_w + rr * std::sin(a)) * sy_k);
+        // clip roughly to panel
+        if (px0 >= x && py0 >= y && px0 < x + mm_w && py0 < y + mm_h &&
+            px1 >= x && py1 >= y && px1 < x + mm_w && py1 < y + mm_h)
+          line(px0, py0, px1, py1, rc);
+        px0 = px1;
+        py0 = py1;
+      }
+    }
+  }
+
   // Map coordinates (world px) -> panel px; dots that fall outside are skipped
   const float sx_k = static_cast<float>(mm_w) / static_cast<float>(MM_W);
   const float sy_k = static_cast<float>(mm_h) / static_cast<float>(MM_H);
@@ -1018,14 +1064,12 @@ void Gfx::draw_sonar(const Game& g) const {
   const Vec2 o = g.sonar.origin;
   const float r = g.sonar.radius;
   if (r < 1.f) return;
-  // Soft falloff with radius and the post-max fade so the ring dissolves instead of popping off
-  const float reach = clampf(1.f - r / std::max(g.sonar.max_radius * 1.15f, 1.f), 0.f, 1.f);
-  const float fade = clampf(g.sonar.fade, 0.f, 1.f) * (0.35f + 0.65f * reach);
+  // Opacity-only fade (radius holds at max); ring expands at constant speed until then
+  const float fade = clampf(g.sonar.fade, 0.f, 1.f);
   if (fade < 0.02f) return;
   const int segments = std::clamp(static_cast<int>(r / 8.f), 24, 96);
-  const Rgba col = with_alpha(pal::CARGO, static_cast<uint8_t>(30 + 200 * fade));
-  const Rgba dim = with_alpha(pal::CARGO, static_cast<uint8_t>(15 + 100 * fade));
-  const Rgba ghost = with_alpha(pal::BRIGHT, static_cast<uint8_t>(10 + 50 * fade));
+  const Rgba col = with_alpha(pal::CARGO, static_cast<uint8_t>(40 + 180 * fade));
+  const Rgba dim = with_alpha(pal::CARGO, static_cast<uint8_t>(20 + 90 * fade));
   SDL_Point prev{sx(g.cam, o.x + r), sy(o.y)};
   for (int i = 1; i <= segments; ++i) {
     const float a = (static_cast<float>(i) / segments) * 6.2831853f;
@@ -1036,13 +1080,6 @@ void Gfx::draw_sonar(const Game& g) const {
       const float a0 = a - 6.2831853f / segments;
       line(sx(g.cam, o.x + r2 * std::cos(a0)), sy(o.y + r2 * std::sin(a0)),
            sx(g.cam, o.x + r2 * std::cos(a)), sy(o.y + r2 * std::sin(a)), dim);
-    }
-    // Outer ghost ring a little past the wavefront while fading
-    if (fade < 0.95f && r > 16.f) {
-      const float r3 = r + 8.f * (1.f - fade);
-      const float a0 = a - 6.2831853f / segments;
-      line(sx(g.cam, o.x + r3 * std::cos(a0)), sy(o.y + r3 * std::sin(a0)),
-           sx(g.cam, o.x + r3 * std::cos(a)), sy(o.y + r3 * std::sin(a)), ghost);
     }
     prev = cur;
   }
