@@ -203,6 +203,57 @@ inline ThrusterPose thruster_pose(const ShipDef& d, int i) {
   return p;
 }
 
+// Derived flight numbers for the ship roster / hangar (stock defaults, no debug mul).
+// Force on a nozzle at full channel = mass · max_thrust · power / PPM (Box2D), so linear
+// accel is max_thrust·power/PPM and cancels mass. TWR compares that to tune::GRAVITY.
+struct ShipPerf {
+  float mass = 0.f;
+  float inertia = 0.f;
+  float max_thrust = 0.f;   // ship rating
+  float total_power = 0.f;  // sum of nozzle power fractions
+  float twr = 0.f;          // thrust-to-weight with both main channels (0+1) full, upright
+  float yaw_bias = 0.f;     // residual yaw accel (1/s²) when L=R=1 (0 = balanced)
+  float spin = 0.f;         // max |yaw| accel from pure L-vs-R differential
+  int nozzles = 0;
+};
+
+inline ShipPerf ship_perf(const ShipDef& d) {
+  ShipPerf s;
+  s.mass = d.mass;
+  s.inertia = d.inertia;
+  s.max_thrust = d.max_thrust;
+  s.nozzles = thruster_count(d);
+  // Angular accel α = τ / I with τ = Σ r × F and F = m · max_thrust · power / PPM · push
+  // → α = (m / I) · (max_thrust / PPM) · Σ power · (x·push_y − y·push_x)
+  const float k_lin = d.max_thrust / 32.f;  // PPM is 32; avoid depending on physics.hpp here
+  const float k_ang = (d.inertia > 1e-6f) ? (d.mass / d.inertia) * k_lin : 0.f;
+
+  float up_mains = 0.f;  // upward accel from channels 0 and 1 at full
+  float yaw_lr = 0.f;    // yaw with both mains full
+  float yaw_l = 0.f;     // yaw with only channel 0 full
+  float yaw_r = 0.f;     // yaw with only channel 1 full
+
+  for (int i = 0; i < s.nozzles; ++i) {
+    const ThrusterPose tp = thruster_pose(d, i);
+    s.total_power += tp.power;
+    // 2D cross (r × F_dir) · power
+    const float lever = tp.pos.x * tp.push.y - tp.pos.y * tp.push.x;
+    const float yaw_i = k_ang * tp.power * lever;
+    // Upward component of push when upright: −push.y (push.y is negative for nose-up thrust)
+    const float up = k_lin * tp.power * std::max(0.f, -tp.push.y);
+    if (tp.channel == 0 || tp.channel == 1) {
+      up_mains += up;
+      yaw_lr += yaw_i;
+      if (tp.channel == 0) yaw_l += yaw_i;
+      else yaw_r += yaw_i;
+    }
+  }
+  s.twr = (tune::GRAVITY > 1e-6f) ? (up_mains / tune::GRAVITY) : 0.f;
+  s.yaw_bias = yaw_lr;
+  s.spin = std::max(std::fabs(yaw_l), std::fabs(yaw_r));
+  return s;
+}
+
 // Hull outline, in ship-local px (+y = ground side when upright). Shared by drawing and physics.
 struct HullGeom {
   float hw, hh;                      // half extents of the drawn body

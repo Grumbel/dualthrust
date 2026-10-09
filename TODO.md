@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-035.1-lurch-unbalanced-ship-9a093cd` → tip `dd8f487`
+- Bundle line: `dualthrust-036.1-ship-perf-stats-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap

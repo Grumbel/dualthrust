@@ -1398,9 +1398,10 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
     const int pad_rows = static_cast<int>(visited.size());
     const int rows = 1 + pad_rows + item_count(HANGAR_ITEMS);  // ship + pads + close
     const int lh = cell_h() + L(8);
-    const int panel_w = std::min(w_ - L(16), L(520));
-    const int max_vis = std::max(8, (h_ - L(100)) / lh);
-    const int panel_h = L(70) + std::min(rows, max_vis) * lh + L(44);
+    const int panel_w = std::min(w_ - L(16), L(560));
+    const int max_vis = std::max(8, (h_ - L(120)) / lh);
+    const int ship_stat_h = L(12) + 4 * (cell_h() + L(3));
+    const int panel_h = L(70) + std::min(rows, max_vis) * lh + ship_stat_h + L(44);
     const int px = w_ / 2 - panel_w / 2, py = std::max(L(4), h_ / 2 - panel_h / 2);
     fill(0, 0, w_, h_, with_alpha(pal::BG, 120));
     fill(px, py, panel_w, panel_h, pal::MENU);
@@ -1447,6 +1448,26 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
         text(px + L(28), ly, HANGAR_ITEMS[i - 1 - pad_rows].label, col);
       }
     }
+    // Ship stats under the list
+    if (g.ecs.has<Hull>(g.ship)) {
+      const ShipPerf sp = ship_perf(*g.ecs.get<Hull>(g.ship).def);
+      int iy = py + panel_h - cell_h() - L(12) - 4 * (cell_h() + L(3)) - L(8);
+      fill(px + L(20), iy - L(6), panel_w - L(40), 1, with_alpha(pal::MID, 100));
+      char line[64];
+      auto srow = [&](const char* lab, const char* val, Rgba vc) {
+        text(px + L(28), iy, lab, pal::DIM);
+        text(px + panel_w - L(28) - text_width(val), iy, val, vc);
+        iy += cell_h() + L(3);
+      };
+      std::snprintf(line, sizeof line, "%.2f   I %.0f", sp.mass, sp.inertia);
+      srow("MASS", line, pal::BRIGHT);
+      std::snprintf(line, sizeof line, "%.0f  (pwr %.2f)", sp.max_thrust, sp.total_power);
+      srow("THRUST", line, pal::BRIGHT);
+      std::snprintf(line, sizeof line, "%.2f", sp.twr);
+      srow("TWR", line, sp.twr >= 1.f ? pal::PAD : pal::WARN);
+      std::snprintf(line, sizeof line, "%+.2f  spin %.2f", sp.yaw_bias, sp.spin);
+      srow("YAW BIAS", line, std::fabs(sp.yaw_bias) > 0.05f ? pal::HOT : pal::BRIGHT);
+    }
     const bool kbd = ui.device != InputDevice::Gamepad;
     text_centered(w_ / 2, py + panel_h - cell_h() - L(12),
                   kbd ? "LEFT/RIGHT SHIP  ENTER GO  ESC CLOSE" : "D-PAD SHIP  A GO  B CLOSE", pal::MID);
@@ -1456,8 +1477,11 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
   const MenuPageDef& page = page_def(ui.page);
   const int lh = cell_h() + L(9);
   const int stat_rows = ui.page == MenuPage::Stats ? STAT_FIELD_COUNT : 0;  // read-only lines above the items
-  const int panel_w = std::min(w_ - L(20), L(520));
-  const int panel_h = L(78) + (stat_rows + page.count) * lh + (stat_rows ? L(10) : 0) + L(44);
+  // Options: ship performance block under the list (mass, inertia, TWR, bias…)
+  const int ship_info_rows = (ui.page == MenuPage::Options) ? 5 : 0;
+  const int panel_w = std::min(w_ - L(20), L(560));
+  const int panel_h = L(78) + (stat_rows + page.count) * lh + (stat_rows ? L(10) : 0) +
+                      (ship_info_rows ? L(12) + ship_info_rows * (cell_h() + L(4)) : 0) + L(44);
   const int px = w_ / 2 - panel_w / 2, py = std::max(L(8), h_ / 2 - panel_h / 2);
   fill(0, 0, w_, h_, with_alpha(pal::BG, 120));
   fill(px, py, panel_w, panel_h, pal::MENU);
@@ -1498,6 +1522,32 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
         fill(rx - bars_w + c * (cell + gap), ly, cell, cell_h(), c < v ? col : with_alpha(pal::DIM, 255));
     }
   }
+
+  // Ship performance readout on Options (updates as the roster cycles)
+  if (ui.page == MenuPage::Options && g.ecs.has<Hull>(g.ship)) {
+    const ShipDef& def = *g.ecs.get<Hull>(g.ship).def;
+    const ShipPerf sp = ship_perf(def);
+    int iy = row_y + page.count * lh + L(10);
+    fill(px + L(24), iy - L(6), panel_w - L(48), 1, with_alpha(pal::MID, 100));
+    char line[64];
+    auto row = [&](const char* lab, const char* val, Rgba vc) {
+      text(px + L(36), iy, lab, pal::DIM);
+      text(px + panel_w - L(36) - text_width(val), iy, val, vc);
+      iy += cell_h() + L(4);
+    };
+    std::snprintf(line, sizeof line, "%.2f", sp.mass);
+    row("MASS", line, pal::BRIGHT);
+    std::snprintf(line, sizeof line, "%.0f", sp.inertia);
+    row("INERTIA", line, pal::BRIGHT);
+    std::snprintf(line, sizeof line, "%.0f  x%.2f", sp.max_thrust, sp.total_power);
+    row("THRUST", line, pal::BRIGHT);
+    std::snprintf(line, sizeof line, "%.2f", sp.twr);
+    row("TWR", line, sp.twr >= 1.f ? pal::PAD : pal::WARN);
+    // Bias: residual yaw with equal mains; Spin: peak differential yaw authority
+    std::snprintf(line, sizeof line, "%+.2f  spin %.2f", sp.yaw_bias, sp.spin);
+    row("YAW BIAS", line, std::fabs(sp.yaw_bias) > 0.05f ? pal::HOT : pal::BRIGHT);
+  }
+
   text_centered(w_ / 2, py + panel_h - cell_h() - L(14), menu_hint(ui, ui.page == MenuPage::Options), pal::MID);
 }
 
