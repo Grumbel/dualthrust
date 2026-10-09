@@ -1261,26 +1261,23 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
   auto on_panel = [&](int px, int py) {
     return px >= x && py >= y && px < x + mm_w && py < y + mm_h;
   };
-  // Pointer ▼: tip on the pad, tall/narrow, black outline for contrast on rock
-  auto tri_down = [&](int cx, int cy, int s, Rgba c) {
+  // Pointer ▼: tip on the pad; fill uses pulsed alpha for a gentle blink
+  auto tri_down = [&](int cx, int cy, int s, Rgba c, float pulse = 1.f) {
     if (!on_panel(cx, cy)) return;
-    const int h = s + s / 2;       // tall
-    const int w = std::max(3, s * 2 / 3);  // not too wide
+    const int h = s + s / 2;
+    const int w = std::max(2, s * 2 / 3);
     SDL_Point tip{cx, cy};
     SDL_Point bl{cx - w, cy - h};
     SDL_Point br{cx + w, cy - h};
-    // Fat black outline (draw expanded triangle first)
-    {
-      const int o = 2;
-      SDL_Point out[3] = {{cx, cy + o}, {cx - w - o, cy - h - o}, {cx + w + o, cy - h - o}};
-      be_->polygon(out, 3, Rgba{0, 0, 0, 255});
-    }
+    const int o = 2;
+    SDL_Point out[3] = {{cx, cy + o}, {cx - w - o, cy - h - o}, {cx + w + o, cy - h - o}};
+    be_->polygon(out, 3, Rgba{0, 0, 0, 255});
+    const uint8_t a = static_cast<uint8_t>(clampf(pulse, 0.35f, 1.f) * 255.f);
     SDL_Point pts[3] = {tip, bl, br};
-    be_->polygon(pts, 3, c);
-    // Inner edge highlight
-    line(tip.x, tip.y, bl.x, bl.y, pal::BRIGHT);
-    line(tip.x, tip.y, br.x, br.y, pal::BRIGHT);
-    line(bl.x, bl.y, br.x, br.y, with_alpha(pal::BRIGHT, 180));
+    be_->polygon(pts, 3, with_alpha(c, a));
+    line(tip.x, tip.y, bl.x, bl.y, with_alpha(pal::BRIGHT, a));
+    line(tip.x, tip.y, br.x, br.y, with_alpha(pal::BRIGHT, a));
+    line(bl.x, bl.y, br.x, br.y, with_alpha(pal::BRIGHT, static_cast<uint8_t>(a * 180 / 255)));
   };
   auto is_rev = [&](float wx, float wy) {
     const int gx = static_cast<int>(wx / Cave::CELL), gy = static_cast<int>(wy / Cave::CELL);
@@ -1291,8 +1288,9 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
   if (g.ecs.get<Rope>(g.ship).held != NULL_ENTITY)
     dest_pi = g.ecs.get<Cargo>(g.ecs.get<Rope>(g.ship).held).dest_pad;
 
-  // Landing pads: tall pointer ▼ (home/dest larger + hotter)
-  const int pad_s = L(11);
+  // Landing pads: ~66% of prior size, gentle pulse
+  const int pad_s = L(7);
+  const float pad_pulse = 0.62f + 0.38f * (0.5f + 0.5f * std::sin(static_cast<float>(t) * 2.4f));
   for (int pi = 0; pi < static_cast<int>(g.cave.pads.size()); ++pi) {
     const LandingPad& p = g.cave.pads[static_cast<size_t>(pi)];
     if (!p.active) continue;
@@ -1301,7 +1299,9 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
     const bool is_dest = (pi == dest_pi) || (pi == g.home_pad);
     Rgba col = is_dest ? pal::HOT : (p.visited ? pal::BRIGHT : pal::WARN);
     auto [px, py] = to_panel(cxw, p.y);
-    tri_down(px, py, is_dest ? pad_s + L(4) : pad_s, col);
+    // Slight phase offset per pad so they don't all blink in lockstep
+    const float phase = pad_pulse + 0.08f * std::sin(static_cast<float>(pi) * 1.7f + static_cast<float>(t));
+    tri_down(px, py, is_dest ? pad_s + L(2) : pad_s, col, clampf(phase, 0.45f, 1.f));
   }
   // Cargo: squares — bright if this ship can lift them, dim otherwise
   {
@@ -1878,21 +1878,22 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
     const int px = dx + static_cast<int>(cx / Cave::CELL * scale);
     const int py = dy + static_cast<int>(pad.y / Cave::CELL * scale);
     const bool is_home = (pi == dest_pi) || (pi == g.home_pad);
-    const int s = is_home ? L(14) : L(11);
+    const int s = is_home ? L(9) : L(7);  // ~66% of prior L(14)/L(11)
     const int h = s + s / 2;
-    const int w = std::max(4, s * 2 / 3);
+    const int w = std::max(3, s * 2 / 3);
     Rgba col = is_home ? pal::HOT : (pad.visited ? pal::BRIGHT : pal::WARN);
-    // Black outline triangle (tip on pad)
+    const float pulse = 0.62f + 0.38f * (0.5f + 0.5f * std::sin(static_cast<float>(ui.time) * 2.4f + pi * 1.7f));
+    const uint8_t a = static_cast<uint8_t>(clampf(pulse, 0.45f, 1.f) * 255.f);
     {
       const int o = 2;
       SDL_Point out[3] = {{px, py + o}, {px - w - o, py - h - o}, {px + w + o, py - h - o}};
       be_->polygon(out, 3, Rgba{0, 0, 0, 255});
     }
     SDL_Point pts[3] = {{px, py}, {px - w, py - h}, {px + w, py - h}};
-    be_->polygon(pts, 3, col);
-    line(pts[0].x, pts[0].y, pts[1].x, pts[1].y, pal::BRIGHT);
-    line(pts[0].x, pts[0].y, pts[2].x, pts[2].y, pal::BRIGHT);
-    line(pts[1].x, pts[1].y, pts[2].x, pts[2].y, with_alpha(pal::BRIGHT, 180));
+    be_->polygon(pts, 3, with_alpha(col, a));
+    line(pts[0].x, pts[0].y, pts[1].x, pts[1].y, with_alpha(pal::BRIGHT, a));
+    line(pts[0].x, pts[0].y, pts[2].x, pts[2].y, with_alpha(pal::BRIGHT, a));
+    line(pts[1].x, pts[1].y, pts[2].x, pts[2].y, with_alpha(pal::BRIGHT, static_cast<uint8_t>(a * 180 / 255)));
   }
   // Cargo on the chart
   int cargo_n = 0;
