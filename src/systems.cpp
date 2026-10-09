@@ -664,16 +664,18 @@ void update_sonar(Game& g, float dt) {
     return best;
   };
 
-  // Line of sight from the ping origin to a cell centre (blocked by solid before the target).
-  auto clear_path = [&](float tx, float ty) -> bool {
+  // LOS to a target cell: solid before the target blocks; the target cell itself may be solid (the echo face).
+  auto clear_path = [&](int tgx, int tgy) -> bool {
+    const float tx = (tgx + 0.5f) * Cave::CELL, ty = (tgy + 0.5f) * Cave::CELL;
     const float dx = tx - s.origin.x, dy = ty - s.origin.y;
     const float dist = std::sqrt(dx * dx + dy * dy);
     if (dist < 1.f) return true;
-    const int steps = std::max(2, static_cast<int>(dist / (Cave::CELL * 0.5f)));
-    for (int i = 1; i < steps; ++i) {
+    const int steps = std::max(2, static_cast<int>(dist / (Cave::CELL * 0.4f)));
+    for (int i = 1; i <= steps; ++i) {
       const float u = static_cast<float>(i) / static_cast<float>(steps);
       const float x = s.origin.x + dx * u, y = s.origin.y + dy * u;
       const int gx = static_cast<int>(x / Cave::CELL), gy = static_cast<int>(y / Cave::CELL);
+      if (gx == tgx && gy == tgy) return true;
       if (g.cave.is_solid_cell(gx, gy)) return false;
     }
     return true;
@@ -686,14 +688,15 @@ void update_sonar(Game& g, float dt) {
       const float dx = cx - s.origin.x, dy = cy - s.origin.y;
       const float d = std::sqrt(dx * dx + dy * dy);
       if (d < r0 || d >= r1) continue;
+      if (!clear_path(gx, gy)) continue;
       if (!g.cave.is_solid_cell(gx, gy)) {
-        // Open air the wavefront reaches with clear LOS → explored void (black on the chart)
-        if (clear_path(cx, cy)) mark(gx, gy);
+        // Open air with clear LOS → explored void (black)
+        mark(gx, gy);
         continue;
       }
-      // Rock face only (slight penetration); must have LOS to the face
+      // Rock face (+ slight penetration); LOS already verified up to this cell
       const int depth = rock_depth(gx, gy);
-      if (depth >= 1 && depth <= 2 && clear_path(cx, cy)) mark(gx, gy);
+      if (depth >= 1 && depth <= 2) mark(gx, gy);
     }
   }
   // Cargo crates: paint a small blob when the wavefront reaches them
