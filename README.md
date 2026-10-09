@@ -90,7 +90,8 @@ stripes, each with hydraulic landing struts and a winch under the belly.
 | **R** (keyboard), **A** (gamepad) | Hook grabs the crate in reach / lets go (on the gamepad **A** respawns after a crash) |
 | **Enter** (keyboard), **A**/**B** (gamepad) | Respawn after a crash |
 | **Y** or **G** | New cave |
-| **Tab**, mouse wheel, or D-pad up/down | Zoom: Near / Medium / Far |
+| **Tab** | Cycle zoom: Near → Medium → Far |
+| **=** / **-**, mouse wheel | Zoom in / out |
 | **S** | Next ship (lands on the nearest pad) |
 | **C** / left-stick click | Sonar search pulse (reflections off pads, cargo, signals) |
 | **Z** / **Select** | Hold: full revealed map |

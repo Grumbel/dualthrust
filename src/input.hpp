@@ -31,6 +31,7 @@ enum class Action : int {
   NextPad,
   PrevPad,
   Respawn,
+  ZoomCycle,
   Count
 };
 
@@ -82,6 +83,7 @@ inline constexpr ActionInfo ACTION_INFO[] = {
     {Action::NextPad, "NEXT PAD", "PAD+", false},
     {Action::PrevPad, "PREV PAD", "PAD-", false},
     {Action::Respawn, "RESPAWN", "RESPAWN", false},
+    {Action::ZoomCycle, "ZOOM", "ZOOM", false},
 };
 static_assert(sizeof(ACTION_INFO) / sizeof(ACTION_INFO[0]) == ACTION_COUNT, "ACTION_INFO size");
 
@@ -128,8 +130,9 @@ inline void set_default_binds(BindMap& m) {
   K(Action::WinchOut, 0, SDL_SCANCODE_Q);
   K(Action::WinchIn, 0, SDL_SCANCODE_E);
   K(Action::Grip, 0, SDL_SCANCODE_R);
-  K(Action::ZoomCloser, 0, SDL_SCANCODE_EQUALS);  // optional; Tab still cycles via ZoomFarther path in UI
-  K(Action::ZoomFarther, 0, SDL_SCANCODE_TAB);
+  K(Action::ZoomCloser, 0, SDL_SCANCODE_EQUALS);
+  K(Action::ZoomFarther, 0, SDL_SCANCODE_MINUS);
+  K(Action::ZoomCycle, 0, SDL_SCANCODE_TAB);
   K(Action::NextShip, 0, SDL_SCANCODE_S);
   K(Action::SwapEngines, 0, SDL_SCANCODE_X);
   K(Action::Sonar, 0, SDL_SCANCODE_C);
@@ -150,8 +153,7 @@ inline void set_default_binds(BindMap& m) {
   B(Action::WinchOut, 0, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
   B(Action::WinchIn, 0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
   B(Action::Grip, 0, SDL_CONTROLLER_BUTTON_A);
-  B(Action::ZoomCloser, 0, SDL_CONTROLLER_BUTTON_DPAD_UP);
-  B(Action::ZoomFarther, 0, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+  // Zoom in/out/cycle unbound on pad by default (D-pad left/right are winch; rebind in Controls)
   B(Action::NextShip, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
   B(Action::Sonar, 0, SDL_CONTROLLER_BUTTON_LEFTSTICK);
   B(Action::MapView, 0, SDL_CONTROLLER_BUTTON_BACK);  // Select: hold for the full revealed map

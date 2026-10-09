@@ -82,7 +82,7 @@ void print_help(const char* argv0) {
       "  -s, --ship N         Ship preset index 0..%d (5=Topdog, 6=Canopy)\n"
       "  -S, --seed N         Cave generation seed (unsigned)\n"
       "  -x, --swap-engines   Swap left/right engine mapping\n"
-      "  -z, --zoom LEVEL     View zoom: near, medium or far (0..2); Tab / D-pad change it in game\n"
+      "  -z, --zoom LEVEL     View zoom: near, medium or far (0..2); Tab cycles in game\n"
       "  -m, --mute           Start with sound off\n"
       "  --renderer MODE      auto (default: GLES2, else SDL), gles2 or sdl\n"
       "  --config-dir PATH    Override XDG config directory\n"
@@ -610,8 +610,10 @@ int main(int argc, char** argv) {
               break;
             }
             if (action_pressed_key(binds, Action::Pause, sc)) open_pause();
-            if (action_pressed_key(binds, Action::ZoomFarther, sc) || k == SDLK_TAB)
+            if (action_pressed_key(binds, Action::ZoomCycle, sc))
               zoom_to(game.cam.zoom + 1, true);
+            if (action_pressed_key(binds, Action::ZoomFarther, sc))
+              zoom_to(game.cam.zoom + 1, false);
             if (action_pressed_key(binds, Action::ZoomCloser, sc))
               zoom_to(game.cam.zoom - 1, false);
             if (action_pressed_key(binds, Action::NextShip, sc)) cycle_ship(+1);
@@ -704,6 +706,7 @@ int main(int argc, char** argv) {
             if (action_pressed_button(binds, Action::NextShip, b)) cycle_ship(+1);
             if (action_pressed_button(binds, Action::NextPad, b)) cycle_pad(game, +1);
             if (action_pressed_button(binds, Action::PrevPad, b)) cycle_pad(game, -1);
+            if (action_pressed_button(binds, Action::ZoomCycle, b)) zoom_to(game.cam.zoom + 1, true);
             if (action_pressed_button(binds, Action::ZoomCloser, b)) zoom_to(game.cam.zoom - 1, false);
             if (action_pressed_button(binds, Action::ZoomFarther, b)) zoom_to(game.cam.zoom + 1, false);
             if (action_pressed_button(binds, Action::WinchOut, b)) set_winch(game, true);
