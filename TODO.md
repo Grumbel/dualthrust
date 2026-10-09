@@ -10,7 +10,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-049.1-cargo-base-grip-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-049.1-cargo-base-grip-9a093cd` → tip `c8871b4`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
