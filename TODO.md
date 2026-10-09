@@ -10,8 +10,9 @@
 - **0.1.0** (released): flight, caves and pads, zoom, title screen and options, sound, GLES2 renderer, web and R36S builds.
 - **0.2.0**: rigid-body rewrite with Box2D 3.1 (done: world, streamed terrain, sprung/retractable legs, slopes, statistics).
   - Done: landing anywhere; pads flat and grippy; legs; rope + cargo; fuel/score.
-  - Rope ideas (open): wrap around rock corners, cargo destinations.
-  - Done: magnet/auto-grab (`rope::AUTO_GRAB`, tighter reach); crate name+mass on HUD while held.
+  - Rope ideas (open): wrap around rock corners.
+  - Done: magnet/auto-grab; crate name+mass on HUD; dest pad highlighted in-world while hauling
+    (ghost + DEST? label if the pad is not yet activated by sonar).
   - Next: tune the feel on the handheld (leg Hz/damping, crash limits, `TIME_SCALE`).
 
 ## Open

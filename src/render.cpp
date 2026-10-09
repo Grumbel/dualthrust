@@ -421,48 +421,70 @@ void Gfx::draw_world(const Game& g) {
 
 void Gfx::draw_pads(const Game& g, double t) const {
   const auto& pads = g.cave.pads;
+  // Preferred delivery pad while hauling — highlighted, and drawn even if not yet activated
+  int dest_pi = -1;
+  if (g.ship != NULL_ENTITY && g.ecs.has<Rope>(g.ship)) {
+    const Rope& rp = g.ecs.get<Rope>(g.ship);
+    if (rp.held != NULL_ENTITY && g.ecs.has<Cargo>(rp.held))
+      dest_pi = g.ecs.get<Cargo>(rp.held).dest_pad;
+  }
+
   for (int pi = 0; pi < static_cast<int>(pads.size()); ++pi) {
     const LandingPad& p = pads[pi];
-    if (!p.active) continue;  // sonar must light the pad before it appears in-world
+    const bool is_dest = (pi == dest_pi);
+    if (!p.active && !is_dest) continue;  // sonar lights pads; dest ghosts still show while hauling
     const int x0 = sx(g.cam, p.x0);
     const int x1 = x0 + Z(p.x1 - p.x0);
     const int y = sy(p.y);
     if (x1 < -40 || x0 > w_ + 40 || y < -Z(80) || y > h_ + Z(40)) continue;
     const int w = std::max(1, x1 - x0), mid = (x0 + x1) / 2;
     const int z2 = Z(2), z4 = Z(4), z6 = Z(6);
+    const bool ghost = !p.active && is_dest;
+    const float pulse = 0.55f + 0.45f * static_cast<float>(0.5 + 0.5 * std::sin(t * 6.0));
 
     // Deck slab with cross-hatch
-    fill(x0, y - z2, w, Z(5), with_alpha(pal::PAD, 200));
-    outline(x0, y - z2, w, Z(5), pal::BRIGHT);
-    for (int i = 0; i < w - z4; i += z6) be_->line(x0 + i, y - z2, x0 + i + z4, y + z2, with_alpha(pal::MID, 180));
+    const uint8_t deck_a = ghost ? static_cast<uint8_t>(50 + 40 * pulse) : 200;
+    fill(x0, y - z2, w, Z(5), with_alpha(is_dest ? pal::HOT : pal::PAD, deck_a));
+    outline(x0, y - z2, w, Z(5), is_dest ? pal::HOT : pal::BRIGHT);
+    if (!ghost) {
+      for (int i = 0; i < w - z4; i += z6)
+        be_->line(x0 + i, y - z2, x0 + i + z4, y + z2, with_alpha(pal::MID, 180));
+    }
 
     // Support struts into the rock
-    const Rgba strut = with_alpha(pal::PAD, 160);
+    const Rgba strut = with_alpha(is_dest ? pal::HOT : pal::PAD, ghost ? 80 : 160);
     be_->line(x0 + z4, y + Z(3), x0 + z4, y + Z(18), strut);
     be_->line(x1 - z4, y + Z(3), x1 - z4, y + Z(18), strut);
     be_->line(mid, y + Z(3), mid, y + Z(22), strut);
     be_->line(x0 + z4, y + Z(18), x1 - z4, y + Z(18), strut);
 
-    // Approach chevrons, chasing upward
-    const int chase = static_cast<int>(t * 3.0) % 3;
+    // Approach chevrons, chasing upward (faster / brighter for dest)
+    const int chase = static_cast<int>(t * (is_dest ? 5.0 : 3.0)) % 3;
     for (int c = 0; c < 3; ++c) {
       const int cy = y - Z(14) - c * Z(10), inset = Z(8) + c * z6;
-      const Rgba chev = with_alpha(pal::WARN, c == chase ? 255 : 110);
+      const Rgba chev = with_alpha(is_dest ? pal::HOT : pal::WARN, c == chase ? 255 : (is_dest ? 160 : 110));
       be_->line(x0 + inset, cy, mid, cy + z6, chev);
       be_->line(x1 - inset, cy, mid, cy + z6, chev);
     }
 
     // Alternating end beacons with a soft halo
-    const bool on = (static_cast<int>(t * 2.5) + pi) % 2 == 0;
-    const Rgba beacon = on ? pal::HOT : pal::PAD;
+    const bool on = (static_cast<int>(t * (is_dest ? 4.0 : 2.5)) + pi) % 2 == 0;
+    const Rgba beacon = on ? pal::HOT : (is_dest ? pal::WARN : pal::PAD);
     for (int bxp : {x0, x1}) {
       fill(bxp - Z(5), y - Z(9), Z(10), Z(10), with_alpha(beacon, on ? 50 : 20));
       fill(bxp - z2, y - z6, z4, z4, beacon);
     }
 
     // Centre T-mark
-    be_->line(mid - Z(8), y, mid + Z(8), y, pal::BRIGHT);
-    be_->line(mid, y - z6, mid, y + z2, pal::BRIGHT);
+    be_->line(mid - Z(8), y, mid + Z(8), y, is_dest ? pal::HOT : pal::BRIGHT);
+    be_->line(mid, y - z6, mid, y + z2, is_dest ? pal::HOT : pal::BRIGHT);
+
+    // DEST tag above the preferred pad while hauling
+    if (is_dest) {
+      const char* label = ghost ? "DEST?" : "DEST";
+      const int tw = text_width(label);
+      text(mid - tw / 2, y - Z(48), label, with_alpha(pal::HOT, static_cast<uint8_t>(160 + 95 * pulse)));
+    }
   }
 }
 
