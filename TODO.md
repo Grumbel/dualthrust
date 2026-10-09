@@ -21,6 +21,9 @@
 
 ## Notes
 
+- Fog of war + sonar: minimap starts black; C / left-stick-click pings a ring that paints solid rock
+  and cargo it sweeps. Select/Z holds the full revealed chart. Ship switch teleports to the nearest pad.
+
 - Controls rebinding: Options → Controls lists every play action; Enter/A starts listening for a key or
   button/axis. Tab/Y toggles keyboard vs gamepad view. Binds save as `bind.K.*` / `bind.P.*` lines.
   Menu navigation stays fixed. Reset Defaults restores the historical layout. HUD hints follow the binds.

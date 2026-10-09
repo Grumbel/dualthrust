@@ -24,6 +24,11 @@ void set_winch(Game& g, bool out);  // deploy the cable fully (true) or retract 
 void toggle_grip(Game& g);         // hook takes the crate in reach, or lets go of it  // retract / extend the landing legs
 inline Transform& ship_transform(Game& g) { return g.ecs.get<Transform>(g.ship); }
 
+// Fog of war / sonar: the minimap stays black until a ping paints solid cells and cargo.
+void reset_fog(Game& g);                 // clear revealed, stop any ping (call after cave.generate)
+void fire_sonar(Game& g);                // start a ring from the ship; ignored if one is already running
+void update_sonar(Game& g, float dt);    // expand the ring and paint cells (sim seconds)
+
 // Per-tick systems (dt = simulated seconds)
 void step_sim(Game& g, float dt);
 void update_camera(Game& g, float real_dt);

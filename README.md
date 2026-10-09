@@ -89,7 +89,9 @@ stripes, each with hydraulic landing struts and a winch under the belly.
 | **Enter** (keyboard), **A**/**B** (gamepad) | Respawn after a crash |
 | **Y** or **G** | New cave |
 | **Tab**, mouse wheel, or D-pad up/down | Zoom: Near / Medium / Far |
-| **S** or **Select** | Next ship |
+| **S** | Next ship (lands on the nearest pad) |
+| **C** / left-stick click | Sonar ping (reveals map) |
+| **Z** / **Select** | Hold: full revealed map |
 | **X** | Swap left/right engines |
 | **F** or **Alt+Enter** | Fullscreen |
 | **M** | Sound on/off |

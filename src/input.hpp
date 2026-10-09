@@ -28,6 +28,8 @@ enum class Action : int {
   ZoomFarther,
   NextShip,
   SwapEngines,
+  Sonar,
+  MapView,
   Count
 };
 
@@ -76,6 +78,8 @@ inline constexpr ActionInfo ACTION_INFO[] = {
     {Action::ZoomFarther, "ZOOM OUT", "ZOOM-", false},
     {Action::NextShip, "NEXT SHIP", "SHIP", false},
     {Action::SwapEngines, "SWAP ENGINES", "SWAP", false},
+    {Action::Sonar, "SONAR", "SONAR", false},
+    {Action::MapView, "MAP", "MAP", false},
 };
 static_assert(sizeof(ACTION_INFO) / sizeof(ACTION_INFO[0]) == ACTION_COUNT, "ACTION_INFO size");
 
@@ -129,6 +133,8 @@ inline void set_default_binds(BindMap& m) {
   K(Action::ZoomFarther, 0, SDL_SCANCODE_TAB);
   K(Action::NextShip, 0, SDL_SCANCODE_S);
   K(Action::SwapEngines, 0, SDL_SCANCODE_X);
+  K(Action::Sonar, 0, SDL_SCANCODE_C);
+  K(Action::MapView, 0, SDL_SCANCODE_Z);
   // Half-thrust on Shift is special-cased in read_thrust (not a separate action)
 
   // Gamepad
@@ -148,7 +154,9 @@ inline void set_default_binds(BindMap& m) {
   B(Action::NewCave, 0, SDL_CONTROLLER_BUTTON_Y);
   B(Action::ZoomCloser, 0, SDL_CONTROLLER_BUTTON_DPAD_UP);
   B(Action::ZoomFarther, 0, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
-  B(Action::NextShip, 0, SDL_CONTROLLER_BUTTON_BACK);
+  B(Action::NextShip, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+  B(Action::Sonar, 0, SDL_CONTROLLER_BUTTON_LEFTSTICK);
+  B(Action::MapView, 0, SDL_CONTROLLER_BUTTON_BACK);  // Select: hold for the full revealed map
 }
 
 // Clear every slot on either device that matches `src`, then write `src` into the first free

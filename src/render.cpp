@@ -3,6 +3,8 @@
 
 #include "render.hpp"
 
+#include <cmath>
+
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -157,10 +159,21 @@ void Gfx::build_overlay() {
   overlay_ = be_->create_texture(w_, h_, reinterpret_cast<const uint8_t*>(px.data()), false);
 }
 
-void Gfx::build_minimap(const Cave& cave) {
+void Gfx::build_minimap(const Cave& cave, const std::vector<uint8_t>& revealed) {
   be_->destroy_texture(minimap_);
   std::vector<uint32_t> px(static_cast<size_t>(Cave::GW) * Cave::GH);
-  for (int i = 0; i < Cave::GW * Cave::GH; ++i) px[i] = pack(with_alpha(pal::MID, cave.solid[i] ? 150 : 0));
+  const bool has_fog = revealed.size() == static_cast<size_t>(Cave::GW) * Cave::GH;
+  for (int i = 0; i < Cave::GW * Cave::GH; ++i) {
+    if (has_fog && !revealed[static_cast<size_t>(i)]) {
+      px[i] = pack({0, 0, 0, 0});
+      continue;
+    }
+    // Solid returns: green rock; open revealed cells are a faint void so tunnels read as outlines
+    if (cave.solid[static_cast<size_t>(i)])
+      px[i] = pack(with_alpha(pal::MID, 160));
+    else
+      px[i] = pack(with_alpha(pal::DIM, 40));
+  }
   minimap_ = be_->create_texture(Cave::GW, Cave::GH, reinterpret_cast<const uint8_t*>(px.data()), false);
   minimap_generation_ = cave.generation;
 }
@@ -746,8 +759,11 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   }
 }
 
-void Gfx::draw_minimap(const Game& g, double t) {
-  if (!minimap_ || minimap_generation_ != g.cave.generation) build_minimap(g.cave);
+void Gfx::draw_minimap(Game& g, double t) {
+  if (!minimap_ || minimap_generation_ != g.cave.generation || g.reveal_dirty) {
+    build_minimap(g.cave, g.revealed);
+    g.reveal_dirty = false;
+  }
   // Source window stays MM_W x MM_H cells; the on-screen panel scales with the UI.
   const int mm_w = L(MM_W), mm_h = L(MM_H), pad = L(4);
   const int x = (w_ - mm_w) / 2, y = h_ - mm_h - L(14);
@@ -771,8 +787,18 @@ void Gfx::draw_minimap(const Game& g, double t) {
     fill(px, py, size, size, c);
   };
   const int d_pad = L(5), d_cargo = L(4), d_ship = L(5);
-  for (const LandingPad& p : g.cave.pads) dot(0.5f * (p.x0 + p.x1), p.y, d_pad, pal::WARN);
-  g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) { dot(ct.pos.x, ct.pos.y, d_cargo, pal::CARGO); });
+  auto is_rev = [&](float wx, float wy) {
+    const int gx = static_cast<int>(wx / Cave::CELL), gy = static_cast<int>(wy / Cave::CELL);
+    if (!Cave::in_grid(gx, gy) || g.revealed.empty()) return true;
+    return g.revealed[static_cast<size_t>(gy * Cave::GW + gx)] != 0;
+  };
+  for (const LandingPad& p : g.cave.pads) {
+    const float cx = 0.5f * (p.x0 + p.x1);
+    if (is_rev(cx, p.y)) dot(cx, p.y, d_pad, pal::WARN);
+  }
+  g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) {
+    if (is_rev(ct.pos.x, ct.pos.y)) dot(ct.pos.x, ct.pos.y, d_cargo, pal::CARGO);
+  });
   // Viewport box, clipped to the panel
   const int vw = static_cast<int>(g.cam.vw * MM_K * sx_k), vh = static_cast<int>(g.cam.vh * MM_K * sy_k);
   const int bx = x + static_cast<int>((g.cam.x * MM_K - ix) * sx_k);
@@ -946,7 +972,59 @@ void Gfx::draw_title(const Game& g, const UiState& ui) const {
 // ---------------------------------------------------------------------------
 // Frame
 // ---------------------------------------------------------------------------
-void Gfx::draw(const Game& g, const UiState& ui, const BindMap& binds) {
+
+void Gfx::draw_sonar(const Game& g) const {
+  if (!g.sonar.active) return;
+  const Vec2 o = g.sonar.origin;
+  const float r = g.sonar.radius;
+  if (r < 1.f) return;
+  // Expanding phosphor ring in world space
+  const int segments = std::clamp(static_cast<int>(r / 8.f), 24, 96);
+  const float fade = 1.f - r / std::max(g.sonar.max_radius, 1.f);
+  const Rgba col = with_alpha(pal::CARGO, static_cast<uint8_t>(40 + 160 * fade));
+  const Rgba dim = with_alpha(pal::CARGO, static_cast<uint8_t>(20 + 80 * fade));
+  SDL_Point prev{sx(g.cam, o.x + r), sy(o.y)};
+  for (int i = 1; i <= segments; ++i) {
+    const float a = (static_cast<float>(i) / segments) * 6.2831853f;
+    const SDL_Point cur{sx(g.cam, o.x + r * std::cos(a)), sy(o.y + r * std::sin(a))};
+    line(prev.x, prev.y, cur.x, cur.y, col);
+    // faint second ring slightly inside
+    if (r > 12.f) {
+      const float r2 = r - 6.f;
+      const SDL_Point a0{sx(g.cam, o.x + r2 * std::cos(a - 6.2831853f / segments)),
+                         sy(o.y + r2 * std::sin(a - 6.2831853f / segments))};
+      const SDL_Point a1{sx(g.cam, o.x + r2 * std::cos(a)), sy(o.y + r2 * std::sin(a))};
+      line(a0.x, a0.y, a1.x, a1.y, dim);
+    }
+    prev = cur;
+  }
+}
+
+void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
+  (void)ui;
+  if (!minimap_) return;
+  fill(0, 0, w_, h_, with_alpha(pal::BG, 220));
+  // Fit the whole cave (GW x GH texels) into the screen with a margin
+  const float margin = 0.08f;
+  const float aw = w_ * (1.f - 2.f * margin), ah = h_ * (1.f - 2.f * margin);
+  const float scale = std::min(aw / Cave::GW, ah / Cave::GH);
+  const int dw = std::max(1, static_cast<int>(Cave::GW * scale));
+  const int dh = std::max(1, static_cast<int>(Cave::GH * scale));
+  const int dx = (w_ - dw) / 2, dy = (h_ - dh) / 2;
+  fill(dx - L(4), dy - L(4), dw + L(8), dh + L(8), with_alpha(pal::MENU, 200));
+  outline(dx - L(4), dy - L(4), dw + L(8), dh + L(8), pal::BRIGHT);
+  be_->copy(minimap_, SDL_Rect{dx, dy, dw, dh}, {255, 255, 255, 255});
+  // Ship
+  const Transform& tf = g.ecs.get<Transform>(g.ship);
+  const int sx = dx + static_cast<int>(tf.pos.x / Cave::CELL * scale);
+  const int sy = dy + static_cast<int>(tf.pos.y / Cave::CELL * scale);
+  const int sz = std::max(3, L(6));
+  fill(sx - sz / 2, sy - sz / 2, sz, sz, pal::HOT);
+  text_centered(w_ / 2, dy - cell_h() - L(10), "MAP", pal::BRIGHT);
+  text_centered(w_ / 2, dy + dh + L(8), "HOLD TO VIEW", pal::MID);
+}
+
+void Gfx::draw(Game& g, const UiState& ui, const BindMap& binds) {
   const int si = std::clamp(ui.ui_scale, 0, UI_SCALE_COUNT - 1);
   font_scale_ = UI_SCALE_LEVELS[si].font;
   scale_ = h_ / g.cam.vh;  // screen px per world px; animates while the zoom level changes
@@ -964,6 +1042,7 @@ void Gfx::draw(const Game& g, const UiState& ui, const BindMap& binds) {
   draw_cargo(g, t);
   draw_rope(g, t);
   draw_ship(g, t);
+  draw_sonar(g);
 
   const Flight& fl = g.ecs.get<Flight>(g.ship);
   if (!title && fl.state == FlightState::Crashed) {
@@ -979,6 +1058,7 @@ void Gfx::draw(const Game& g, const UiState& ui, const BindMap& binds) {
   }
   if (title && ui.page == MenuPage::Title) draw_title(g, ui);
   else if (ui.in_menu()) draw_menu(g, ui, binds);
+  if (ui.show_map && !title) draw_full_map(g, ui);
 
   if (ui.crt) be_->copy(overlay_, SDL_Rect{0, 0, w_, h_}, {255, 255, 255, 255});
 }

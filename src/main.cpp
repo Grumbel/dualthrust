@@ -259,6 +259,7 @@ int main(int argc, char** argv) {
   Game game;
   std::printf("Generating cave...\n");
   game.cave.generate(opt.seed);
+  reset_fog(game);
   std::printf("Cave ready (%d pads)\n", static_cast<int>(game.cave.pads.size()));
   game.rng = Rng(SDL_GetTicks() | 1u);
   // Debug and screenshot runs leave the saved statistics alone
@@ -362,6 +363,7 @@ int main(int argc, char** argv) {
   };
   auto new_cave = [&] {
     game.cave.generate(SDL_GetTicks());
+    reset_fog(game);
     new_game_at(first_pad_x());
     if (game.stats_enabled) { game.stats.caves += 1; game.stats_dirty = true; }
   };
@@ -386,6 +388,23 @@ int main(int argc, char** argv) {
   };
   auto cycle_ship = [&](int delta) {
     set_ship_def(game, ship_def_index(game) + delta);
+    // New hull lands on the nearest pad (switching mid-flight is a teleport, not an in-place morph)
+    float wx = ship_transform(game).pos.x;
+    if (!game.cave.pads.empty()) {
+      float best = game.cave.pads[0].x0;
+      float best_d = 1e30f;
+      for (const LandingPad& p : game.cave.pads) {
+        const float cx = 0.5f * (p.x0 + p.x1);
+        const float d = std::abs(cx - wx);
+        if (d < best_d) { best_d = d; best = cx; }
+      }
+      wx = best;
+    }
+    respawn_ship(game, wx);
+    snap_camera(game);
+    char buf[40];
+    std::snprintf(buf, sizeof buf, "SHIP %s", game.ecs.get<Hull>(game.ship).def->name);
+    show_toast(buf);
     persist_config();
   };
   auto toggle_swap = [&] {
@@ -563,6 +582,7 @@ int main(int argc, char** argv) {
             if (action_pressed_key(binds, Action::WinchIn, sc)) set_winch(game, false);
             if (action_pressed_key(binds, Action::Respawn, sc)) respawn_after_crash();
             if (action_pressed_key(binds, Action::NewCave, sc)) new_cave();
+            if (action_pressed_key(binds, Action::Sonar, sc)) fire_sonar(game);
           } else {
             if (k == SDLK_UP || k == SDLK_w) menu_move(-1);
             if (k == SDLK_DOWN || k == SDLK_s) menu_move(+1);
@@ -625,6 +645,7 @@ int main(int argc, char** argv) {
             if (action_pressed_button(binds, Action::Legs, b)) toggle_legs(game);
             if (action_pressed_button(binds, Action::NewCave, b)) new_cave();
             if (action_pressed_button(binds, Action::SwapEngines, b)) toggle_swap();
+            if (action_pressed_button(binds, Action::Sonar, b)) fire_sonar(game);
             if (action_pressed_button(binds, Action::Respawn, b)) respawn_after_crash();
             if (action_pressed_button(binds, Action::Grip, b)) {
               if (game.ecs.get<Flight>(game.ship).state == FlightState::Crashed) respawn_after_crash();
@@ -676,6 +697,10 @@ int main(int argc, char** argv) {
       read_thrust_bound(binds, pad, ship_channels(game), in);
       in[0] = std::max(in[0], opt.hold[0]);
       in[1] = std::max(in[1], opt.hold[1]);
+      const Uint8* keys = SDL_GetKeyboardState(nullptr);
+      ui.show_map = action_value(binds, Action::MapView, pad, keys) > 0.5f;
+    } else {
+      ui.show_map = false;
     }
     if (ui.swap_engines) {
       std::swap(in[0], in[1]);

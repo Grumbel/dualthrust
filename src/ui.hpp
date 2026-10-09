@@ -113,6 +113,7 @@ struct UiState {
   int rebind_action = 0;     // Action as int
   bool rebind_keyboard = true;
   int controls_cursor = 0;   // 0..ACTION_COUNT-1 = action rows, then footer items
+  bool show_map = false;     // hold MapView: full fog-of-war chart
 
   bool in_menu() const { return screen != Screen::Play; }
 };

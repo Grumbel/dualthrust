@@ -91,6 +91,16 @@ struct SimEvent {
   float strength;
 };
 
+// Expanding sonar ring: paints solid cells (and cargo) it sweeps into the fog-of-war map.
+struct SonarPing {
+  bool active = false;
+  Vec2 origin;
+  float radius = 0.f;
+  float prev_radius = 0.f;
+  float max_radius = 900.f;  // world px
+  float speed = 720.f;       // world px per sim second
+};
+
 struct Game {
   Cave cave;
   Physics phys;
@@ -108,4 +118,10 @@ struct Game {
   std::vector<SimEvent> fired;  // copy of this tick's events for the audio layer; drained by main
   std::vector<Entity> dead;
   float time = 0.f;  // accumulated sim time
+
+  // Fog of war: one byte per cave cell, 0 = unknown, non-zero = revealed by sonar.
+  // Size GW*GH after the first cave generate; reset when the cave regenerates.
+  std::vector<uint8_t> revealed;
+  bool reveal_dirty = true;  // minimap texture needs a rebuild
+  SonarPing sonar;
 };

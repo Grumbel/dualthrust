@@ -23,7 +23,7 @@ class Gfx {
   void resize();  // call after window size / fullscreen changes
   int width() const { return w_; }
   int height() const { return h_; }
-  void draw(const Game& g, const UiState& ui, const BindMap& binds);
+  void draw(Game& g, const UiState& ui, const BindMap& binds);
   bool save_screenshot(const char* path) const;
 
  private:
@@ -31,7 +31,7 @@ class Gfx {
   struct View { int ox, oy; };
 
   void build_overlay();
-  void build_minimap(const Cave& cave);
+  void build_minimap(const Cave& cave, const std::vector<uint8_t>& revealed);
 
   void line(int x0, int y0, int x1, int y1, Rgba c) const;
   void fill(int x, int y, int w, int h, Rgba c) const;
@@ -59,7 +59,9 @@ class Gfx {
   void draw_cargo(const Game& g, double t) const;
   void draw_rope(const Game& g, double t) const;
   void draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const;
-  void draw_minimap(const Game& g, double t);
+  void draw_minimap(Game& g, double t);
+  void draw_sonar(const Game& g) const;
+  void draw_full_map(const Game& g, const UiState& ui) const;
   void draw_menu(const Game& g, const UiState& ui, const BindMap& binds) const;
   void draw_title(const Game& g, const UiState& ui) const;  // logo + the title page
   void item_value(const MenuItem& item, const Game& g, const UiState& ui, char* buf, size_t n) const;

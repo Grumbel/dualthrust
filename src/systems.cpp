@@ -3,6 +3,8 @@
 
 #include "systems.hpp"
 
+#include <cmath>
+
 #include <array>
 #include <cstdio>
 
@@ -593,6 +595,70 @@ void snap_camera(Game& g) {
   g.cam.shake = 0.f;
 }
 
+void reset_fog(Game& g) {
+  g.revealed.assign(static_cast<size_t>(Cave::GW) * Cave::GH, 0);
+  g.reveal_dirty = true;
+  g.sonar = {};
+}
+
+void fire_sonar(Game& g) {
+  if (g.sonar.active) return;
+  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
+  const Vec2 p = ship_transform(g).pos;
+  g.sonar = SonarPing{true, p, 0.f, 0.f, 960.f, 780.f};
+}
+
+void update_sonar(Game& g, float dt) {
+  if (!g.sonar.active) return;
+  SonarPing& s = g.sonar;
+  s.prev_radius = s.radius;
+  s.radius = std::min(s.radius + s.speed * dt, s.max_radius);
+  const float r0 = s.prev_radius, r1 = s.radius;
+  // Bounding box of the annulus in cell coordinates
+  const float pad = Cave::CELL * 2.f;
+  const int gx0 = std::max(0, static_cast<int>((s.origin.x - r1 - pad) / Cave::CELL));
+  const int gx1 = std::min(Cave::GW - 1, static_cast<int>((s.origin.x + r1 + pad) / Cave::CELL));
+  const int gy0 = std::max(0, static_cast<int>((s.origin.y - r1 - pad) / Cave::CELL));
+  const int gy1 = std::min(Cave::GH - 1, static_cast<int>((s.origin.y + r1 + pad) / Cave::CELL));
+  bool painted = false;
+  auto mark = [&](int gx, int gy) {
+    if (!Cave::in_grid(gx, gy)) return;
+    const size_t i = static_cast<size_t>(gy * Cave::GW + gx);
+    if (!g.revealed[i]) {
+      g.revealed[i] = 1;
+      painted = true;
+    }
+  };
+  for (int gy = gy0; gy <= gy1; ++gy) {
+    for (int gx = gx0; gx <= gx1; ++gx) {
+      const float cx = (gx + 0.5f) * Cave::CELL;
+      const float cy = (gy + 0.5f) * Cave::CELL;
+      const float dx = cx - s.origin.x, dy = cy - s.origin.y;
+      const float d = std::sqrt(dx * dx + dy * dy);
+      if (d < r0 || d >= r1) continue;
+      // Return from rock: paint the solid cell and a 1-cell halo of open air so tunnels read as outlines
+      if (g.cave.is_solid_cell(gx, gy)) {
+        mark(gx, gy);
+        for (int oy = -1; oy <= 1; ++oy)
+          for (int ox = -1; ox <= 1; ++ox)
+            if (!g.cave.is_solid_cell(gx + ox, gy + oy)) mark(gx + ox, gy + oy);
+      }
+    }
+  }
+  // Cargo crates: paint a small blob when the wavefront reaches them
+  g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& tf) {
+    const float dx = tf.pos.x - s.origin.x, dy = tf.pos.y - s.origin.y;
+    const float d = std::sqrt(dx * dx + dy * dy);
+    if (d < r0 || d >= r1) return;
+    const int gx = static_cast<int>(tf.pos.x / Cave::CELL);
+    const int gy = static_cast<int>(tf.pos.y / Cave::CELL);
+    for (int oy = -1; oy <= 1; ++oy)
+      for (int ox = -1; ox <= 1; ++ox) mark(gx + ox, gy + oy);
+  });
+  if (painted) g.reveal_dirty = true;
+  if (s.radius >= s.max_radius - 1e-3f) s.active = false;
+}
+
 void step_sim(Game& g, float dt) {
   g.time += dt;
   g.notice_timer = std::max(0.f, g.notice_timer - dt / tune::TIME_SCALE);
@@ -614,6 +680,7 @@ void step_sim(Game& g, float dt) {
   event_system(g);
   exhaust_system(g, dt);
   particle_system(g, dt);
+  update_sonar(g, dt);
 }
 
 void update_camera(Game& g, float dt) {
