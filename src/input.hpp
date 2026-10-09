@@ -319,29 +319,30 @@ inline const char* src_name(const InputSrc& src, char* buf, size_t n) {
 }
 
 // Compact summary of the primary bind for a device family.
+// Builds into `buf` without multi-%s snprintf (avoids -Wformat-truncation under fortify).
 inline const char* action_bind_label(const BindMap& m, Action a, bool keyboard, char* buf, size_t n) {
+  if (!buf || n == 0) return buf;
+  buf[0] = '\0';
   const int i = static_cast<int>(a);
   const auto& slots = keyboard ? m.kbd[i] : m.pad[i];
-  char part[3][24];
-  int n_parts = 0;
-  for (int s = 0; s < BIND_SLOTS && n_parts < 3; ++s) {
+  int written = 0;
+  for (int s = 0; s < BIND_SLOTS; ++s) {
     if (slots[s].empty()) continue;
-    src_name(slots[s], part[n_parts], sizeof part[n_parts]);
-    ++n_parts;
+    char part[24];
+    src_name(slots[s], part, sizeof part);
+    if (written > 0) {
+      if (static_cast<size_t>(written) + 1 >= n) break;
+      buf[written++] = '/';
+      buf[written] = '\0';
+    }
+    for (const char* p = part; *p && static_cast<size_t>(written) + 1 < n; ++p)
+      buf[written++] = *p;
+    buf[written] = '\0';
+    if (static_cast<size_t>(written) + 1 >= n) break;
   }
-  if (n_parts == 0) {
-    std::snprintf(buf, n, "-");
-    return buf;
+  if (written == 0) {
+    if (n > 1) { buf[0] = '-'; buf[1] = '\0'; }
   }
-  if (n_parts == 1) {
-    std::snprintf(buf, n, "%s", part[0]);
-    return buf;
-  }
-  if (n_parts == 2) {
-    std::snprintf(buf, n, "%s/%s", part[0], part[1]);
-    return buf;
-  }
-  std::snprintf(buf, n, "%s/%s/%s", part[0], part[1], part[2]);
   return buf;
 }
 

@@ -818,7 +818,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   y += lh;
   const Legs& legs = g.ecs.get<Legs>(g.ship);
   action_bind_label(binds, Action::Legs, !pad, bname, sizeof bname);
-  char legbuf[40];
+  char legbuf[64];
   std::snprintf(legbuf, sizeof legbuf, "LEGS %s  %s", legs.deployed ? "OUT" : "IN", bname);
   text(m20, y, legbuf, legs.deployed ? pal::MID : pal::WARN);
   y += lh;
@@ -924,7 +924,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     } else {
       char rb[24];
       action_bind_label(binds, Action::Respawn, !pad, rb, sizeof rb);
-      char msg[40];
+      char msg[64];
       std::snprintf(msg, sizeof msg, "%s TO RESPAWN", rb);
       text_centered(w_ / 2, L(48) + lh, msg, pal::MID);
     }
@@ -1083,7 +1083,7 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
 
     const bool kbd = ui.device != InputDevice::Gamepad;
     int row_y = py + L(18) + cell_h() + L(22);
-    char val[40];
+    char val[64];
     for (int i = 0; i < ACTION_COUNT; ++i) {
       const bool sel = ui.controls_cursor == i;
       const int ly = row_y + i * lh;
@@ -1169,7 +1169,7 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
         else
           std::snprintf(val, sizeof val, "%.2f", v);
         const char* shown = sel ? val : val;
-        char buf[40];
+        char buf[64];
         if (sel)
           std::snprintf(buf, sizeof buf, "< %s >", val);
         else
