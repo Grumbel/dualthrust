@@ -24,7 +24,9 @@ int ship_channels(const Game& g);                   // 2 for the classic ships, 
 void toggle_legs(Game& g);
 void debug_rope(Game& g, float len);  // debugging: cable paid out to len px, hook hanging
 void set_winch(Game& g, bool out);  // deploy the cable fully (true) or retract it fully (false)
-void toggle_grip(Game& g);         // hook takes the crate in reach, or lets go of it  // retract / extend the landing legs
+void toggle_grip(Game& g);         // hook takes the crate in reach, or lets go of it
+void ensure_cargo(Game& g);        // (re)spawn crates for the current cave generation
+void grab_crate(Game& g, Entity e);  // attach entity to the hook (no reach check)
 inline Transform& ship_transform(Game& g) { return g.ecs.get<Transform>(g.ship); }
 
 // Fog / sonar: data-driven (tune::SONAR_MODES, PASSIVE_EXPLORE). Paint and reflect paths both live.

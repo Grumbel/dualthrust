@@ -70,6 +70,7 @@ add_executable(dualthrust
   src/physics.cpp
   src/render.cpp
   src/stats.cpp
+  src/save.cpp
   src/systems.cpp
 )
 target_compile_options(dualthrust PRIVATE -Wall -Wextra)

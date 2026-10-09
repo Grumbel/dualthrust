@@ -79,6 +79,7 @@ Small sparse-set ECS plus data tables; all tuning/art data lives in `defs.hpp`.
 - `systems.cpp` — `forces_system` (thrust, leg springs) → `Physics::step` → `sync_system` → `impact_system` (hit events: crash
   or bounce) → `ground_system` (touching/resting; `Flight` Flying/Landed/Crashed is a label, the body always simulates;
   Landed = touching, upright, still and thrust-free for `SETTLE_TIME`) → events, exhaust, particles; fixed 120 Hz step from `main.cpp`
+- `save.hpp/.cpp` — world snapshot in `$XDG_STATE_HOME/dualthrust/world` (+ `world.fog`); restored on launch
 - `stats.hpp/.cpp` — permanent statistics: `STAT_FIELDS` table (key, menu label, format); file `$XDG_STATE_HOME/dualthrust/stats`,
   saved on landing/crash, every 30 s, on pause and at exit (not in `--frames`/`--screenshot` runs). Web build mounts the state dir as IDBFS.
 - `cave.cpp` — generation stages + baked per-cell `depth` / `contour` (rendering reads these, never recomputes)

@@ -16,6 +16,7 @@
 
 #include "audio.hpp"
 #include "config.hpp"
+#include "save.hpp"
 #include "input.hpp"
 #include "defs.hpp"
 #include "game.hpp"
@@ -97,7 +98,7 @@ void print_help(const char* argv0) {
       "  --frames N           Exit after N frames\n"
       "  --screenshot FILE    Save a BMP of the last frame (with --frames)\n"
       "\n"
-      "Config: $XDG_CONFIG_HOME/dualthrust/config  (default ~/.config/dualthrust/)\n",
+      "Config: $XDG_CONFIG_HOME/dualthrust/config  (default ~/.config/dualthrust/)\nState:  $XDG_STATE_HOME/dualthrust/         (stats + world save)\n",
       argv0, SHIP_DEF_COUNT - 1);
 }
 
@@ -191,7 +192,8 @@ void print_diagnostics(const char* argv0, const Options& o) {
   const char* xst = std::getenv("XDG_STATE_HOME");
   std::printf("  HOME:       %s\n  XDG_CONFIG_HOME: %s\n  XDG_STATE_HOME:  %s\n", home ? home : "(unset)",
               xdg ? xdg : "(unset)", xst ? xst : "(unset)");
-  std::printf("  config:     %s\n  state:      %s\n", config_file_path().c_str(), state_dir_path().c_str());
+  std::printf("  config:     %s\n  state:      %s\n  world:      %s\n", config_file_path().c_str(), state_dir_path().c_str(),
+              world_file_path().c_str());
   char cwd[4096];
   if (getcwd(cwd, sizeof cwd)) std::printf("  cwd:        %s\n", cwd);
   std::printf("  window:     %dx%d\n  cave seed:  0x%08x (%u)\n", o.win_w, o.win_h, o.seed, o.seed);
@@ -258,8 +260,21 @@ int main(int argc, char** argv) {
 
   // --- World ---
   Game game;
+  bool restored_world = false;
+  unsigned world_seed = opt.seed;
+  // Peek seed from a previous session so we regenerate the same cave layout
+  if (opt.frames == 0 && !opt.screenshot && world_save_exists()) {
+    if (std::FILE* wf = std::fopen(world_file_path().c_str(), "r")) {
+      char line[256];
+      while (std::fgets(line, sizeof line, wf)) {
+        unsigned s = 0;
+        if (std::sscanf(line, "seed=%u", &s) == 1 && s != 0) { world_seed = s; break; }
+      }
+      std::fclose(wf);
+    }
+  }
   std::printf("Generating cave...\n");
-  game.cave.generate(opt.seed);
+  game.cave.generate(world_seed);
   reset_fog(game);
   std::printf("Cave ready (%d pads)\n", static_cast<int>(game.cave.pads.size()));
   game.rng = Rng(SDL_GetTicks() | 1u);
@@ -267,14 +282,17 @@ int main(int argc, char** argv) {
   game.stats_enabled = opt.frames == 0 && !opt.screenshot;
   if (game.stats_enabled) {
     game.stats = load_stats();
-    game.stats.caves += 1;
-    game.stats_dirty = true;
   }
   auto flush_stats = [&] {
     if (!game.stats_enabled || !game.stats_dirty) return;
     if (save_stats(game.stats)) game.stats_dirty = false;
   };
+  auto persist_world = [&] {
+    if (opt.frames != 0 || opt.screenshot) return;
+    if (save_world(game, ship_def_index(game))) flush_user_files();
+  };
   double stats_age = 0.0;  // real seconds since the last save
+  double world_age = 0.0;  // real seconds since the last world snapshot
 
   UserConfig user = load_config();
   BindMap binds;
@@ -312,7 +330,31 @@ int main(int argc, char** argv) {
     snap_camera(game);
   };
   auto first_pad_x = [&] { return 0.5f * (game.cave.pads[0].x0 + game.cave.pads[0].x1); };
-  new_game_at(first_pad_x());
+  if (opt.frames == 0 && !opt.screenshot && !opt.at_set) {
+    int ship_from_save = user.ship;
+    if (load_world(game, &ship_from_save)) {
+      restored_world = true;
+      if (ship_from_save != user.ship) {
+        user.ship = ship_from_save;
+        set_ship_def(game, user.ship);
+        // set_ship_def may move the ship; re-apply saved pose from load_world via a second load is heavy —
+        // load_world already placed the ship after create_ship, so if we switch def we must re-load.
+        // Simpler: create_ship already used user.ship; if save differs, switch and reload world pose.
+        load_world(game, nullptr);
+      }
+      std::printf("  world:      restored from %s
+", world_file_path().c_str());
+    } else {
+      new_game_at(first_pad_x());
+      if (game.stats_enabled) { game.stats.caves += 1; game.stats_dirty = true; }
+    }
+  } else {
+    new_game_at(first_pad_x());
+    if (game.stats_enabled && opt.frames == 0 && !opt.screenshot) {
+      game.stats.caves += 1;
+      game.stats_dirty = true;
+    }
+  }
   if (opt.at_set) {
     place_ship(game, {opt.at_x, opt.at_y}, opt.at_deg * PI / 180.f);
     snap_camera(game);
@@ -374,10 +416,13 @@ int main(int argc, char** argv) {
     persist_config();
   };
   auto new_cave = [&] {
+    clear_world_save();
     game.cave.generate(SDL_GetTicks());
     reset_fog(game);
     new_game_at(first_pad_x());
     if (game.stats_enabled) { game.stats.caves += 1; game.stats_dirty = true; }
+    save_world(game, ship_def_index(game));
+    flush_user_files();
   };
   // Respawn on the home pad after a crash — never regenerates the cave; no-ops while alive
   auto respawn_after_crash = [&] {
@@ -491,7 +536,7 @@ int main(int argc, char** argv) {
         show_toast("TUNE RESET");
         break;
       case MenuAction::MainMenu: ui.screen = Screen::Title; ui.nav_depth = 0; open_page(MenuPage::Title); break;
-      case MenuAction::Quit: persist_config(); running = false; break;
+      case MenuAction::Quit: persist_config(); persist_world(); running = false; break;
       case MenuAction::Back: if (!pop_page()) { /* top-level */ } break;
       case MenuAction::Ship: cycle_ship(delta); break;
       case MenuAction::Zoom: zoom_to(game.cam.zoom + delta, true); break;
@@ -531,6 +576,7 @@ int main(int argc, char** argv) {
   };
   auto open_pause = [&] {
     flush_stats();
+    persist_world();
     ui.screen = Screen::Pause;
     ui.nav_depth = 0;
     open_page(MenuPage::Pause);
@@ -851,9 +897,14 @@ int main(int argc, char** argv) {
     }
     game.fired.clear();
     stats_age += dt;
+    world_age += dt;
     if (milestone || (game.stats_dirty && stats_age > 30.0)) {
       flush_stats();
       stats_age = 0.0;
+    }
+    if (world_age > 20.0) {
+      persist_world();
+      world_age = 0.0;
     }
 
     const double t1 = stamp();
@@ -891,6 +942,7 @@ int main(int argc, char** argv) {
 #endif
 
   persist_config();
+  persist_world();
   flush_stats();
   if (pad) SDL_GameControllerClose(pad);
   audio.shutdown();

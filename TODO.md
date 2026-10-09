@@ -17,6 +17,8 @@
 
 ## Open
 
+- [x] Persist world state under XDG state dir (restore on next launch)
+
 - [ ] Real-hardware pass through the PortMaster launcher; controller mapping basically works but still needs
       tweaks and customization (R36S)
 - [ ] Audio in the browser untested (gamepad in the browser works)
