@@ -185,11 +185,11 @@ void Gfx::build_minimap(const Cave& cave, const std::vector<uint8_t>& revealed) 
       px[static_cast<size_t>(i)] = pack({static_cast<uint8_t>(v / 3), v, static_cast<uint8_t>(v / 2), 220});
       continue;
     }
-    // Solid returns: green rock; open revealed cells are a faint void so tunnels read as outlines
+    // Solid returns: green rock; explored open air is pure black (only unexplored is noise)
     if (cave.solid[static_cast<size_t>(i)])
-      px[static_cast<size_t>(i)] = pack(with_alpha(pal::MID, 160));
+      px[static_cast<size_t>(i)] = pack(with_alpha(pal::MID, 180));
     else
-      px[static_cast<size_t>(i)] = pack(with_alpha(pal::DIM, 40));
+      px[static_cast<size_t>(i)] = pack({0, 0, 0, 255});
   }
   minimap_ = be_->create_texture(Cave::GW, Cave::GH, reinterpret_cast<const uint8_t*>(px.data()), false);
   minimap_generation_ = cave.generation;

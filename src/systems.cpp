@@ -630,6 +630,21 @@ void update_sonar(Game& g, float dt) {
       painted = true;
     }
   };
+  // How deep a solid cell sits behind the open surface (0 = open, 1 = surface, 2 = one cell in, …).
+  auto rock_depth = [&](int gx, int gy) -> int {
+    if (!g.cave.is_solid_cell(gx, gy)) return 0;
+    int best = 8;
+    for (int r = 1; r <= 2; ++r) {
+      for (int oy = -r; oy <= r; ++oy)
+        for (int ox = -r; ox <= r; ++ox) {
+          if (std::abs(ox) != r && std::abs(oy) != r) continue;  // ring only
+          if (!g.cave.is_solid_cell(gx + ox, gy + oy)) best = std::min(best, r);
+        }
+      if (best <= r) break;
+    }
+    return best;
+  };
+
   for (int gy = gy0; gy <= gy1; ++gy) {
     for (int gx = gx0; gx <= gx1; ++gx) {
       const float cx = (gx + 0.5f) * Cave::CELL;
@@ -637,12 +652,16 @@ void update_sonar(Game& g, float dt) {
       const float dx = cx - s.origin.x, dy = cy - s.origin.y;
       const float d = std::sqrt(dx * dx + dy * dy);
       if (d < r0 || d >= r1) continue;
-      // Return from rock: paint the solid cell and a 1-cell halo of open air so tunnels read as outlines
+      // Echo from the rock face only: surface + one cell of penetration, not the solid bulk
       if (g.cave.is_solid_cell(gx, gy)) {
-        mark(gx, gy);
-        for (int oy = -1; oy <= 1; ++oy)
-          for (int ox = -1; ox <= 1; ++ox)
-            if (!g.cave.is_solid_cell(gx + ox, gy + oy)) mark(gx + ox, gy + oy);
+        const int depth = rock_depth(gx, gy);
+        if (depth >= 1 && depth <= 2) {
+          mark(gx, gy);
+          // Open air on the free side of the face → black on the chart (explored void)
+          for (int oy = -1; oy <= 1; ++oy)
+            for (int ox = -1; ox <= 1; ++ox)
+              if (!g.cave.is_solid_cell(gx + ox, gy + oy)) mark(gx + ox, gy + oy);
+        }
       }
     }
   }
