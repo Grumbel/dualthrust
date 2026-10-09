@@ -98,8 +98,9 @@ struct SonarPing {
   Vec2 origin;
   float radius = 0.f;
   float prev_radius = 0.f;
-  float max_radius = 900.f;  // world px
+  float max_radius = 900.f;  // world px — painting stops here
   float speed = 720.f;       // world px per sim second
+  float fade = 1.f;          // 1..0 visual life after the wave reaches max_radius
 };
 
 struct Game {

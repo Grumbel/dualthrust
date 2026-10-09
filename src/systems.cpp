@@ -623,7 +623,7 @@ void fire_sonar(Game& g) {
   }
   fl.fuel = std::max(0.f, fl.fuel - tune::FUEL_SONAR);
   const Vec2 p = ship_transform(g).pos;
-  g.sonar = SonarPing{true, p, 0.f, 0.f, 960.f, 780.f};
+  g.sonar = SonarPing{true, p, 0.f, 0.f, 960.f, 780.f, 1.f};
   g.sonar_cool = tune::SONAR_COOLDOWN;
   g.events.push_back({SimEventKind::SonarPing, p, {}, 200.f});
 }
@@ -632,8 +632,21 @@ void update_sonar(Game& g, float dt) {
   if (!g.sonar.active) return;
   SonarPing& s = g.sonar;
   s.prev_radius = s.radius;
-  s.radius = std::min(s.radius + s.speed * dt, s.max_radius);
-  const float r0 = s.prev_radius, r1 = s.radius;
+  const bool expanding = s.radius < s.max_radius - 1e-3f;
+  if (expanding) {
+    s.radius = std::min(s.radius + s.speed * dt, s.max_radius);
+  } else {
+    // Soft stop: keep drifting outward slowly while the ring fades away
+    s.radius += s.speed * 0.35f * s.fade * dt;
+    s.fade -= dt / 0.55f;
+    if (s.fade <= 0.f) {
+      s.active = false;
+      return;
+    }
+  }
+  // Only paint while the wavefront is still in the active range (not during the fade-out drift)
+  if (!expanding && s.prev_radius >= s.max_radius - 1e-3f) return;
+  const float r0 = s.prev_radius, r1 = std::min(s.radius, s.max_radius);
   // Bounding box of the annulus in cell coordinates
   const float pad = Cave::CELL * 2.f;
   const int gx0 = std::max(0, static_cast<int>((s.origin.x - r1 - pad) / Cave::CELL));
@@ -710,7 +723,6 @@ void update_sonar(Game& g, float dt) {
       for (int ox = -1; ox <= 1; ++ox) mark(gx + ox, gy + oy);
   });
   if (painted) g.reveal_dirty = true;
-  if (s.radius >= s.max_radius - 1e-3f) s.active = false;
 }
 
 void step_sim(Game& g, float dt) {
