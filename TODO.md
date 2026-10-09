@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-048.1-stack-stick-up-down-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-048.1-stack-stick-up-down-9a093cd` → tip `da0cfce`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
