@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-043.1-x11-exit-shutdown-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-043.1-x11-exit-shutdown-9a093cd` → tip `cb2b1cb`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
