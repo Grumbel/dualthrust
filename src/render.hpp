@@ -8,6 +8,7 @@
 
 #include "backend.hpp"
 #include "game.hpp"
+#include "input.hpp"
 #include "ui.hpp"
 
 // All drawing. Static art (font, rock tiles, CRT overlay, minimap) is baked into textures once
@@ -22,7 +23,7 @@ class Gfx {
   void resize();  // call after window size / fullscreen changes
   int width() const { return w_; }
   int height() const { return h_; }
-  void draw(const Game& g, const UiState& ui);
+  void draw(const Game& g, const UiState& ui, const BindMap& binds);
   bool save_screenshot(const char* path) const;
 
  private:
@@ -57,9 +58,9 @@ class Gfx {
   void draw_ship(const Game& g, double t) const;
   void draw_cargo(const Game& g, double t) const;
   void draw_rope(const Game& g, double t) const;
-  void draw_hud(const Game& g, const UiState& ui) const;
+  void draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const;
   void draw_minimap(const Game& g, double t);
-  void draw_menu(const Game& g, const UiState& ui) const;   // boxed page: pause, options
+  void draw_menu(const Game& g, const UiState& ui, const BindMap& binds) const;
   void draw_title(const Game& g, const UiState& ui) const;  // logo + the title page
   void item_value(const MenuItem& item, const Game& g, const UiState& ui, char* buf, size_t n) const;
 

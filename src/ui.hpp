@@ -10,12 +10,13 @@
 enum class InputDevice { Keyboard, Gamepad };
 
 enum class Screen { Title, Play, Pause };
-enum class MenuPage { Title, Pause, Options, Stats };
+enum class MenuPage { Title, Pause, Options, Stats, Controls };
 
 enum class MenuAction {
   Start, Resume, NewCave, Options, Stats, MainMenu, Quit, Back,  // actions
   Ship, Zoom, UiScale, SwapEngines, Crt, Fullscreen,       // choices (on/off or a list), changed with left/right
   Music, Effects,                                         // sliders 0..SLIDER_MAX
+  Controls, ResetBinds,                                   // open Controls page / restore defaults
 };
 enum class ItemKind { Action, Choice, Slider };
 
@@ -59,6 +60,13 @@ inline constexpr MenuItem OPTION_ITEMS[] = {
     {MenuAction::Effects, "EFFECTS", ItemKind::Slider},
     {MenuAction::Crt, "CRT EFFECT", ItemKind::Choice},
     {MenuAction::Fullscreen, "FULLSCREEN", ItemKind::Choice},
+    {MenuAction::Controls, "CONTROLS", ItemKind::Action},
+    {MenuAction::Back, "BACK", ItemKind::Action},
+};
+
+// Controls page: one row per rebindable action, then Reset / Back. Values are drawn from BindMap.
+inline constexpr MenuItem CONTROL_ITEMS[] = {
+    {MenuAction::ResetBinds, "RESET DEFAULTS", ItemKind::Action},
     {MenuAction::Back, "BACK", ItemKind::Action},
 };
 
@@ -77,6 +85,7 @@ inline const MenuPageDef& page_def(MenuPage p) {
       {"PAUSED", PAUSE_ITEMS, item_count(PAUSE_ITEMS)},
       {"OPTIONS", OPTION_ITEMS, item_count(OPTION_ITEMS)},
       {"STATISTICS", STATS_ITEMS, item_count(STATS_ITEMS)},
+      {"CONTROLS", CONTROL_ITEMS, item_count(CONTROL_ITEMS)},
   };
   return defs[static_cast<int>(p)];
 }
@@ -97,6 +106,13 @@ struct UiState {
   double time = 0.0;      // real seconds, for UI animation
   char toast[40] = "";    // short message above the minimap, fading out
   float toast_timer = 0.f;
+
+  // Controls page: list cursor covers ACTION_COUNT action rows + CONTROL_ITEMS footer.
+  // When rebinding, the next key / button / axis assigns to rebind_action for rebind_keyboard.
+  bool rebinding = false;
+  int rebind_action = 0;     // Action as int
+  bool rebind_keyboard = true;
+  int controls_cursor = 0;   // 0..ACTION_COUNT-1 = action rows, then footer items
 
   bool in_menu() const { return screen != Screen::Play; }
 };

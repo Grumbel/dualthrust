@@ -4,6 +4,8 @@
 
 #include <string>
 
+#include "input.hpp"
+
 // XDG config: $XDG_CONFIG_HOME/dualthrust/config (default ~/.config/dualthrust/config)
 struct UserConfig {
   bool fullscreen = false;
@@ -28,4 +30,7 @@ std::string config_file_path();
 bool make_dirs(const std::string& dir);  // mkdir -p
 void flush_user_files();                 // web build: write the IndexedDB-backed directories back; else a no-op
 UserConfig load_config();
-void save_config(const UserConfig& c);
+// Writes scalars and binds together. When binds is null, existing bind lines are preserved.
+void save_config(const UserConfig& c, const BindMap* binds = nullptr);
+void load_binds(BindMap& m);   // starts from defaults, overlays saved lines
+void save_binds(const BindMap& m);  // preserves scalar settings

@@ -3,6 +3,8 @@
 
 #include "config.hpp"
 
+#include "input.hpp"
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -98,7 +100,28 @@ UserConfig load_config() {
   return c;
 }
 
-void save_config(const UserConfig& c) {
+void load_binds(BindMap& m) {
+  set_default_binds(m);
+  std::FILE* f = std::fopen(config_file_path().c_str(), "r");
+  if (!f) return;
+  char line[256];
+  while (std::fgets(line, sizeof(line), f)) {
+    char side = 0;
+    int action = -1, slot = -1;
+    char val[64] = {};
+    if (line[0] == '#') continue;
+    if (std::sscanf(line, "bind.%c.%d.%d=%63s", &side, &action, &slot, val) != 4) continue;
+    if (action < 0 || action >= ACTION_COUNT || slot < 0 || slot >= BIND_SLOTS) continue;
+    InputSrc src = src_decode(val);
+    if (side == 'K' || side == 'k') m.kbd[action][slot] = src;
+    else if (side == 'P' || side == 'p') m.pad[action][slot] = src;
+  }
+  std::fclose(f);
+}
+
+namespace {
+
+void write_config_file(const UserConfig& c, const BindMap& m) {
   if (!make_dirs(config_dir_path())) {
     std::fprintf(stderr, "dualthrust: cannot create %s: %s\n", config_dir_path().c_str(), std::strerror(errno));
     return;
@@ -108,8 +131,37 @@ void save_config(const UserConfig& c) {
     std::fprintf(stderr, "dualthrust: cannot write %s: %s\n", config_file_path().c_str(), std::strerror(errno));
     return;
   }
-  std::fprintf(f, "# dualthrust config (XDG)\nfullscreen=%d\nswap_engines=%d\nsound=%d\nship=%d\nzoom=%d\nui_scale=%d\ncrt=%d\nmusic=%d\nsfx=%d\n",
-               c.fullscreen ? 1 : 0, c.swap_engines ? 1 : 0, c.sound ? 1 : 0, c.ship, c.zoom, c.ui_scale, c.crt ? 1 : 0, c.music, c.sfx);
+  std::fprintf(f,
+               "# dualthrust config (XDG)\nfullscreen=%d\nswap_engines=%d\nsound=%d\nship=%d\nzoom=%d\nui_scale=%d\ncrt=%d\nmusic=%d\nsfx=%d\n",
+               c.fullscreen ? 1 : 0, c.swap_engines ? 1 : 0, c.sound ? 1 : 0, c.ship, c.zoom, c.ui_scale, c.crt ? 1 : 0,
+               c.music, c.sfx);
+  char enc[32];
+  for (int a = 0; a < ACTION_COUNT; ++a) {
+    for (int s = 0; s < BIND_SLOTS; ++s) {
+      if (!m.kbd[a][s].empty()) {
+        src_encode(m.kbd[a][s], enc, sizeof enc);
+        std::fprintf(f, "bind.K.%d.%d=%s\n", a, s, enc);
+      }
+      if (!m.pad[a][s].empty()) {
+        src_encode(m.pad[a][s], enc, sizeof enc);
+        std::fprintf(f, "bind.P.%d.%d=%s\n", a, s, enc);
+      }
+    }
+  }
   std::fclose(f);
   flush_user_files();
 }
+
+}  // namespace
+
+void save_config(const UserConfig& c, const BindMap* binds) {
+  if (binds) {
+    write_config_file(c, *binds);
+    return;
+  }
+  BindMap m;
+  load_binds(m);
+  write_config_file(c, m);
+}
+
+void save_binds(const BindMap& m) { write_config_file(load_config(), m); }

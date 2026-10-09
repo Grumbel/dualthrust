@@ -16,6 +16,7 @@
 
 #include "audio.hpp"
 #include "config.hpp"
+#include "input.hpp"
 #include "defs.hpp"
 #include "game.hpp"
 #include "render.hpp"
@@ -196,53 +197,6 @@ void print_diagnostics(const char* argv0, const Options& o) {
   std::fflush(stdout);
 }
 
-// Engine levels 0..1 per control channel from triggers / shoulders / sticks (up = thrust) and the keyboard.
-//   0 left trigger, 1 right trigger, 2 left stick up, 3 right stick up
-// Ships with only two engines (`channels` = 2) fold the sticks into the left and right engines, as always.
-void read_thrust(SDL_GameController* pad, int channels, float out[4]) {
-  float trig[2] = {0.f, 0.f}, stick[2] = {0.f, 0.f};
-  if (pad) {
-    auto trigger = [&](SDL_GameControllerAxis ax) {
-      return clampf(SDL_GameControllerGetAxis(pad, ax) / 32767.f, 0.f, 1.f);
-    };
-    constexpr int DEAD = 8000;
-    auto stick_up = [&](SDL_GameControllerAxis ax) {
-      int raw = SDL_GameControllerGetAxis(pad, ax);
-      return raw >= -DEAD ? 0.f : clampf((-raw - DEAD) / static_cast<float>(32768 - DEAD), 0.f, 1.f);
-    };
-    trig[0] = trigger(SDL_CONTROLLER_AXIS_TRIGGERLEFT);
-    trig[1] = trigger(SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
-    stick[0] = stick_up(SDL_CONTROLLER_AXIS_LEFTY);
-    stick[1] = stick_up(SDL_CONTROLLER_AXIS_RIGHTY);
-    // shoulder buttons: full thrust (handhelds without analog triggers)
-    if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) trig[0] = 1.f;
-    if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) trig[1] = 1.f;
-  }
-  // Keyboard, one hand per engine: Ctrl (or A / D, arrows) = full thrust, Shift = half thrust;
-  // the big ships' two extra thrusters: W / Up and Down / Right Alt
-  const Uint8* keys = SDL_GetKeyboardState(nullptr);
-  const bool full[2] = {keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT],
-                        keys[SDL_SCANCODE_RCTRL] || keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT]};
-  const bool half[2] = {keys[SDL_SCANCODE_LSHIFT] != 0, keys[SDL_SCANCODE_RSHIFT] != 0};
-  for (int i = 0; i < 2; ++i) {
-    if (full[i]) trig[i] = 1.f;
-    else if (half[i]) trig[i] = std::max(trig[i], 0.5f);
-  }
-  if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP]) stick[0] = 1.f;
-  if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_RALT]) stick[1] = 1.f;
-
-  out[0] = trig[0];
-  out[1] = trig[1];
-  out[2] = out[3] = 0.f;
-  if (channels >= 4) {
-    out[2] = stick[0];
-    out[3] = stick[1];
-  } else {
-    out[0] = std::max(out[0], stick[0]);
-    out[1] = std::max(out[1], stick[1]);
-  }
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -321,6 +275,8 @@ int main(int argc, char** argv) {
   double stats_age = 0.0;  // real seconds since the last save
 
   UserConfig user = load_config();
+  BindMap binds;
+  load_binds(binds);
   if (opt.ship >= 0) user.ship = opt.ship;
   if (user.ship < 0 || user.ship >= SHIP_DEF_COUNT) user.ship = DEFAULT_SHIP;
   if (opt.zoom >= 0) user.zoom = opt.zoom;
@@ -390,8 +346,9 @@ int main(int argc, char** argv) {
     c.crt = ui.crt;
     c.music = ui.music_vol;
     c.sfx = ui.sfx_vol;
-    save_config(c);
+    save_config(c, &binds);
   };
+  auto persist_binds = [&] { save_binds(binds); };
   auto sync_viewport = [&] {
     gfx.resize();
     update_view(game, 0.f, aspect(), true);
@@ -470,6 +427,19 @@ int main(int argc, char** argv) {
       case MenuAction::NewCave: new_cave(); ui.screen = Screen::Play; break;
       case MenuAction::Options: ui.options_back = ui.page; ui.back_cursor = ui.cursor; open_page(MenuPage::Options); break;
       case MenuAction::Stats: ui.options_back = ui.page; ui.back_cursor = ui.cursor; open_page(MenuPage::Stats); break;
+      case MenuAction::Controls:
+        ui.options_back = ui.page;
+        ui.back_cursor = ui.cursor;
+        ui.controls_cursor = 0;
+        ui.rebinding = false;
+        ui.rebind_keyboard = ui.device != InputDevice::Gamepad;
+        open_page(MenuPage::Controls);
+        break;
+      case MenuAction::ResetBinds:
+        set_default_binds(binds);
+        persist_binds();
+        show_toast("BINDS RESET");
+        break;
       case MenuAction::MainMenu: ui.screen = Screen::Title; open_page(MenuPage::Title); break;
       case MenuAction::Quit: persist_config(); running = false; break;
       case MenuAction::Back: open_page(ui.options_back, ui.back_cursor); break;  // back on the entry it came from
@@ -488,6 +458,10 @@ int main(int argc, char** argv) {
     }
   };
   auto menu_back = [&] {  // Escape / B
+    if (ui.page == MenuPage::Controls && ui.rebinding) {
+      ui.rebinding = false;
+      return;
+    }
     switch (ui.page) {
       case MenuPage::Title:
 #ifndef __EMSCRIPTEN__
@@ -497,7 +471,9 @@ int main(int argc, char** argv) {
         break;
       case MenuPage::Pause: ui.screen = Screen::Play; break;
       case MenuPage::Options:
-      case MenuPage::Stats: open_page(ui.options_back, ui.back_cursor); break;
+      case MenuPage::Stats:
+      case MenuPage::Controls: open_page(ui.options_back, ui.back_cursor); break;
+      default: break;
     }
   };
   auto open_pause = [&] {
@@ -533,21 +509,60 @@ int main(int argc, char** argv) {
         case SDL_KEYDOWN: {
           ui.device = InputDevice::Keyboard;
           const SDL_Keycode k = ev.key.keysym.sym;
+          const SDL_Scancode sc = ev.key.keysym.scancode;
           const bool enter = k == SDLK_RETURN || k == SDLK_KP_ENTER;
           if (enter && (ev.key.keysym.mod & KMOD_ALT)) { toggle_fullscreen(); break; }
           if (k == SDLK_f) { toggle_fullscreen(); break; }
           if (k == SDLK_m) { toggle_sound(); break; }
+
+          // Listening for a new keyboard bind
+          if (ui.rebinding && ui.rebind_keyboard) {
+            if (k == SDLK_ESCAPE) { ui.rebinding = false; break; }
+            assign_bind(binds, static_cast<Action>(ui.rebind_action), key_src(sc), true);
+            persist_binds();
+            ui.rebinding = false;
+            break;
+          }
+
+          if (ui.page == MenuPage::Controls && ui.screen != Screen::Play) {
+            const int n = ACTION_COUNT + item_count(CONTROL_ITEMS);
+            if (k == SDLK_UP || k == SDLK_w) ui.controls_cursor = (ui.controls_cursor + n - 1) % n;
+            else if (k == SDLK_DOWN || k == SDLK_s) ui.controls_cursor = (ui.controls_cursor + 1) % n;
+            else if (k == SDLK_TAB) ui.rebind_keyboard = !ui.rebind_keyboard;
+            else if (k == SDLK_ESCAPE) menu_back();
+            else if (enter || k == SDLK_SPACE) {
+              if (ui.controls_cursor < ACTION_COUNT) {
+                ui.rebinding = true;
+                ui.rebind_action = ui.controls_cursor;
+                ui.rebind_keyboard = true;
+              } else {
+                const MenuItem& item = CONTROL_ITEMS[ui.controls_cursor - ACTION_COUNT];
+                if (item.action == MenuAction::ResetBinds) {
+                  set_default_binds(binds);
+                  persist_binds();
+                  show_toast("BINDS RESET");
+                } else if (item.action == MenuAction::Back) {
+                  menu_back();
+                }
+              }
+            }
+            break;
+          }
+
           if (ui.screen == Screen::Play) {
-            if (k == SDLK_ESCAPE) open_pause();
-            if (k == SDLK_TAB) zoom_to(game.cam.zoom + 1, true);
-            if (k == SDLK_s) cycle_ship(+1);
-            if (k == SDLK_x) toggle_swap();
-            if (k == SDLK_SPACE) toggle_legs(game);
-            if (k == SDLK_r) toggle_grip(game);
-            if (k == SDLK_q) set_winch(game, true);
-            if (k == SDLK_e) set_winch(game, false);
-            if (enter) respawn_after_crash();
-            if (k == SDLK_g) new_cave();
+            if (action_pressed_key(binds, Action::Pause, sc)) open_pause();
+            if (action_pressed_key(binds, Action::ZoomFarther, sc) || k == SDLK_TAB)
+              zoom_to(game.cam.zoom + 1, true);
+            if (action_pressed_key(binds, Action::ZoomCloser, sc))
+              zoom_to(game.cam.zoom - 1, false);
+            if (action_pressed_key(binds, Action::NextShip, sc)) cycle_ship(+1);
+            if (action_pressed_key(binds, Action::SwapEngines, sc)) toggle_swap();
+            if (action_pressed_key(binds, Action::Legs, sc)) toggle_legs(game);
+            if (action_pressed_key(binds, Action::Grip, sc)) toggle_grip(game);
+            if (action_pressed_key(binds, Action::WinchOut, sc)) set_winch(game, true);
+            if (action_pressed_key(binds, Action::WinchIn, sc)) set_winch(game, false);
+            if (action_pressed_key(binds, Action::Respawn, sc)) respawn_after_crash();
+            if (action_pressed_key(binds, Action::NewCave, sc)) new_cave();
           } else {
             if (k == SDLK_UP || k == SDLK_w) menu_move(-1);
             if (k == SDLK_DOWN || k == SDLK_s) menu_move(+1);
@@ -560,21 +575,61 @@ int main(int argc, char** argv) {
         }
         case SDL_CONTROLLERBUTTONDOWN: {
           ui.device = InputDevice::Gamepad;
-          const int b = ev.cbutton.button;
+          const Uint8 b = ev.cbutton.button;
+
+          if (ui.rebinding && !ui.rebind_keyboard) {
+            // Start cancels so face buttons (including B) can be rebound
+            if (b == SDL_CONTROLLER_BUTTON_START) {
+              ui.rebinding = false;
+              break;
+            }
+            assign_bind(binds, static_cast<Action>(ui.rebind_action),
+                        btn_src(static_cast<SDL_GameControllerButton>(b)), false);
+            persist_binds();
+            ui.rebinding = false;
+            break;
+          }
+
+          if (ui.page == MenuPage::Controls && ui.screen != Screen::Play) {
+            const int n = ACTION_COUNT + item_count(CONTROL_ITEMS);
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) ui.controls_cursor = (ui.controls_cursor + n - 1) % n;
+            else if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) ui.controls_cursor = (ui.controls_cursor + 1) % n;
+            else if (b == SDL_CONTROLLER_BUTTON_Y) ui.rebind_keyboard = !ui.rebind_keyboard;
+            else if (b == SDL_CONTROLLER_BUTTON_B) menu_back();
+            else if (b == SDL_CONTROLLER_BUTTON_A) {
+              if (ui.controls_cursor < ACTION_COUNT) {
+                ui.rebinding = true;
+                ui.rebind_action = ui.controls_cursor;
+                ui.rebind_keyboard = false;
+              } else {
+                const MenuItem& item = CONTROL_ITEMS[ui.controls_cursor - ACTION_COUNT];
+                if (item.action == MenuAction::ResetBinds) {
+                  set_default_binds(binds);
+                  persist_binds();
+                  show_toast("BINDS RESET");
+                } else if (item.action == MenuAction::Back) {
+                  menu_back();
+                }
+              }
+            }
+            break;
+          }
+
           if (ui.screen == Screen::Play) {
-            if (b == SDL_CONTROLLER_BUTTON_START) open_pause();
-            if (b == SDL_CONTROLLER_BUTTON_BACK) cycle_ship(+1);
-            if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) zoom_to(game.cam.zoom - 1, false);    // closer
-            if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) zoom_to(game.cam.zoom + 1, false);  // farther
-            if (b == SDL_CONTROLLER_BUTTON_DPAD_LEFT) set_winch(game, true);
-            if (b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) set_winch(game, false);
-            if (b == SDL_CONTROLLER_BUTTON_B) respawn_after_crash();
-            if (b == SDL_CONTROLLER_BUTTON_A) {  // respawn after a crash, else the hook grabs / lets go
+            if (action_pressed_button(binds, Action::Pause, b)) open_pause();
+            if (action_pressed_button(binds, Action::NextShip, b)) cycle_ship(+1);
+            if (action_pressed_button(binds, Action::ZoomCloser, b)) zoom_to(game.cam.zoom - 1, false);
+            if (action_pressed_button(binds, Action::ZoomFarther, b)) zoom_to(game.cam.zoom + 1, false);
+            if (action_pressed_button(binds, Action::WinchOut, b)) set_winch(game, true);
+            if (action_pressed_button(binds, Action::WinchIn, b)) set_winch(game, false);
+            if (action_pressed_button(binds, Action::Legs, b)) toggle_legs(game);
+            if (action_pressed_button(binds, Action::NewCave, b)) new_cave();
+            if (action_pressed_button(binds, Action::SwapEngines, b)) toggle_swap();
+            if (action_pressed_button(binds, Action::Respawn, b)) respawn_after_crash();
+            if (action_pressed_button(binds, Action::Grip, b)) {
               if (game.ecs.get<Flight>(game.ship).state == FlightState::Crashed) respawn_after_crash();
               else toggle_grip(game);
             }
-            if (b == SDL_CONTROLLER_BUTTON_Y) new_cave();
-            if (b == SDL_CONTROLLER_BUTTON_X) toggle_legs(game);
           } else {
             if (b == SDL_CONTROLLER_BUTTON_START) {
               if (ui.screen == Screen::Title) start_game();
@@ -591,6 +646,13 @@ int main(int argc, char** argv) {
         }
         case SDL_CONTROLLERAXISMOTION:  // sticks and triggers count as using the pad (ignore dead-zone noise)
           if (std::abs(ev.caxis.value) > 12000) ui.device = InputDevice::Gamepad;
+          if (ui.rebinding && !ui.rebind_keyboard && std::abs(ev.caxis.value) > 16000) {
+            const int sign = ev.caxis.value < 0 ? -1 : 1;
+            assign_bind(binds, static_cast<Action>(ui.rebind_action),
+                        axis_src(static_cast<SDL_GameControllerAxis>(ev.caxis.axis), sign), false);
+            persist_binds();
+            ui.rebinding = false;
+          }
           break;
         case SDL_MOUSEWHEEL:
           ui.device = InputDevice::Keyboard;
@@ -611,7 +673,7 @@ int main(int argc, char** argv) {
     // Input → thruster levels (L/R swapped on request)
     float in[4] = {0.f, 0.f, 0.f, 0.f};
     if (ui.screen == Screen::Play) {
-      read_thrust(pad, ship_channels(game), in);
+      read_thrust_bound(binds, pad, ship_channels(game), in);
       in[0] = std::max(in[0], opt.hold[0]);
       in[1] = std::max(in[1], opt.hold[1]);
     }
@@ -665,7 +727,7 @@ int main(int argc, char** argv) {
     }
 
     const double t1 = stamp();
-    gfx.draw(game, ui);
+    gfx.draw(game, ui, binds);
     const double t2 = stamp();
     const bool last_frame = opt.frames > 0 && frame + 1 >= opt.frames;
     if (last_frame && opt.screenshot && !gfx.save_screenshot(opt.screenshot))  // before the buffer swap

@@ -97,7 +97,7 @@ stripes, each with hydraulic landing struts and a winch under the belly.
 On-screen hints follow the device you used last: they name keyboard keys or gamepad buttons accordingly.
 
 **Menus.** The game opens on a title screen (Start, Options, Statistics, Quit). Pausing shows Resume, New Cave, Options,
-Statistics, Main Menu and Quit. **Options** has Ship, Zoom, UI Scale (1X–4X), Swap Engines, Music and Effects volume (sliders), CRT Effect
+Statistics, Main Menu and Quit. **Options** has Ship, Zoom, UI Scale (1X–4X), Swap Engines, Music and Effects volume (sliders), CRT Effect, Controls
 (scanlines and vignette on or off) and Fullscreen; change a value with left/right, or Enter/A to step it forward.
 Everything is remembered between runs.
 
@@ -106,6 +106,11 @@ whatever the window or display size. The first start picks Near on small screens
 elsewhere; after that your choice is remembered.
 
 **UI Scale** multiplies the HUD, menus and minimap. 2X is the classic desktop size; 1X is about half that (the default on a 480p panel such as the R36S); 3X and 4X suit 1440p and 4K. The first start picks a level from the panel height unless a value is already saved in the config.
+
+**Controls** (Options → Controls) rebinds every play action for keyboard and gamepad. Highlight a row and press
+Enter / A, then the next key, button or stick/trigger axis is assigned. Tab / Y switches which device family is
+shown; Reset Defaults restores the stock layout. Menu navigation is fixed so the page is always reachable.
+
 
 ## Sound
 

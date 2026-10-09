@@ -662,7 +662,7 @@ void Gfx::draw_rope(const Game& g, double t) const {
   (void)t;
 }
 
-void Gfx::draw_hud(const Game& g, const UiState& ui) const {
+void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const {
   const bool pad = ui.device == InputDevice::Gamepad;  // hints name the device in use
   const Transform& tf = g.ecs.get<Transform>(g.ship);
   const Motion& m = g.ecs.get<Motion>(g.ship);
@@ -689,18 +689,24 @@ void Gfx::draw_hud(const Game& g, const UiState& ui) const {
   std::snprintf(buf, sizeof(buf), "%s%s", d.name, d.engines_top ? " TOP" : "");
   text(m20, y, buf, pal::BRIGHT);
   y += lh;
-  text(m20, y, pad ? "START MENU" : "ESC MENU", pal::MID);
+  char bname[24];
+  action_bind_label(binds, Action::Pause, !pad, bname, sizeof bname);
+  char linebuf[48];
+  std::snprintf(linebuf, sizeof linebuf, "%s MENU", bname);
+  text(m20, y, linebuf, pal::MID);
   y += lh;
   const Legs& legs = g.ecs.get<Legs>(g.ship);
-  char legbuf[32];
-  std::snprintf(legbuf, sizeof legbuf, "LEGS %s  %s", legs.deployed ? "OUT" : "IN", pad ? "X" : "SPACE");
+  action_bind_label(binds, Action::Legs, !pad, bname, sizeof bname);
+  char legbuf[40];
+  std::snprintf(legbuf, sizeof legbuf, "LEGS %s  %s", legs.deployed ? "OUT" : "IN", bname);
   text(m20, y, legbuf, legs.deployed ? pal::MID : pal::WARN);
   y += lh;
   const Rope& rp = g.ecs.get<Rope>(g.ship);
+  action_bind_label(binds, Action::Grip, !pad, bname, sizeof bname);
   if (rp.held != NULL_ENTITY)
-    std::snprintf(legbuf, sizeof legbuf, "LOAD %.1f  %s", g.ecs.get<Cargo>(rp.held).def->mass, pad ? "A" : "R");
+    std::snprintf(legbuf, sizeof legbuf, "LOAD %.1f  %s", g.ecs.get<Cargo>(rp.held).def->mass, bname);
   else
-    std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", pad ? "A" : "R");
+    std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", bname);
   text(m20, y, legbuf, rp.held != NULL_ENTITY ? pal::CARGO : pal::MID);
   y += lh + L(4);
 
@@ -728,7 +734,15 @@ void Gfx::draw_hud(const Game& g, const UiState& ui) const {
     float pulse = 0.65f + 0.35f * std::sin(fl.timer * 10.f);
     Rgba c = landed ? pal::PAD : pal::HOT;
     text_centered(w_ / 2, L(48), landed ? "LANDED" : "CRASH", with_alpha(c, static_cast<uint8_t>(255 * pulse)));
-    text_centered(w_ / 2, L(48) + lh, landed ? "THRUST TO LIFT OFF" : (pad ? "A TO RESPAWN" : "ENTER TO RESPAWN"), pal::MID);
+    if (landed) {
+      text_centered(w_ / 2, L(48) + lh, "THRUST TO LIFT OFF", pal::MID);
+    } else {
+      char rb[24];
+      action_bind_label(binds, Action::Respawn, !pad, rb, sizeof rb);
+      char msg[40];
+      std::snprintf(msg, sizeof msg, "%s TO RESPAWN", rb);
+      text_centered(w_ / 2, L(48) + lh, msg, pal::MID);
+    }
   }
 }
 
@@ -788,7 +802,59 @@ static const char* menu_hint(const UiState& ui, bool options) {
 }
 
 // A boxed menu page (pause, options) over the dimmed game
-void Gfx::draw_menu(const Game& g, const UiState& ui) const {
+void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) const {
+  if (ui.page == MenuPage::Controls) {
+    const int lh = cell_h() + L(9);
+    const int rows = ACTION_COUNT + item_count(CONTROL_ITEMS);
+    const int panel_w = std::min(w_ - L(20), L(640));
+    const int panel_h = L(78) + rows * lh + L(44);
+    const int px = w_ / 2 - panel_w / 2, py = std::max(L(8), h_ / 2 - panel_h / 2);
+    fill(0, 0, w_, h_, with_alpha(pal::BG, 120));
+    fill(px, py, panel_w, panel_h, pal::MENU);
+    outline(px, py, panel_w, panel_h, pal::BRIGHT);
+    outline(px + L(3), py + L(3), panel_w - L(6), panel_h - L(6), with_alpha(pal::MID, 90));
+    text_centered(w_ / 2, py + L(18), "CONTROLS", pal::BRIGHT);
+    fill(px + L(24), py + L(18) + cell_h() + L(8), panel_w - L(48), 1, with_alpha(pal::MID, 140));
+
+    const bool kbd = ui.device != InputDevice::Gamepad;
+    int row_y = py + L(18) + cell_h() + L(22);
+    char val[40];
+    for (int i = 0; i < ACTION_COUNT; ++i) {
+      const bool sel = ui.controls_cursor == i;
+      const int ly = row_y + i * lh;
+      if (sel) {
+        fill(px + L(12), ly - L(4), panel_w - L(24), cell_h() + L(8), with_alpha(pal::MID, 40));
+        if (!ui.rebinding && std::fmod(ui.time, 0.8) < 0.55)
+          text(px + L(36) - cell_w() - L(4), ly, ">", pal::WARN);
+      }
+      const Rgba col = sel ? pal::WARN : pal::MID;
+      text(px + L(36), ly, ACTION_INFO[i].label, col);
+      if (ui.rebinding && sel) {
+        std::snprintf(val, sizeof val, kbd ? "PRESS KEY..." : "PRESS BUTTON...");
+        text(px + panel_w - L(36) - text_width(val), ly, val, pal::HOT);
+      } else {
+        action_bind_label(binds, static_cast<Action>(i), kbd, val, sizeof val);
+        text(px + panel_w - L(36) - text_width(val), ly, val, col);
+      }
+    }
+    row_y += ACTION_COUNT * lh + L(6);
+    for (int i = 0; i < item_count(CONTROL_ITEMS); ++i) {
+      const int idx = ACTION_COUNT + i;
+      const bool sel = ui.controls_cursor == idx;
+      const int ly = row_y + i * lh;
+      if (sel) {
+        fill(px + L(12), ly - L(4), panel_w - L(24), cell_h() + L(8), with_alpha(pal::MID, 40));
+        if (std::fmod(ui.time, 0.8) < 0.55) text(px + L(36) - cell_w() - L(4), ly, ">", pal::WARN);
+      }
+      text(px + L(36), ly, CONTROL_ITEMS[i].label, sel ? pal::WARN : pal::MID);
+    }
+    const char* hint = ui.rebinding
+                           ? (kbd ? "ESC CANCEL" : "START CANCEL")
+                           : (kbd ? "ENTER REBIND  TAB DEVICE  ESC BACK" : "A REBIND  Y DEVICE  B BACK");
+    text_centered(w_ / 2, py + panel_h - cell_h() - L(14), hint, pal::MID);
+    return;
+  }
+
   const MenuPageDef& page = page_def(ui.page);
   const int lh = cell_h() + L(9);
   const int stat_rows = ui.page == MenuPage::Stats ? STAT_FIELD_COUNT : 0;  // read-only lines above the items
@@ -880,7 +946,7 @@ void Gfx::draw_title(const Game& g, const UiState& ui) const {
 // ---------------------------------------------------------------------------
 // Frame
 // ---------------------------------------------------------------------------
-void Gfx::draw(const Game& g, const UiState& ui) {
+void Gfx::draw(const Game& g, const UiState& ui, const BindMap& binds) {
   const int si = std::clamp(ui.ui_scale, 0, UI_SCALE_COUNT - 1);
   font_scale_ = UI_SCALE_LEVELS[si].font;
   scale_ = h_ / g.cam.vh;  // screen px per world px; animates while the zoom level changes
@@ -905,14 +971,14 @@ void Gfx::draw(const Game& g, const UiState& ui) {
     fill(0, 0, w_, h_, with_alpha(pal::HOT, static_cast<uint8_t>(8 + 100 * flash)));
   }
   if (!title) {
-    draw_hud(g, ui);
+    draw_hud(g, ui, binds);
     if (ui.toast_timer > 0.f && !ui.in_menu())  // short message above the minimap, fading out
       text_centered(w_ / 2, h_ - L(MM_H) - L(14) - cell_h() - L(18), ui.toast,
                     with_alpha(pal::BRIGHT, static_cast<uint8_t>(255 * clampf(ui.toast_timer / 0.5f, 0.f, 1.f))));
     draw_minimap(g, t);
   }
   if (title && ui.page == MenuPage::Title) draw_title(g, ui);
-  else if (ui.in_menu()) draw_menu(g, ui);
+  else if (ui.in_menu()) draw_menu(g, ui, binds);
 
   if (ui.crt) be_->copy(overlay_, SDL_Rect{0, 0, w_, h_}, {255, 255, 255, 255});
 }

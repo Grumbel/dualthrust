@@ -19,7 +19,7 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 - Triggers (or L1/R1, or sticks up): engines. Keyboard: L/R Ctrl (or A/D, arrows) full, L/R Shift half thrust
 - Start/Escape: pause menu (Escape also = back; quits from the title screen on desktop)
 - Screens: title (Start/Options/Statistics/Quit) → play ⇄ pause (Resume/New Cave/Options/Statistics/Main Menu/Quit); Options: Ship, Zoom, UI Scale,
-  Swap Engines, Music + Effects sliders, CRT Effect, Fullscreen, Back. Pages are data in `ui.hpp`; left/right change values
+  Swap Engines, Music + Effects sliders, CRT Effect, Fullscreen, Controls, Back. Pages are data in `ui.hpp`; left/right change values
 - On-screen hints follow the last-used device (`UiState::device`: keyboard events/wheel vs gamepad buttons/axes)
 - Zoom: Tab (cycle), mouse wheel, D-pad up/down in play; `-z near|medium|far`. Ship: S or Select.
 - M: sound on/off (saved in config; `-m/--mute` for one run)

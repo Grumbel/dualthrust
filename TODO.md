@@ -21,6 +21,9 @@
 
 ## Notes
 
+- Controls rebinding: Options → Controls lists every play action; Enter/A starts listening for a key or
+  button/axis. Tab/Y toggles keyboard vs gamepad view. Binds save as `bind.K.*` / `bind.P.*` lines.
+  Menu navigation stays fixed. Reset Defaults restores the historical layout. HUD hints follow the binds.
 - UI scale: Options → UI SCALE cycles 1X (font 2, ~half of old desktop), 2X (font 3, previous default),
   3X (font 5), 4X (font 6). First start without a saved value picks by panel height (≤480 → 1X,
   ≥1440 → 3X, ≥2160 → 4X, else 2X). HUD, menus, minimap panel and toast all scale with the font.
