@@ -1261,16 +1261,26 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
   auto on_panel = [&](int px, int py) {
     return px >= x && py >= y && px < x + mm_w && py < y + mm_h;
   };
-  // Filled downward triangle: tip sits on the pad, base flares upward
+  // Pointer ▼: tip on the pad, tall/narrow, black outline for contrast on rock
   auto tri_down = [&](int cx, int cy, int s, Rgba c) {
     if (!on_panel(cx, cy)) return;
-    // Tip at (cx, cy) = pad centre; base above so the marker hangs from the ceiling of the map
-    SDL_Point pts[3] = {{cx, cy}, {cx - s, cy - s}, {cx + s, cy - s}};
+    const int h = s + s / 2;       // tall
+    const int w = std::max(3, s * 2 / 3);  // not too wide
+    SDL_Point tip{cx, cy};
+    SDL_Point bl{cx - w, cy - h};
+    SDL_Point br{cx + w, cy - h};
+    // Fat black outline (draw expanded triangle first)
+    {
+      const int o = 2;
+      SDL_Point out[3] = {{cx, cy + o}, {cx - w - o, cy - h - o}, {cx + w + o, cy - h - o}};
+      be_->polygon(out, 3, Rgba{0, 0, 0, 255});
+    }
+    SDL_Point pts[3] = {tip, bl, br};
     be_->polygon(pts, 3, c);
-    // Outline for contrast on bright rock
-    line(pts[0].x, pts[0].y, pts[1].x, pts[1].y, pal::BRIGHT);
-    line(pts[1].x, pts[1].y, pts[2].x, pts[2].y, pal::BRIGHT);
-    line(pts[2].x, pts[2].y, pts[0].x, pts[0].y, pal::BRIGHT);
+    // Inner edge highlight
+    line(tip.x, tip.y, bl.x, bl.y, pal::BRIGHT);
+    line(tip.x, tip.y, br.x, br.y, pal::BRIGHT);
+    line(bl.x, bl.y, br.x, br.y, with_alpha(pal::BRIGHT, 180));
   };
   auto is_rev = [&](float wx, float wy) {
     const int gx = static_cast<int>(wx / Cave::CELL), gy = static_cast<int>(wy / Cave::CELL);
@@ -1281,8 +1291,8 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
   if (g.ecs.get<Rope>(g.ship).held != NULL_ENTITY)
     dest_pi = g.ecs.get<Cargo>(g.ecs.get<Rope>(g.ship).held).dest_pad;
 
-  // Landing pads: big ▼ with tip on the pad — home/dest larger
-  const int pad_s = L(9);
+  // Landing pads: tall pointer ▼ (home/dest larger + hotter)
+  const int pad_s = L(11);
   for (int pi = 0; pi < static_cast<int>(g.cave.pads.size()); ++pi) {
     const LandingPad& p = g.cave.pads[static_cast<size_t>(pi)];
     if (!p.active) continue;
@@ -1291,7 +1301,7 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
     const bool is_dest = (pi == dest_pi) || (pi == g.home_pad);
     Rgba col = is_dest ? pal::HOT : (p.visited ? pal::BRIGHT : pal::WARN);
     auto [px, py] = to_panel(cxw, p.y);
-    tri_down(px, py, is_dest ? pad_s + L(3) : pad_s, col);
+    tri_down(px, py, is_dest ? pad_s + L(4) : pad_s, col);
   }
   // Cargo: squares — bright if this ship can lift them, dim otherwise
   {
@@ -1867,11 +1877,22 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
     const float cx = 0.5f * (pad.x0 + pad.x1);
     const int px = dx + static_cast<int>(cx / Cave::CELL * scale);
     const int py = dy + static_cast<int>(pad.y / Cave::CELL * scale);
-    const int ps = std::max(3, L(5));
-    Rgba col = (pi == dest_pi) ? pal::HOT : (pad.visited ? pal::BRIGHT : pal::WARN);
-    fill(px - ps / 2, py - ps / 2, ps, ps, col);
-    if (!pad.visited)  // hollow look: dark centre for unvisited
-      fill(px - ps / 4, py - ps / 4, std::max(1, ps / 2), std::max(1, ps / 2), with_alpha(pal::BG, 220));
+    const bool is_home = (pi == dest_pi) || (pi == g.home_pad);
+    const int s = is_home ? L(14) : L(11);
+    const int h = s + s / 2;
+    const int w = std::max(4, s * 2 / 3);
+    Rgba col = is_home ? pal::HOT : (pad.visited ? pal::BRIGHT : pal::WARN);
+    // Black outline triangle (tip on pad)
+    {
+      const int o = 2;
+      SDL_Point out[3] = {{px, py + o}, {px - w - o, py - h - o}, {px + w + o, py - h - o}};
+      be_->polygon(out, 3, Rgba{0, 0, 0, 255});
+    }
+    SDL_Point pts[3] = {{px, py}, {px - w, py - h}, {px + w, py - h}};
+    be_->polygon(pts, 3, col);
+    line(pts[0].x, pts[0].y, pts[1].x, pts[1].y, pal::BRIGHT);
+    line(pts[0].x, pts[0].y, pts[2].x, pts[2].y, pal::BRIGHT);
+    line(pts[1].x, pts[1].y, pts[2].x, pts[2].y, with_alpha(pal::BRIGHT, 180));
   }
   // Cargo on the chart
   int cargo_n = 0;
@@ -1890,7 +1911,7 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
                 pct, n_vis, n_act, cargo_n, g.hauls_run, g.score);
   text_centered(w_ / 2, dy + dh + L(8), line, pal::MID);
   text_centered(w_ / 2, dy + dh + L(8) + cell_h() + L(4),
-                "PAD: BRIGHT=VISITED   CARGO: SQUARES", pal::DIM);
+                "PAD: ▼ POINTER  BRIGHT=VISITED  HOT=HOME   CARGO: SQUARES", pal::DIM);
 }
 
 void Gfx::draw(Game& g, const UiState& ui, const BindMap& binds) {

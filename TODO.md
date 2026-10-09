@@ -14,7 +14,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-054.1-minimap-pad-triangles-9a093cd` → tip `e6faddb`
+- Bundle line: `dualthrust-055.1-pad-pointer-fullmap-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
