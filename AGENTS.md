@@ -18,7 +18,7 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 
 - Triggers (or L1/R1, or sticks up): engines. Keyboard: L/R Ctrl (or A/D, arrows) full, L/R Shift half thrust
 - Start/Escape: pause menu (Escape also = back; quits from the title screen on desktop)
-- Screens: title (Start/Options/Statistics/Debug/Quit) → play ⇄ pause (Resume/Respawn/New Cave/Options/Statistics/Main Menu/Quit); Options: Ship, Zoom, UI Scale,
+- Screens: title (Start/Options/Statistics/Quit) → play ⇄ pause (Resume/Respawn/New Cave/Options/Statistics/Debug/Main Menu/Quit); Options: Ship, Zoom, UI Scale,
   Swap Engines, Music + Effects sliders, CRT Effect, Fullscreen, Controls, Back. Pages are data in `ui.hpp`; left/right change values
 - On-screen hints follow the last-used device (`UiState::device`: keyboard events/wheel vs gamepad buttons/axes)
 - Zoom: Tab cycles Near/Medium/Far; = / - and mouse wheel zoom in/out (no default gamepad binds); `-z near|medium|far`. Ship: S (keyboard); Options → Ship on pad.
@@ -28,7 +28,7 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 - Enter (keyboard) or A/B (gamepad): respawn after crash (a landed ship lifts off when thrust is applied)
 - Y or G: new cave
 - F: fullscreen
-- F3 or title menu → Debug: live-tweak gravity, thrust/mass multipliers, fuel, sonar range, legs, rope, crash limits
+- F3 or pause menu → Debug: live-tweak gravity, thrust/mass multipliers, fuel, sonar range, legs, rope, crash limits
 - Explore: passive radius around the ship paints the minimap; sonar is a search pulse that reflects off pads/cargo/signals
 - Fog/sonar are data-driven (`tune::SONAR_MODES`, `PASSIVE_EXPLORE`): REFLECT (default), PAINT (classic fog ping),
   BOTH. Systems dispatch on flags — old paint path is kept, not deleted. Debug can switch modes live.

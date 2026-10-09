@@ -38,7 +38,6 @@ inline constexpr MenuItem TITLE_ITEMS[] = {
     {MenuAction::Start, "START", ItemKind::Action},
     {MenuAction::Options, "OPTIONS", ItemKind::Action},
     {MenuAction::Stats, "STATISTICS", ItemKind::Action},
-    {MenuAction::Debug, "DEBUG", ItemKind::Action},
 #ifndef __EMSCRIPTEN__  // a web page cannot quit
     {MenuAction::Quit, "QUIT", ItemKind::Action},
 #endif
@@ -49,6 +48,7 @@ inline constexpr MenuItem PAUSE_ITEMS[] = {
     {MenuAction::NewCave, "NEW CAVE", ItemKind::Action},
     {MenuAction::Options, "OPTIONS", ItemKind::Action},
     {MenuAction::Stats, "STATISTICS", ItemKind::Action},
+    {MenuAction::Debug, "DEBUG", ItemKind::Action},
     {MenuAction::MainMenu, "MAIN MENU", ItemKind::Action},
 #ifndef __EMSCRIPTEN__
     {MenuAction::Quit, "QUIT", ItemKind::Action},

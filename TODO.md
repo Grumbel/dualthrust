@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-029.1-engine-damage-audio-particles-9a093cd` → tip `bb568e1`
+- Bundle line: `dualthrust-030.1-debug-in-pause-9a093cd` → tip `caf5e82`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
@@ -27,7 +27,7 @@
 - [x] Fuel / score
 - [x] Box2D on the R36S and in the browser
 - [x] UI scale option
-- [x] Debug menu (title → Debug, or F3 in play): live tune + Y resets one row; changed rows highlight
+- [x] Debug menu (pause → Debug, or F3 in play): live tune + Y resets one row; changed rows highlight
 - [x] Data-driven sonar modes (REFLECT / PAINT / BOTH) + passive explore
 - [x] Magnet auto-grab + HUD MAGNET cue + Debug AUTO GRAB
 - [x] Bidirectional stick thrust (channels 4/5 = stick-down) + Vernier / Bidraft / Seesaw ships
@@ -55,7 +55,7 @@
 - **Seesaw**: each stick is an opposing pair (no triggers required).
 
 ### Debug
-- Title menu → **Debug** (not under Options). F3 opens it from play.
+- Pause menu → **Debug** (not under Options). F3 opens it from play (via Pause).
 - Rows that differ from stock defaults draw in HOT orange.
 - **Y** resets the selected row; footer **RESET DEFAULTS** restores all.
 - Mass mul rebuilds Box2D mass immediately; gravity syncs the world. Drag/friction on
