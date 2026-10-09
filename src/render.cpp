@@ -539,7 +539,11 @@ void Gfx::draw_ship(const Game& g, double t) const {
     be_->set_blend(Blend::Add);
     for (int i = 0; i < thruster_count(d); ++i) {
       const ThrusterPose tp = thruster_pose(d, i);
-      const float lvl = th.level[tp.channel] * tp.power;
+      const float dmg = i < Thrusters::MAX ? clampf(th.damage[i], 0.f, 1.f) : 0.f;
+      if (dmg >= tune::ENGINE_DEAD) continue;
+      float lvl = th.level[tp.channel] * tp.power * (1.f - 0.9f * dmg);
+      if (dmg >= tune::ENGINE_SPUTTER)
+        lvl *= 0.55f + 0.45f * (0.5f + 0.5f * std::sin(t * (14.0 + 9.0 * dmg) + i * 2.1));
       if (lvl < 0.05f) continue;
       const float len = (10.f + 46.f * lvl) * (0.8f + 0.4f * flicker(t, i * 1.7f));
       const float wd = d.thruster_n ? 4.f + 3.f * tp.power : (top ? 8.f : 7.f);
@@ -794,6 +798,25 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     static const char* labels[] = {"L", "R", "LS", "RS", "LSd", "RSd"};
     text(L(148), y - L(3), labels[i < 6 ? i : 0], pal::MID);
     y += bar_step;
+  }
+  // Per-engine damage row (thruster index order, not control channel)
+  {
+    const int n_eng = std::min(thruster_count(d), Thrusters::MAX);
+    if (n_eng > 0) {
+      const int cell = std::max(L(8), bar_w / n_eng - L(2));
+      for (int i = 0; i < n_eng; ++i) {
+        const float dmg = clampf(th.damage[i], 0.f, 1.f);
+        const int x = m20 + i * (cell + L(2));
+        fill(x, y, cell, bar_h, pal::DIM);
+        if (dmg > 0.02f) {
+          Rgba col = dmg >= tune::ENGINE_DEAD ? pal::HOT : mix(pal::WARN, pal::HOT, dmg);
+          fill(x, y, cell, static_cast<int>(bar_h * dmg), col);
+        }
+        outline(x, y, cell, bar_h, with_alpha(pal::MID, 120));
+      }
+      text(L(148), y - L(3), "ENG", pal::MID);
+      y += bar_step;
+    }
   }
   y += L(4);
   // Fuel gauge (drains with thrust, refills on pads)

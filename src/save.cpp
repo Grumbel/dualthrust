@@ -133,6 +133,13 @@ bool save_world(const Game& g, int ship_index) {
     std::fprintf(f, "rope_out=%d\n", rope->out ? 1 : 0);
     std::fprintf(f, "held=%d\n", held_idx);
   }
+  if (g.ship != NULL_ENTITY && g.ecs.has<Thrusters>(g.ship) && g.ecs.has<Hull>(g.ship)) {
+    const Thrusters& th = g.ecs.get<Thrusters>(g.ship);
+    const int n_eng = std::min(thruster_count(*g.ecs.get<Hull>(g.ship).def), Thrusters::MAX);
+    std::fprintf(f, "eng_n=%d\n", n_eng);
+    for (int i = 0; i < n_eng; ++i)
+      std::fprintf(f, "eng_%d=%.4f\n", i, th.damage[i]);
+  }
 
   std::fprintf(f, "pad_n=%d\n", static_cast<int>(g.cave.pads.size()));
   for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i)

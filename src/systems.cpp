@@ -47,9 +47,13 @@ void exhaust_system(Game& g, float dt) {
       [&](Entity, Thrusters& th, Transform& t, Motion& m, Hull& h, Flight& f) {
         if (f.state != FlightState::Flying) return;
         const ShipDef& d = *h.def;
-        for (int i = 0; i < thruster_count(d); ++i) {
+        for (int i = 0; i < std::min(thruster_count(d), Thrusters::MAX); ++i) {
           const ThrusterPose tp = thruster_pose(d, i);
-          const float lvl = th.level[tp.channel] * tp.power;
+          const float dmg = clampf(th.damage[i], 0.f, 1.f);
+          if (dmg >= tune::ENGINE_DEAD) { th.emit_acc[i] = 0.f; continue; }
+          float lvl = th.level[tp.channel] * tp.power * (1.f - 0.9f * dmg);
+          if (dmg >= tune::ENGINE_SPUTTER)
+            lvl *= 0.55f + 0.45f * (0.5f + 0.5f * std::sin(g.time * (14.f + 9.f * dmg) + float(i) * 2.1f));
           if (lvl < 0.05f) { th.emit_acc[i] = 0.f; continue; }
           const Vec2 down = rotate(tp.flame, t.angle);  // exhaust direction
           const Vec2 side{-down.y, down.x};
@@ -301,10 +305,41 @@ void impact_system(Game& g) {
       } else if (speed > tune::HIT_MIN_SPEED) {
         g.events.push_back({SimEventKind::Bounce, pos, n, speed});
         stat_add(g, &Stats::hard_hits, 1);
-        // Soft damage: a hard bump hurts the engines a little (repaired on pads)
         Flight& fl = g.ecs.get<Flight>(g.ship);
-        if (fl.state != FlightState::Crashed)
-          fl.hurt = std::min(1.f, fl.hurt + tune::HURT_FROM_HIT * clampf((speed - tune::HIT_MIN_SPEED) / 80.f, 0.3f, 1.f));
+        if (fl.state == FlightState::Crashed) continue;
+        const float hit = clampf((speed - tune::HIT_MIN_SPEED) / 80.f, 0.3f, 1.f);
+        fl.hurt = std::min(1.f, fl.hurt + tune::HURT_FROM_HIT * hit);
+        // Per-engine damage: hull hits wound the nearest nozzle(s); foot hits are gentler
+        if (g.ecs.has<Thrusters>(g.ship) && g.ecs.has<Hull>(g.ship) && g.ecs.has<Transform>(g.ship)) {
+          Thrusters& th = g.ecs.get<Thrusters>(g.ship);
+          const ShipDef& def = *g.ecs.get<Hull>(g.ship).def;
+          const Transform& tf = g.ecs.get<Transform>(g.ship);
+          const Vec2 local = rotate(pos - tf.pos, -tf.angle);
+          const int n_eng = std::min(thruster_count(def), Thrusters::MAX);
+          if (n_eng > 0) {
+            int order[Thrusters::MAX];
+            float dist[Thrusters::MAX];
+            for (int ei = 0; ei < n_eng; ++ei) {
+              order[ei] = ei;
+              const ThrusterPose tp = thruster_pose(def, ei);
+              const float dx = local.x - tp.pos.x, dy = local.y - tp.pos.y;
+              dist[ei] = dx * dx + dy * dy;
+            }
+            for (int a = 0; a < n_eng - 1; ++a)
+              for (int b = a + 1; b < n_eng; ++b)
+                if (dist[order[b]] < dist[order[a]]) std::swap(order[a], order[b]);
+            const float base = tune::ENGINE_DAMAGE_FROM_HIT * hit *
+                               (ship_part == Part::Hull ? 1.f : 0.35f);
+            const float before = th.damage[order[0]];
+            th.damage[order[0]] = std::min(1.f, th.damage[order[0]] + base);
+            if (n_eng > 1)
+              th.damage[order[1]] = std::min(1.f, th.damage[order[1]] + base * 0.45f);
+            if (before < tune::ENGINE_DEAD && th.damage[order[0]] >= tune::ENGINE_DEAD)
+              notice(g, "ENGINE OUT");
+            else if (before < tune::ENGINE_SPUTTER && th.damage[order[0]] >= tune::ENGINE_SPUTTER)
+              notice(g, "ENGINE HURT");
+          }
+        }
       }
     }
   });
@@ -385,6 +420,8 @@ void ground_system(Game& g, float dt) {
     if (f.state == FlightState::Landed && touching_pad(g.cave, f.contact_pt)) {
       f.fuel = std::min(1.f, f.fuel + tune::FUEL_REFUEL * dt);
       if (f.hurt > 0.f) f.hurt = std::max(0.f, f.hurt - tune::HURT_REPAIR * dt);
+      for (int i = 0; i < Thrusters::MAX; ++i)
+        if (th.damage[i] > 0.f) th.damage[i] = std::max(0.f, th.damage[i] - tune::ENGINE_REPAIR * dt);
     }
   });
 }

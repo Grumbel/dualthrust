@@ -84,8 +84,12 @@ inline constexpr int SCORE_DEST_BONUS = 150;    // delivering cargo to its prefe
 inline constexpr int SCORE_ECHO = 15;           // ambient life answering a ping
 inline constexpr int SCORE_MILESTONE = 50;      // exploration tier / all-signals / all-pads
 inline float SIGNAL_PROX = 220.f;     // world px: passive cue near an unfound signal
-inline float HURT_FROM_HIT = 0.12f;   // soft damage added on a hard bounce
-inline float HURT_REPAIR = 0.35f;     // repair rate per second while on an active pad
+inline float HURT_FROM_HIT = 0.12f;   // soft hull damage added on a hard bounce (global)
+inline float HURT_REPAIR = 0.35f;     // global hurt repair rate per second on an active pad
+inline float ENGINE_DAMAGE_FROM_HIT = 0.22f;  // added to the nearest engine(s) on a hull impact
+inline float ENGINE_REPAIR = 0.28f;           // per-engine repair rate /s on an active pad
+inline float ENGINE_SPUTTER = 0.18f;          // damage above this: thrust flickers
+inline float ENGINE_DEAD = 0.92f;             // damage above this: engine produces no thrust
 inline constexpr float RESIDUE_TTL = 1.4f;      // seconds a scan glow lingers on rock
 
 // Landing legs: spring along the strut (Hz, damping ratio), leg body mass as a fraction of the ship's
