@@ -368,6 +368,12 @@ int main(int argc, char** argv) {
     new_game_at(first_pad_x());
     if (game.stats_enabled) { game.stats.caves += 1; game.stats_dirty = true; }
   };
+  // Respawn on the home pad after a crash — never regenerates the cave; no-ops while alive
+  auto respawn_after_crash = [&] {
+    if (game.ecs.get<Flight>(game.ship).state != FlightState::Crashed) return;
+    respawn_ship(game, home_pad_x(game));
+    snap_camera(game);
+  };
   auto show_toast = [&](const char* text) {
     std::snprintf(ui.toast, sizeof ui.toast, "%s", text);
     ui.toast_timer = 1.6f;
@@ -573,6 +579,7 @@ int main(int argc, char** argv) {
             if (action_pressed_key(binds, Action::Grip, sc)) toggle_grip(game);
             if (action_pressed_key(binds, Action::WinchOut, sc)) set_winch(game, true);
             if (action_pressed_key(binds, Action::WinchIn, sc)) set_winch(game, false);
+            if (action_pressed_key(binds, Action::Respawn, sc)) respawn_after_crash();
             if (action_pressed_key(binds, Action::Sonar, sc)) fire_sonar(game);
           } else {
             if (k == SDLK_UP || k == SDLK_w) menu_move(-1);
@@ -638,7 +645,11 @@ int main(int argc, char** argv) {
             if (action_pressed_button(binds, Action::Legs, b)) toggle_legs(game);
             if (action_pressed_button(binds, Action::SwapEngines, b)) toggle_swap();
             if (action_pressed_button(binds, Action::Sonar, b)) fire_sonar(game);
-            if (action_pressed_button(binds, Action::Grip, b)) toggle_grip(game);
+            if (action_pressed_button(binds, Action::Respawn, b)) respawn_after_crash();
+            if (action_pressed_button(binds, Action::Grip, b)) {
+              if (game.ecs.get<Flight>(game.ship).state == FlightState::Crashed) respawn_after_crash();
+              else toggle_grip(game);
+            }
           } else {
             if (b == SDL_CONTROLLER_BUTTON_START) {
               if (ui.screen == Screen::Title) start_game();

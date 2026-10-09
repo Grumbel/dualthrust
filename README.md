@@ -99,7 +99,7 @@ stripes, each with hydraulic landing struts and a winch under the belly.
 
 On-screen hints follow the device you used last: they name keyboard keys or gamepad buttons accordingly.
 
-**Menus.** The game opens on a title screen (Start, Options, Statistics, Quit). Pausing shows Resume, New Cave, Options,
+**Menus.** The game opens on a title screen (Start, Options, Statistics, Quit). Pausing shows Resume, Respawn, New Cave, Options,
 Statistics, Main Menu and Quit. **Options** has Ship, Zoom, UI Scale (1X–4X), Swap Engines, Music and Effects volume (sliders), CRT Effect, Controls
 (scanlines and vignette on or off) and Fullscreen; change a value with left/right, or Enter/A to step it forward.
 Everything is remembered between runs.

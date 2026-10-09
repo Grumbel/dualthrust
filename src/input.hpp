@@ -30,6 +30,7 @@ enum class Action : int {
   MapView,
   NextPad,
   PrevPad,
+  Respawn,
   Count
 };
 
@@ -80,6 +81,7 @@ inline constexpr ActionInfo ACTION_INFO[] = {
     {Action::MapView, "MAP", "MAP", false},
     {Action::NextPad, "NEXT PAD", "PAD+", false},
     {Action::PrevPad, "PREV PAD", "PAD-", false},
+    {Action::Respawn, "RESPAWN", "RESPAWN", false},
 };
 static_assert(sizeof(ACTION_INFO) / sizeof(ACTION_INFO[0]) == ACTION_COUNT, "ACTION_INFO size");
 
@@ -134,6 +136,7 @@ inline void set_default_binds(BindMap& m) {
   K(Action::MapView, 0, SDL_SCANCODE_Z);
   K(Action::NextPad, 0, SDL_SCANCODE_RIGHTBRACKET);  // ]
   K(Action::PrevPad, 0, SDL_SCANCODE_LEFTBRACKET);   // [
+  K(Action::Respawn, 0, SDL_SCANCODE_RETURN);
   // Half-thrust on Shift is special-cased in read_thrust (not a separate action)
 
   // Gamepad
@@ -154,6 +157,8 @@ inline void set_default_binds(BindMap& m) {
   B(Action::MapView, 0, SDL_CONTROLLER_BUTTON_BACK);  // Select: hold for the full revealed map
   B(Action::NextPad, 0, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);  // triggers still drive thrust
   B(Action::PrevPad, 0, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+  B(Action::Respawn, 0, SDL_CONTROLLER_BUTTON_B);
+  B(Action::Respawn, 1, SDL_CONTROLLER_BUTTON_A);  // A also respawns when crashed (handled in play logic)
 }
 
 // Clear every slot on either device that matches `src`, then write `src` into the first free

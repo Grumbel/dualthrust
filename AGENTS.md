@@ -18,7 +18,7 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 
 - Triggers (or L1/R1, or sticks up): engines. Keyboard: L/R Ctrl (or A/D, arrows) full, L/R Shift half thrust
 - Start/Escape: pause menu (Escape also = back; quits from the title screen on desktop)
-- Screens: title (Start/Options/Statistics/Quit) → play ⇄ pause (Resume/New Cave/Options/Statistics/Main Menu/Quit); Options: Ship, Zoom, UI Scale,
+- Screens: title (Start/Options/Statistics/Quit) → play ⇄ pause (Resume/Respawn/New Cave/Options/Statistics/Main Menu/Quit); Options: Ship, Zoom, UI Scale,
   Swap Engines, Music + Effects sliders, CRT Effect, Fullscreen, Controls, Back. Pages are data in `ui.hpp`; left/right change values
 - On-screen hints follow the last-used device (`UiState::device`: keyboard events/wheel vs gamepad buttons/axes)
 - Zoom: Tab (cycle), mouse wheel, D-pad up/down in play; `-z near|medium|far`. Ship: S or Select.
@@ -124,14 +124,14 @@ nix build .#dualthrust-r36s-portmaster-zip  # PortMaster autoinstall zip
 - Launcher exports `XDG_CONFIG_HOME` and `XDG_STATE_HOME` = `<port>/conf`, so settings persist in `conf/dualthrust/`, not `$HOME`.
   The game never guesses: settings = `$XDG_CONFIG_HOME/dualthrust`, saves/stats = `$XDG_STATE_HOME/dualthrust`, each falling back to
   `$HOME/.config` / `$HOME/.local/state` only when the variable is unset; a relative path or no usable base → error, exit 1.
-- Verified: aarch64 ELF, needs only GLIBC ≤ 2.17 / GLIBCXX ≤ 3.4.18 / CXXABI ≤ 1.3.9 (0.2 with Box2D builds; not run on the device yet). Runs on a real R36S (ArkOS,
-  SDL 2.0.10, KMSDRM + opengles2) at 60 fps in play. Not yet tested through the PortMaster launcher or with
-  the real controller mapping.
+- Verified: aarch64 ELF, needs only GLIBC ≤ 2.17 / GLIBCXX ≤ 3.4.18 / CXXABI ≤ 1.3.9. Runs on a real R36S (ArkOS,
+  SDL 2.0.10, KMSDRM + opengles2) at 60 fps in play with Box2D. Not yet tested through the PortMaster launcher;
+  controller mapping basically works but still needs tweaks and customization.
 
 ## Versioning
 
 - `VERSION` (plain text, top level) is the only source of truth; on the main branch it always ends in `-dev`
-  (currently `0.1.0-dev`). Never hardcode the version elsewhere.
+  (currently `0.2.0-dev`). Never hardcode the version elsewhere.
 - Dev builds are `0.1.0-dev.<revCount>+g<shortRev>[-dirty]` (Nix: `self.revCount or 0`); release builds
   (`VERSION` without `-dev`) use the file as-is.
 - CMake reads `VERSION` into `PROJECT_VERSION_FULL` (packaging overrides it with `-DPROJECT_VERSION_FULL=…`),
@@ -159,7 +159,7 @@ nix run .#dualthrust-wasm     # serve it on 127.0.0.1:8765 and open a browser (D
   batching helps WebGL too.
 - Testing: serve `result/` and drive it in real time over the Chrome DevTools protocol (headless Chromium;
   virtual-time mode never completes the IndexedDB sync, so the page stays at "Preparing…"). Verified: boots,
-  WebGL renderer, keyboard (menu, Ctrl/D thrust), settings survive a reload. Untested: gamepad, audio output.
+  WebGL renderer, keyboard (menu, Ctrl/D thrust), gamepad, Box2D, settings survive a reload. Untested: audio output.
 
 ## Packaging
 

@@ -14,13 +14,17 @@
 
 ## Open
 
-- [ ] Real-hardware pass through the PortMaster launcher and the controller mapping (R36S)
-- [ ] Audio in the browser and gamepads in the browser are untested
+- [ ] Real-hardware pass through the PortMaster launcher; controller mapping basically works but still needs
+      tweaks and customization (R36S)
+- [ ] Audio in the browser untested (gamepad in the browser works)
 - [x] Fuel / score (tank burns with thrust, refills on pads; pad landings +100, cargo +250; HUD bar + score)
-- [ ] Box2D on the R36S and in the browser: builds, but not run on the device / in a browser yet
+- [x] Box2D on the R36S and in the browser (builds and runs on device / in browser)
 - [x] UI scale option (1X/2X/3X/4X; auto by display height; R36S → 1X, desktop → 2X)
 
 ## Notes
+
+- Respawn: after a crash, Enter / B (and A on the gamepad) respawn immediately on the home pad.
+  Intentional respawn while alive is pause-menu only (Respawn item). New Cave is pause-menu only.
 
 - Exploration: sonar reveal strength fades past 75% range; deep-cave signals (+75);
   fuel limps instead of cutting out; map exploration awards small score.
