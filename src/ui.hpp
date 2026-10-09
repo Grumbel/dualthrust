@@ -38,6 +38,7 @@ inline constexpr MenuItem TITLE_ITEMS[] = {
     {MenuAction::Start, "START", ItemKind::Action},
     {MenuAction::Options, "OPTIONS", ItemKind::Action},
     {MenuAction::Stats, "STATISTICS", ItemKind::Action},
+    {MenuAction::Debug, "DEBUG", ItemKind::Action},
 #ifndef __EMSCRIPTEN__  // a web page cannot quit
     {MenuAction::Quit, "QUIT", ItemKind::Action},
 #endif
@@ -63,7 +64,6 @@ inline constexpr MenuItem OPTION_ITEMS[] = {
     {MenuAction::Crt, "CRT EFFECT", ItemKind::Choice},
     {MenuAction::Fullscreen, "FULLSCREEN", ItemKind::Choice},
     {MenuAction::Controls, "CONTROLS", ItemKind::Action},
-    {MenuAction::Debug, "DEBUG", ItemKind::Action},
     {MenuAction::Back, "BACK", ItemKind::Action},
 };
 
