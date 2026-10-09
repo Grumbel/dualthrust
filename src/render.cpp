@@ -3,6 +3,7 @@
 
 #include "render.hpp"
 #include "debug.hpp"
+#include "systems.hpp"
 
 #include <cmath>
 
@@ -1773,11 +1774,7 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
   }
   int found = 0;
   for (const Game::Signal& s : g.signals) if (s.found) ++found;
-  const int total_cells = Cave::GW * Cave::GH;
-  int lit = 0;
-  if (!g.revealed.empty())
-    for (uint8_t v : g.revealed) if (v >= 80) ++lit;
-  const int pct = total_cells > 0 ? (lit * 100) / total_cells : 0;
+  const int pct = explore_percent(g);
   char line[72];
   text_centered(w_ / 2, dy - cell_h() - L(10), "MAP  (HOLD TO PAUSE)", pal::BRIGHT);
   std::snprintf(line, sizeof line, "EXPLORED %d%%   PADS %d/%d   SIGNALS %d/%d   SCORE %d", pct, n_vis,

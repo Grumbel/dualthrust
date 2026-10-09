@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-036.1-ship-perf-stats-9a093cd` → tip `a80acc9`
+- Bundle line: `dualthrust-037.1-explore-open-only-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap

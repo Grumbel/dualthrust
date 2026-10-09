@@ -935,11 +935,23 @@ void fire_sonar(Game& g) {
   g.events.push_back({SimEventKind::SonarPing, p, {}, 200.f});
 }
 
+// Explored fraction of *open air* cells only — solid rock is not explorable.
+int explore_percent(const Game& g) {
+  if (g.revealed.empty() || g.cave.solid.empty()) return 0;
+  const size_t n = g.revealed.size();
+  if (n != g.cave.solid.size()) return 0;
+  int open_total = 0, open_lit = 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (g.cave.solid[i]) continue;
+    ++open_total;
+    if (g.revealed[i] >= 80) ++open_lit;
+  }
+  return open_total > 0 ? (open_lit * 100) / open_total : 0;
+}
+
 void check_exploration_milestones(Game& g) {
   if (g.revealed.empty()) return;
-  int lit = 0;
-  for (uint8_t v : g.revealed) if (v >= 80) ++lit;
-  const int pct = (lit * 100) / static_cast<int>(g.revealed.size());
+  const int pct = explore_percent(g);
   static constexpr int TIERS[] = {25, 50, 75, 100};
   for (int t = g.explore_tier; t < 4; ++t) {
     if (pct < TIERS[t]) break;

@@ -35,6 +35,8 @@ void reset_fog(Game& g);                 // clear revealed, stop any ping (call 
 void fire_sonar(Game& g);                // start a ping; behaviour from current SonarModeDef
 void update_explore(Game& g, float dt);  // passive circular uncover (if PASSIVE_EXPLORE)
 void update_sonar(Game& g, float dt);    // expand ring; paint and/or reflect per mode flags
+// Open-air cells only (solid rock excluded from denominator and numerator).
+int explore_percent(const Game& g);      // 0..100
 
 // Per-tick systems (dt = simulated seconds)
 void step_sim(Game& g, float dt);
