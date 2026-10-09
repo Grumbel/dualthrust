@@ -132,7 +132,7 @@ enum ShipStyle : unsigned {
 
 // One thruster of a ship with its own control channel. Ships without a list have the classic pair (see
 // thruster_pose): left and right engines on the channels 0 and 1.
-//   channel 0 = left trigger / left shoulder, 1 = right trigger / right shoulder, 2 = left stick up, 3 = right stick up
+//   channel 0 = L trigger, 1 = R trigger, 2 = LS up, 3 = RS up, 4 = LS down, 5 = RS down
 //   angle: direction of the push in radians off the nose (0 = toward the nose, +90° = to the right, 180° = down)
 struct ThrusterDef {
   float x, y;     // hull-local mount
@@ -168,7 +168,13 @@ struct ThrusterPose {
   int channel;
 };
 inline int thruster_count(const ShipDef& d) { return d.thruster_n ? d.thruster_n : 2; }
-inline int channel_count(const ShipDef& d) { return d.thruster_n ? 4 : 2; }  // controls the ship uses
+inline int channel_count(const ShipDef& d) {
+  if (!d.thruster_n) return 2;
+  int mx = 1;
+  for (int i = 0; i < d.thruster_n; ++i)
+    if (d.thrusters[i].channel > mx) mx = d.thrusters[i].channel;
+  return mx + 1;  // 2..6 depending on which stick halves the ship uses
+}
 inline ThrusterPose thruster_pose(const ShipDef& d, int i) {
   ThrusterPose p;
   if (d.thruster_n) {
@@ -259,6 +265,24 @@ inline constexpr ThrusterDef COLOSSUS_T[] = {
     {-44.f, 24.f, 0.f, 0.8f, 2},  {44.f, 24.f, 0.f, 0.8f, 3},                  // inboard engines: fine attitude control
 };
 
+// Stick up fires one side, stick down the other (bidirectional verniers).
+inline constexpr ThrusterDef VERNIER_T[] = {
+    {-34.f, 28.f, 0.f, 1.0f, 0}, {34.f, 28.f, 0.f, 1.0f, 1},                 // mains: triggers
+    {-52.f, 4.f, -1.5708f, 0.65f, 2},                                          // LS up → strafe left
+    {52.f, 4.f, 1.5708f, 0.65f, 4},                                           // LS down → strafe right
+};
+// Both sticks bidirectional: LS lateral, RS nose/belly.
+inline constexpr ThrusterDef BIDRAFT_T[] = {
+    {-38.f, 30.f, 0.f, 1.0f, 0}, {38.f, 30.f, 0.f, 1.0f, 1},                 // mains
+    {-56.f, 2.f, -1.5708f, 0.55f, 2}, {56.f, 2.f, 1.5708f, 0.55f, 4},       // LS up/down → left/right
+    {0.f, -36.f, 0.f, 0.5f, 3}, {0.f, 36.f, 3.1416f, 0.5f, 5},               // RS up/down → nose/belly
+};
+// Pure dual-stick craft: no triggers required — each stick is a opposing pair (hover + translate).
+inline constexpr ThrusterDef SEESAW_T[] = {
+    {-40.f, 20.f, -0.4f, 0.85f, 2}, {40.f, 20.f, 0.4f, 0.85f, 4},            // LS up/down → lift-left / lift-right
+    {-40.f, 20.f, -2.7408f, 0.85f, 3}, {40.f, 20.f, 2.7408f, 0.85f, 5},      // RS up/down → brake-left / brake-right
+};
+
 inline constexpr ShipDef SHIP_DEFS[] = {
     {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f, false, STYLE_FINS},
     {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false, STYLE_DOME | STYLE_STRIPES},
@@ -280,6 +304,9 @@ inline constexpr ShipDef SHIP_DEFS[] = {
     {"Colossus", 100.f, 52.f, 90.f, 44.f, 5.0f, 22000.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, COLOSSUS_T, 4},
     // 1950s sci-fi needle rocket: very tall, narrow, classic tail fins + nose dish
     {"Rocket", 14.f, 96.f, 9.f, 88.f, 1.55f, 4200.f, 400.f, false, STYLE_FINS | STYLE_STRIPES | STYLE_DISH},
+    {"Vernier", 36.f, 32.f, 22.f, 28.f, 1.2f, 1400.f, 420.f, false, STYLE_FINS | STYLE_DOME, VERNIER_T, 4},
+    {"Bidraft", 42.f, 36.f, 28.f, 32.f, 1.5f, 2100.f, 430.f, false, STYLE_TANKS | STYLE_FINS | STYLE_DISH, BIDRAFT_T, 6},
+    {"Seesaw", 48.f, 28.f, 34.f, 24.f, 1.35f, 1800.f, 410.f, false, STYLE_DECK | STYLE_STRIPES | STYLE_DOME, SEESAW_T, 4},
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;

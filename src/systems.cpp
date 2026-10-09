@@ -328,7 +328,9 @@ void ground_system(Game& g, float dt) {
     }
 
     const float speed = length(m.vel);
-    const bool thrust = std::max(std::max(th.level[0], th.level[1]), std::max(th.level[2], th.level[3])) > 0.05f;
+    float thr_max = th.level[0];
+    for (int i = 1; i < 6; ++i) thr_max = std::max(thr_max, th.level[i]);
+    const bool thrust = thr_max > 0.05f;
     f.timer += dt;
     if (f.state == FlightState::Flying) {
       const bool resting = f.contacts > 0 && !thrust && speed < tune::SETTLE_SPEED && std::abs(m.ang_vel) < tune::SETTLE_ANGVEL &&
@@ -370,10 +372,13 @@ void ground_system(Game& g, float dt) {
       stat_add(g, &Stats::landed_time, real_dt);
     }
     if (f.state != FlightState::Crashed)
-      stat_add(g, &Stats::thrust_time, (th.level[0] + th.level[1] + th.level[2] + th.level[3]) * real_dt);
+      float thr_sum = 0.f;
+      for (int i = 0; i < 6; ++i) thr_sum += th.level[i];
+      stat_add(g, &Stats::thrust_time, thr_sum * real_dt);
 
     // Fuel: burn while thrusting; refill while settled on a pad
-    const float demand = th.level[0] + th.level[1] + th.level[2] + th.level[3];
+    float demand = 0.f;
+    for (int i = 0; i < 6; ++i) demand += th.level[i];
     if (f.state != FlightState::Crashed && f.fuel > 0.f && demand > 0.02f)
       f.fuel = std::max(0.f, f.fuel - tune::FUEL_BURN * demand * 0.25f * dt);
     if (f.state == FlightState::Landed && touching_pad(g.cave, f.contact_pt)) {
@@ -629,9 +634,9 @@ void set_thrust(Game& g, float left, float right) {
   th.level[1] = right;
 }
 
-void set_thrusts(Game& g, const float levels[4]) {
+void set_thrusts(Game& g, const float levels[6]) {
   Thrusters& th = g.ecs.get<Thrusters>(g.ship);
-  for (int i = 0; i < 4; ++i) th.level[i] = levels[i];
+  for (int i = 0; i < 6; ++i) th.level[i] = levels[i];
 }
 
 int ship_channels(const Game& g) { return channel_count(*g.ecs.get<Hull>(g.ship).def); }

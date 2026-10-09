@@ -787,7 +787,7 @@ int main(int argc, char** argv) {
     }
 
     // Input → thruster levels (L/R swapped on request)
-    float in[4] = {0.f, 0.f, 0.f, 0.f};
+    float in[6] = {};
     if (ui.screen == Screen::Play) {
       read_thrust_bound(binds, pad, ship_channels(game), in);
       in[0] = std::max(in[0], opt.hold[0]);

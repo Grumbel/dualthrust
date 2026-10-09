@@ -19,7 +19,7 @@ void snap_camera(Game& g);
 void set_zoom(Game& g, int index);
 void update_view(Game& g, float real_dt, float aspect, bool snap = false);
 void set_thrust(Game& g, float left, float right);  // channels 0 and 1
-void set_thrusts(Game& g, const float levels[4]);   // all four control channels
+void set_thrusts(Game& g, const float levels[6]);   // up to six control channels (incl. stick-down)
 int ship_channels(const Game& g);                   // 2 for the classic ships, 4 for the big ones
 void toggle_legs(Game& g);
 void debug_rope(Game& g, float len);  // debugging: cable paid out to len px, hook hanging

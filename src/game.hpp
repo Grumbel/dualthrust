@@ -21,7 +21,7 @@ struct Transform { Vec2 pos; float angle = 0.f; };
 struct Motion { Vec2 vel; float ang_vel = 0.f; };
 struct Hull { const ShipDef* def = nullptr; };
 struct Thrusters {
-  float level[4] = {0.f, 0.f, 0.f, 0.f};     // per control channel 0..1: left trigger, right trigger, left stick, right stick
+  float level[6] = {};  // 0 L-trig, 1 R-trig, 2 LS-up, 3 RS-up, 4 LS-down, 5 RS-down
   float emit_acc[4] = {0.f, 0.f, 0.f, 0.f};  // fractional exhaust particles owed, per thruster
 };
 // Flying / Landed / Crashed is a label on top of the rigid-body simulation: the body never stops simulating.

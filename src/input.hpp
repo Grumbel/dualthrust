@@ -32,6 +32,8 @@ enum class Action : int {
   PrevPad,
   Respawn,
   ZoomCycle,
+  ThrustLSd,  // left stick down half (append for bind-index stability)
+  ThrustRSd,  // right stick down half
   Count
 };
 
@@ -84,6 +86,8 @@ inline constexpr ActionInfo ACTION_INFO[] = {
     {Action::PrevPad, "PREV PAD", "PAD-", false},
     {Action::Respawn, "RESPAWN", "RESPAWN", false},
     {Action::ZoomCycle, "ZOOM", "ZOOM", false},
+    {Action::ThrustLSd, "THRUST LS DN", "LSd", true},
+    {Action::ThrustRSd, "THRUST RS DN", "RSd", true},
 };
 static_assert(sizeof(ACTION_INFO) / sizeof(ACTION_INFO[0]) == ACTION_COUNT, "ACTION_INFO size");
 
@@ -125,6 +129,8 @@ inline void set_default_binds(BindMap& m) {
   K(Action::ThrustLS, 1, SDL_SCANCODE_UP);
   K(Action::ThrustRS, 0, SDL_SCANCODE_DOWN);
   K(Action::ThrustRS, 1, SDL_SCANCODE_RALT);
+  K(Action::ThrustLSd, 0, SDL_SCANCODE_F);
+  K(Action::ThrustRSd, 0, SDL_SCANCODE_G);
   K(Action::Pause, 0, SDL_SCANCODE_ESCAPE);
   K(Action::Legs, 0, SDL_SCANCODE_SPACE);
   K(Action::WinchOut, 0, SDL_SCANCODE_Q);
@@ -148,6 +154,8 @@ inline void set_default_binds(BindMap& m) {
   // Shoulders reserved for pad teleport (see NextPad / PrevPad)
   A(Action::ThrustLS, 0, SDL_CONTROLLER_AXIS_LEFTY, -1);   // stick up
   A(Action::ThrustRS, 0, SDL_CONTROLLER_AXIS_RIGHTY, -1);
+  A(Action::ThrustLSd, 0, SDL_CONTROLLER_AXIS_LEFTY, +1);  // stick down
+  A(Action::ThrustRSd, 0, SDL_CONTROLLER_AXIS_RIGHTY, +1);
   B(Action::Pause, 0, SDL_CONTROLLER_BUTTON_START);
   B(Action::Legs, 0, SDL_CONTROLLER_BUTTON_X);
   B(Action::WinchOut, 0, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
@@ -226,21 +234,29 @@ inline float action_value(const BindMap& m, Action a, SDL_GameController* pad, c
 }
 
 // Half thrust on Shift (historical): applied on top of key binds for L/R only.
-inline void read_thrust_bound(const BindMap& m, SDL_GameController* pad, int channels, float out[4]) {
+inline void read_thrust_bound(const BindMap& m, SDL_GameController* pad, int channels, float out[6]) {
   const Uint8* keys = SDL_GetKeyboardState(nullptr);
+  for (int i = 0; i < 6; ++i) out[i] = 0.f;
   out[0] = action_value(m, Action::ThrustL, pad, keys);
   out[1] = action_value(m, Action::ThrustR, pad, keys);
   out[2] = action_value(m, Action::ThrustLS, pad, keys);
   out[3] = action_value(m, Action::ThrustRS, pad, keys);
+  out[4] = action_value(m, Action::ThrustLSd, pad, keys);
+  out[5] = action_value(m, Action::ThrustRSd, pad, keys);
   // Shift = half thrust on the classic L/R keys when no full bind is active from Shift itself
   if (keys) {
     if (keys[SDL_SCANCODE_LSHIFT]) out[0] = std::max(out[0], 0.5f);
     if (keys[SDL_SCANCODE_RSHIFT]) out[1] = std::max(out[1], 0.5f);
   }
-  if (channels < 4) {
-    out[0] = std::max(out[0], out[2]);
-    out[1] = std::max(out[1], out[3]);
-    out[2] = out[3] = 0.f;
+  if (channels <= 2) {
+    // Classic pair: fold stick channels into L/R
+    out[0] = std::max(out[0], std::max(out[2], out[4]));
+    out[1] = std::max(out[1], std::max(out[3], out[5]));
+    out[2] = out[3] = out[4] = out[5] = 0.f;
+  } else if (channels <= 4) {
+    // Four-channel ships without down-half: drop LSd/RSd into nothing (or ignore)
+    // Keep 0..3; zero unused downs unless a thruster listens on 4/5
+    // (callers still pass full out; thrusters only read their channel)
   }
 }
 

@@ -67,6 +67,9 @@ steadier but slower to turn.
 | Atlas | Big, mains on the triggers, two **top boosters on the sticks** that push the ship *down*: brake, descend, steer |
 | Dragonfly | Mid-size, mains on the triggers, two **crossed 35° thrusters on the sticks**: together they lift, alone they strafe and turn |
 | Colossus | The biggest: outboard mains on the triggers, **inboard engines on the sticks** for fine attitude control |
+| Vernier | Mains on triggers; **left stick up/down** fires opposing lateral thrusters |
+| Bidraft | Mains on triggers; **LS up/down** strafe, **RS up/down** nose/belly |
+| Seesaw | No triggers needed — **each stick** is an opposing thruster pair |
 
 The classic ships have two engines and fold the sticks into them. The four-thruster ships keep all four apart:
 left trigger, right trigger, left stick up and right stick up (the HUD shows four bars, `L R LS RS`). On the keyboard the
