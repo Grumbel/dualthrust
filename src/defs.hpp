@@ -248,6 +248,24 @@ inline constexpr int DEFAULT_ZOOM = 1;
 // Near is 1:1 on a 480 px high screen, which is also the cheapest path for weak GPUs.
 inline int auto_zoom_for_height(int display_h) { return display_h <= 480 ? 0 : DEFAULT_ZOOM; }
 
+// UI scale: multiplies the pixel font and all HUD/menu/minimap layout. 2X matches the pre-scale
+// desktop look (font multiplier 3); 1X is roughly half that size for the R36S 480p panel; 3X/4X
+// for larger / 4K displays. `font` is the 3x5 glyph pixel multiplier used by the renderer.
+struct UiScaleLevel {
+  const char* name;
+  int font;
+};
+inline constexpr UiScaleLevel UI_SCALE_LEVELS[] = {{"1X", 2}, {"2X", 3}, {"3X", 5}, {"4X", 6}};
+inline constexpr int UI_SCALE_COUNT = static_cast<int>(sizeof(UI_SCALE_LEVELS) / sizeof(UI_SCALE_LEVELS[0]));
+inline constexpr int DEFAULT_UI_SCALE = 1;  // 2X
+// First start without a saved scale: R36S-class panels → 1X, 1440p+ → 3X, 4K → 4X, else 2X.
+inline int auto_ui_scale_for_height(int display_h) {
+  if (display_h <= 480) return 0;
+  if (display_h >= 2160) return 3;
+  if (display_h >= 1440) return 2;
+  return DEFAULT_UI_SCALE;
+}
+
 // Cargo crates: half extents (px) and mass (the same units as the ships')
 struct CargoDef {
   const char* name;

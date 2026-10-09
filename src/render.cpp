@@ -10,9 +10,7 @@
 namespace {
 
 // --- Pixel font: 3x5 glyphs, rows top→bottom, '1' = lit ---------------------
-constexpr int FONT_SCALE = 3;
-constexpr int GLYPH_W = 3 * FONT_SCALE, FONT_CELL_W = GLYPH_W + FONT_SCALE;
-constexpr int FONT_CELL_H = 5 * FONT_SCALE;
+// Glyph size is `font_scale_` (from UI_SCALE_LEVELS); 2X uses 3 (the historical default).
 constexpr int FIRST_CHAR = 32, CHAR_COUNT = 95;
 
 struct Glyph {
@@ -193,11 +191,11 @@ void Gfx::outline(int x, int y, int w, int h, Rgba c) const {
   be_->fill_rects(r, 4, c);
 }
 
-// Text as horizontal pixel runs; `scale` multiplies the font size (the title logo uses big letters)
+// Text as horizontal pixel runs; `scale` multiplies the UI font size (the title logo uses big letters)
 void Gfx::text(int x, int y, const char* s, Rgba c, int scale) const {
   static thread_local std::vector<SDL_Rect> rects;
   rects.clear();
-  const int fs = FONT_SCALE * scale;
+  const int fs = font_scale_ * scale;
   for (; *s; ++s, x += (3 * fs + fs)) {
     int ch = *s;
     if (ch >= 'a' && ch <= 'z') ch -= 32;
@@ -215,7 +213,7 @@ void Gfx::text(int x, int y, const char* s, Rgba c, int scale) const {
   be_->fill_rects(rects.data(), static_cast<int>(rects.size()), c);
 }
 
-int Gfx::text_width(const char* s, int scale) const { return static_cast<int>(std::strlen(s)) * FONT_CELL_W * scale; }
+int Gfx::text_width(const char* s, int scale) const { return static_cast<int>(std::strlen(s)) * cell_w() * scale; }
 
 int Gfx::sx(const Camera&, float wx) const {
   return static_cast<int>(std::lround(static_cast<double>(wx) * scale_)) - view_.ox;
@@ -671,94 +669,103 @@ void Gfx::draw_hud(const Game& g, const UiState& ui) const {
   const ShipDef& d = *g.ecs.get<Hull>(g.ship).def;
   const Flight& fl = g.ecs.get<Flight>(g.ship);
   const Thrusters& th = g.ecs.get<Thrusters>(g.ship);
-  const int lh = FONT_CELL_H + 4;
+  const int lh = cell_h() + L(4);
+  const int m8 = L(8), m16 = L(16), m20 = L(20), m24 = L(24);
 
   const int bars = channel_count(d);
-  fill(8, 8, 210, 18 * bars + 4 + lh * 6 + 28, with_alpha(pal::MENU, 120));
-  int y = 16;
+  const int bar_h = L(10), bar_w = L(120), bar_step = L(18);
+  fill(m8, m8, L(210), bar_step * bars + L(4) + lh * 6 + L(28), with_alpha(pal::MENU, 120));
+  int y = m16;
   for (int i = 0; i < bars; ++i) {
-    fill(20, y, 120, 10, pal::DIM);
+    fill(m20, y, bar_w, bar_h, pal::DIM);
     float v = clampf(th.level[i], 0.f, 1.f);
-    fill(20, y, static_cast<int>(120 * v), 10, mix(pal::MID, pal::HOT, smoothstep((v - 0.6f) / 0.4f)));
-    outline(20, y, 120, 10, with_alpha(pal::MID, 120));
-    text(148, y - 3, i == 0 ? "L" : i == 1 ? "R" : i == 2 ? "LS" : "RS", pal::MID);
-    y += 18;
+    fill(m20, y, static_cast<int>(bar_w * v), bar_h, mix(pal::MID, pal::HOT, smoothstep((v - 0.6f) / 0.4f)));
+    outline(m20, y, bar_w, bar_h, with_alpha(pal::MID, 120));
+    text(L(148), y - L(3), i == 0 ? "L" : i == 1 ? "R" : i == 2 ? "LS" : "RS", pal::MID);
+    y += bar_step;
   }
-  y += 4;
+  y += L(4);
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%s%s", d.name, d.engines_top ? " TOP" : "");
-  text(20, y, buf, pal::BRIGHT);
+  text(m20, y, buf, pal::BRIGHT);
   y += lh;
-  text(20, y, pad ? "START MENU" : "ESC MENU", pal::MID);
+  text(m20, y, pad ? "START MENU" : "ESC MENU", pal::MID);
   y += lh;
   const Legs& legs = g.ecs.get<Legs>(g.ship);
   char legbuf[32];
   std::snprintf(legbuf, sizeof legbuf, "LEGS %s  %s", legs.deployed ? "OUT" : "IN", pad ? "X" : "SPACE");
-  text(20, y, legbuf, legs.deployed ? pal::MID : pal::WARN);
+  text(m20, y, legbuf, legs.deployed ? pal::MID : pal::WARN);
   y += lh;
   const Rope& rp = g.ecs.get<Rope>(g.ship);
   if (rp.held != NULL_ENTITY)
     std::snprintf(legbuf, sizeof legbuf, "LOAD %.1f  %s", g.ecs.get<Cargo>(rp.held).def->mass, pad ? "A" : "R");
   else
     std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", pad ? "A" : "R");
-  text(20, y, legbuf, rp.held != NULL_ENTITY ? pal::CARGO : pal::MID);
-  y += lh + 4;
+  text(m20, y, legbuf, rp.held != NULL_ENTITY ? pal::CARGO : pal::MID);
+  y += lh + L(4);
 
   const float alt = g.cave.floor_below(tf.pos.x, tf.pos.y) - tf.pos.y;
   std::snprintf(buf, sizeof(buf), "ALT %.0f", alt);
-  text(20, y, buf, pal::BRIGHT);
+  text(m20, y, buf, pal::BRIGHT);
   y += lh;
   std::snprintf(buf, sizeof(buf), "VX %.0f VY %.0f", m.vel.x, m.vel.y);
-  text(20, y, buf, pal::MID);
+  text(m20, y, buf, pal::MID);
 
   const bool on_pad = g.cave.pad_below(tf.pos.x, tf.pos.y, 140.f) != nullptr;
   const bool ok_v = m.vel.y < tune::LAND_MAX_VY && std::abs(m.vel.x) < tune::LAND_MAX_VX;
   const bool ok_a = std::abs(tf.angle) < tune::LAND_MAX_ANGLE;
   const struct { const char* s; bool ok; } status[] = {
       {on_pad ? "PAD OK" : "NO PAD", on_pad}, {ok_v ? "SPEED OK" : "SPEED HI", ok_v}, {ok_a ? "ATT OK" : "ATT BAD", ok_a}};
-  const int rx = w_ - text_width("SPEED OK") - 24;
-  fill(rx - 12, 8, w_ - rx + 4, lh * 3 + 16, with_alpha(pal::MENU, 120));
-  for (int i = 0; i < 3; ++i) text(rx, 16 + lh * i, status[i].s, status[i].ok ? pal::PAD : pal::HOT);
+  const int rx = w_ - text_width("SPEED OK") - m24;
+  fill(rx - L(12), m8, w_ - rx + L(4), lh * 3 + m16, with_alpha(pal::MENU, 120));
+  for (int i = 0; i < 3; ++i) text(rx, m16 + lh * i, status[i].s, status[i].ok ? pal::PAD : pal::HOT);
 
   if (g.notice_timer > 0.f)
-    text_centered(w_ / 2, 48 + (fl.state != FlightState::Flying ? 2 * lh + 8 : 0), g.notice,
+    text_centered(w_ / 2, L(48) + (fl.state != FlightState::Flying ? 2 * lh + L(8) : 0), g.notice,
                   with_alpha(pal::CARGO, static_cast<uint8_t>(255 * clampf(g.notice_timer / 0.5f, 0.f, 1.f))));
   if (fl.state != FlightState::Flying) {
     const bool landed = fl.state == FlightState::Landed;
     float pulse = 0.65f + 0.35f * std::sin(fl.timer * 10.f);
     Rgba c = landed ? pal::PAD : pal::HOT;
-    text_centered(w_ / 2, 48, landed ? "LANDED" : "CRASH", with_alpha(c, static_cast<uint8_t>(255 * pulse)));
-    text_centered(w_ / 2, 48 + lh, landed ? "THRUST TO LIFT OFF" : (pad ? "A TO RESPAWN" : "ENTER TO RESPAWN"), pal::MID);
+    text_centered(w_ / 2, L(48), landed ? "LANDED" : "CRASH", with_alpha(c, static_cast<uint8_t>(255 * pulse)));
+    text_centered(w_ / 2, L(48) + lh, landed ? "THRUST TO LIFT OFF" : (pad ? "A TO RESPAWN" : "ENTER TO RESPAWN"), pal::MID);
   }
 }
 
 void Gfx::draw_minimap(const Game& g, double t) {
   if (!minimap_ || minimap_generation_ != g.cave.generation) build_minimap(g.cave);
-  const int x = (w_ - MM_W) / 2, y = h_ - MM_H - 14;
-  fill(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::BG, 170));
+  // Source window stays MM_W x MM_H cells; the on-screen panel scales with the UI.
+  const int mm_w = L(MM_W), mm_h = L(MM_H), pad = L(4);
+  const int x = (w_ - mm_w) / 2, y = h_ - mm_h - L(14);
+  fill(x - pad, y - pad, mm_w + 2 * pad, mm_h + 2 * pad, with_alpha(pal::BG, 170));
 
   // The window scrolls with the ship and stops at the map's edges
   const Transform& tf = g.ecs.get<Transform>(g.ship);
   const float ox = clampf(tf.pos.x * MM_K - MM_W * 0.5f, 0.f, static_cast<float>(Cave::GW - MM_W));
   const float oy = clampf(tf.pos.y * MM_K - MM_H * 0.5f, 0.f, static_cast<float>(Cave::GH - MM_H));
   const int ix = static_cast<int>(ox), iy = static_cast<int>(oy);
-  be_->copy_part(minimap_, SDL_Rect{ix, iy, MM_W, MM_H}, SDL_Rect{x, y, MM_W, MM_H}, {255, 255, 255, 255});
-  outline(x - 4, y - 4, MM_W + 8, MM_H + 8, with_alpha(pal::MID, 140));
+  be_->copy_part(minimap_, SDL_Rect{ix, iy, MM_W, MM_H}, SDL_Rect{x, y, mm_w, mm_h}, {255, 255, 255, 255});
+  outline(x - pad, y - pad, mm_w + 2 * pad, mm_h + 2 * pad, with_alpha(pal::MID, 140));
 
   // Map coordinates (world px) -> panel px; dots that fall outside are skipped
+  const float sx_k = static_cast<float>(mm_w) / static_cast<float>(MM_W);
+  const float sy_k = static_cast<float>(mm_h) / static_cast<float>(MM_H);
   auto dot = [&](float wx, float wy, int size, Rgba c) {
-    const int px = x + static_cast<int>(wx * MM_K) - ix - size / 2, py = y + static_cast<int>(wy * MM_K) - iy - size / 2;
-    if (px < x || py < y || px + size > x + MM_W || py + size > y + MM_H) return;
+    const int px = x + static_cast<int>((wx * MM_K - ix) * sx_k) - size / 2;
+    const int py = y + static_cast<int>((wy * MM_K - iy) * sy_k) - size / 2;
+    if (px < x || py < y || px + size > x + mm_w || py + size > y + mm_h) return;
     fill(px, py, size, size, c);
   };
-  for (const LandingPad& p : g.cave.pads) dot(0.5f * (p.x0 + p.x1), p.y, 5, pal::WARN);
-  g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) { dot(ct.pos.x, ct.pos.y, 4, pal::CARGO); });
+  const int d_pad = L(5), d_cargo = L(4), d_ship = L(5);
+  for (const LandingPad& p : g.cave.pads) dot(0.5f * (p.x0 + p.x1), p.y, d_pad, pal::WARN);
+  g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) { dot(ct.pos.x, ct.pos.y, d_cargo, pal::CARGO); });
   // Viewport box, clipped to the panel
-  const int vw = static_cast<int>(g.cam.vw * MM_K), vh = static_cast<int>(g.cam.vh * MM_K);
-  const int bx = x + static_cast<int>(g.cam.x * MM_K) - ix, by = y + static_cast<int>(g.cam.y * MM_K) - iy;
-  const int cx0 = std::max(bx, x), cy0 = std::max(by, y), cx1 = std::min(bx + vw, x + MM_W), cy1 = std::min(by + vh, y + MM_H);
+  const int vw = static_cast<int>(g.cam.vw * MM_K * sx_k), vh = static_cast<int>(g.cam.vh * MM_K * sy_k);
+  const int bx = x + static_cast<int>((g.cam.x * MM_K - ix) * sx_k);
+  const int by = y + static_cast<int>((g.cam.y * MM_K - iy) * sy_k);
+  const int cx0 = std::max(bx, x), cy0 = std::max(by, y), cx1 = std::min(bx + vw, x + mm_w), cy1 = std::min(by + vh, y + mm_h);
   if (cx1 > cx0 && cy1 > cy0) outline(cx0, cy0, cx1 - cx0, cy1 - cy0, with_alpha(pal::BRIGHT, 120));
-  if (std::fmod(t, 0.6) < 0.35) dot(tf.pos.x, tf.pos.y, 5, pal::HOT);
+  if (std::fmod(t, 0.6) < 0.35) dot(tf.pos.x, tf.pos.y, d_ship, pal::HOT);
 }
 
 // The value shown beside a choice or slider item
@@ -767,6 +774,7 @@ void Gfx::item_value(const MenuItem& item, const Game& g, const UiState& ui, cha
   switch (item.action) {
     case MenuAction::Ship: std::snprintf(buf, n, "%s", g.ecs.get<Hull>(g.ship).def->name); break;
     case MenuAction::Zoom: std::snprintf(buf, n, "%s", ZOOM_LEVELS[g.cam.zoom].name); break;
+    case MenuAction::UiScale: std::snprintf(buf, n, "%s", UI_SCALE_LEVELS[ui.ui_scale].name); break;
     case MenuAction::SwapEngines: on_off(ui.swap_engines); break;
     case MenuAction::Crt: on_off(ui.crt); break;
     case MenuAction::Fullscreen: on_off(ui.fullscreen); break;
@@ -782,33 +790,34 @@ static const char* menu_hint(const UiState& ui, bool options) {
 // A boxed menu page (pause, options) over the dimmed game
 void Gfx::draw_menu(const Game& g, const UiState& ui) const {
   const MenuPageDef& page = page_def(ui.page);
-  const int lh = FONT_CELL_H + 9;
+  const int lh = cell_h() + L(9);
   const int stat_rows = ui.page == MenuPage::Stats ? STAT_FIELD_COUNT : 0;  // read-only lines above the items
-  const int panel_w = std::min(w_ - 20, 520), panel_h = 78 + (stat_rows + page.count) * lh + (stat_rows ? 10 : 0) + 44;
-  const int px = w_ / 2 - panel_w / 2, py = std::max(8, h_ / 2 - panel_h / 2);
+  const int panel_w = std::min(w_ - L(20), L(520));
+  const int panel_h = L(78) + (stat_rows + page.count) * lh + (stat_rows ? L(10) : 0) + L(44);
+  const int px = w_ / 2 - panel_w / 2, py = std::max(L(8), h_ / 2 - panel_h / 2);
   fill(0, 0, w_, h_, with_alpha(pal::BG, 120));
   fill(px, py, panel_w, panel_h, pal::MENU);
   outline(px, py, panel_w, panel_h, pal::BRIGHT);
-  outline(px + 3, py + 3, panel_w - 6, panel_h - 6, with_alpha(pal::MID, 90));
+  outline(px + L(3), py + L(3), panel_w - L(6), panel_h - L(6), with_alpha(pal::MID, 90));
 
-  text_centered(w_ / 2, py + 18, page.title, pal::BRIGHT);
-  fill(px + 24, py + 18 + FONT_CELL_H + 8, panel_w - 48, 1, with_alpha(pal::MID, 140));
+  text_centered(w_ / 2, py + L(18), page.title, pal::BRIGHT);
+  fill(px + L(24), py + L(18) + cell_h() + L(8), panel_w - L(48), 1, with_alpha(pal::MID, 140));
 
-  int row_y = py + 18 + FONT_CELL_H + 22;
+  int row_y = py + L(18) + cell_h() + L(22);
   for (int i = 0; i < stat_rows; ++i, row_y += lh) {
     char val[32];
     format_stat(STAT_FIELDS[i], g.stats, val, sizeof val);
-    text(px + 36, row_y, STAT_FIELDS[i].label, pal::MID);
-    text(px + panel_w - 36 - text_width(val), row_y, val, pal::BRIGHT);
+    text(px + L(36), row_y, STAT_FIELDS[i].label, pal::MID);
+    text(px + panel_w - L(36) - text_width(val), row_y, val, pal::BRIGHT);
   }
-  if (stat_rows) row_y += 10;
+  if (stat_rows) row_y += L(10);
   for (int i = 0; i < page.count; ++i) {
     const MenuItem& item = page.items[i];
     const bool sel = i == ui.cursor;
-    const int lx = px + 36, ly = row_y + i * lh, rx = px + panel_w - 36;
+    const int lx = px + L(36), ly = row_y + i * lh, rx = px + panel_w - L(36);
     if (sel) {
-      fill(px + 12, ly - 4, panel_w - 24, FONT_CELL_H + 8, with_alpha(pal::MID, 40));
-      if (std::fmod(ui.time, 0.8) < 0.55) text(lx - FONT_CELL_W - 4, ly, ">", pal::WARN);
+      fill(px + L(12), ly - L(4), panel_w - L(24), cell_h() + L(8), with_alpha(pal::MID, 40));
+      if (std::fmod(ui.time, 0.8) < 0.55) text(lx - cell_w() - L(4), ly, ">", pal::WARN);
     }
     const Rgba col = sel ? pal::WARN : pal::MID;
     text(lx, ly, item.label, col);
@@ -820,12 +829,12 @@ void Gfx::draw_menu(const Game& g, const UiState& ui) const {
       text(rx - text_width(shown), ly, shown, col);
     } else if (item.kind == ItemKind::Slider) {
       const int v = item.action == MenuAction::Music ? ui.music_vol : ui.sfx_vol;
-      const int cell = 9, gap = 3, bars_w = SLIDER_MAX * (cell + gap) - gap;
+      const int cell = L(9), gap = L(3), bars_w = SLIDER_MAX * (cell + gap) - gap;
       for (int c = 0; c < SLIDER_MAX; ++c)
-        fill(rx - bars_w + c * (cell + gap), ly, cell, FONT_CELL_H, c < v ? col : with_alpha(pal::DIM, 255));
+        fill(rx - bars_w + c * (cell + gap), ly, cell, cell_h(), c < v ? col : with_alpha(pal::DIM, 255));
     }
   }
-  text_centered(w_ / 2, py + panel_h - FONT_CELL_H - 14, menu_hint(ui, ui.page == MenuPage::Options), pal::MID);
+  text_centered(w_ / 2, py + panel_h - cell_h() - L(14), menu_hint(ui, ui.page == MenuPage::Options), pal::MID);
 }
 
 // Title screen: the cave drifts behind a glowing logo; the title page is plain centred text
@@ -833,7 +842,7 @@ void Gfx::draw_title(const Game& g, const UiState& ui) const {
   (void)g;
   fill(0, 0, w_, h_, with_alpha(pal::BG, 140));
   // Logo letter scale: about 70% of the width, never taller than a seventh of the screen
-  const int S = std::clamp(std::min(static_cast<int>(w_ * 0.7f) / (10 * FONT_CELL_W), h_ / 70), 2, 9);
+  const int S = std::clamp(std::min(static_cast<int>(w_ * 0.7f) / (10 * cell_w()), h_ / 70), 2, 9);
   const char* logo = "DUALTHRUST";
   const int ly = h_ / 8;
   const int lx = w_ / 2 - text_width(logo, S) / 2;
@@ -844,34 +853,36 @@ void Gfx::draw_title(const Game& g, const UiState& ui) const {
       text(lx + ox, ly + oy, logo, with_alpha(pal::MID, static_cast<uint8_t>(26 * pulse)), S);
     }
   text(lx, ly, logo, pal::BRIGHT, S);
-  const int rule_y = ly + 5 * FONT_SCALE * S + 14;
-  fill(lx, rule_y, text_width(logo, S) - FONT_SCALE * S, 2, with_alpha(pal::MID, 180));
-  text_centered(w_ / 2, rule_y + 12, "CRT CAVE LANDER", pal::MID, 2);
+  const int rule_y = ly + 5 * font_scale_ * S + L(14);
+  fill(lx, rule_y, text_width(logo, S) - font_scale_ * S, L(2), with_alpha(pal::MID, 180));
+  text_centered(w_ / 2, rule_y + L(12), "CRT CAVE LANDER", pal::MID, 2);
 
   const MenuPageDef& page = page_def(ui.page);
-  const int lh = FONT_CELL_H * 2 + 14;
-  const int top = std::max(rule_y + 12 + FONT_CELL_H * 2 + 28, h_ * 11 / 20);
+  const int lh = cell_h() * 2 + L(14);
+  const int top = std::max(rule_y + L(12) + cell_h() * 2 + L(28), h_ * 11 / 20);
   for (int i = 0; i < page.count; ++i) {
     const bool sel = i == ui.cursor;
     const int y = top + i * lh;
     const char* label = page.items[i].label;
     text_centered(w_ / 2, y, label, sel ? pal::WARN : pal::MID, 2);
     if (sel && std::fmod(ui.time, 0.8) < 0.55) {
-      const int half = text_width(label, 2) / 2 + 14;
-      text(w_ / 2 - half - FONT_CELL_W * 2, y, ">", pal::WARN, 2);
+      const int half = text_width(label, 2) / 2 + L(14);
+      text(w_ / 2 - half - cell_w() * 2, y, ">", pal::WARN, 2);
       text(w_ / 2 + half, y, "<", pal::WARN, 2);
     }
   }
-  text_centered(w_ / 2, h_ - FONT_CELL_H * 2 - 22, menu_hint(ui, false), pal::MID);
+  text_centered(w_ / 2, h_ - cell_h() * 2 - L(22), menu_hint(ui, false), pal::MID);
   char ver[64];
   std::snprintf(ver, sizeof ver, "V%s", APP_VERSION);
-  text(12, h_ - FONT_CELL_H - 8, ver, with_alpha(pal::MID, 150));
+  text(L(12), h_ - cell_h() - L(8), ver, with_alpha(pal::MID, 150));
 }
 
 // ---------------------------------------------------------------------------
 // Frame
 // ---------------------------------------------------------------------------
 void Gfx::draw(const Game& g, const UiState& ui) {
+  const int si = std::clamp(ui.ui_scale, 0, UI_SCALE_COUNT - 1);
+  font_scale_ = UI_SCALE_LEVELS[si].font;
   scale_ = h_ / g.cam.vh;  // screen px per world px; animates while the zoom level changes
   bake_scale_ = std::min(h_ / ZOOM_LEVELS[g.cam.zoom].visible_h, 3.f);  // chunk resolution: the level's own scale
   view_.ox = static_cast<int>(std::lround(g.cam.x * static_cast<double>(scale_) + g.cam.shake_off.x * scale_));
@@ -896,7 +907,7 @@ void Gfx::draw(const Game& g, const UiState& ui) {
   if (!title) {
     draw_hud(g, ui);
     if (ui.toast_timer > 0.f && !ui.in_menu())  // short message above the minimap, fading out
-      text_centered(w_ / 2, h_ - MM_H - 14 - FONT_CELL_H - 18, ui.toast,
+      text_centered(w_ / 2, h_ - L(MM_H) - L(14) - cell_h() - L(18), ui.toast,
                     with_alpha(pal::BRIGHT, static_cast<uint8_t>(255 * clampf(ui.toast_timer / 0.5f, 0.f, 1.f))));
     draw_minimap(g, t);
   }

@@ -92,6 +92,7 @@ UserConfig load_config() {
     else if (!std::strcmp(key, "crt")) c.crt = val != 0;
     else if (!std::strcmp(key, "music")) c.music = val;
     else if (!std::strcmp(key, "sfx")) c.sfx = val;
+    else if (!std::strcmp(key, "ui_scale")) c.ui_scale = val;
   }
   std::fclose(f);
   return c;
@@ -107,8 +108,8 @@ void save_config(const UserConfig& c) {
     std::fprintf(stderr, "dualthrust: cannot write %s: %s\n", config_file_path().c_str(), std::strerror(errno));
     return;
   }
-  std::fprintf(f, "# dualthrust config (XDG)\nfullscreen=%d\nswap_engines=%d\nsound=%d\nship=%d\nzoom=%d\ncrt=%d\nmusic=%d\nsfx=%d\n",
-               c.fullscreen ? 1 : 0, c.swap_engines ? 1 : 0, c.sound ? 1 : 0, c.ship, c.zoom, c.crt ? 1 : 0, c.music, c.sfx);
+  std::fprintf(f, "# dualthrust config (XDG)\nfullscreen=%d\nswap_engines=%d\nsound=%d\nship=%d\nzoom=%d\nui_scale=%d\ncrt=%d\nmusic=%d\nsfx=%d\n",
+               c.fullscreen ? 1 : 0, c.swap_engines ? 1 : 0, c.sound ? 1 : 0, c.ship, c.zoom, c.ui_scale, c.crt ? 1 : 0, c.music, c.sfx);
   std::fclose(f);
   flush_user_files();
 }

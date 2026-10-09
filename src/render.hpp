@@ -40,6 +40,11 @@ class Gfx {
   void text_centered(int cx, int y, const char* s, Rgba c, int scale = 1) const {
     text(cx - text_width(s, scale) / 2, y, s, c, scale);
   }
+  // Pixel-font cell size at the current UI scale (scale=1 text uses these).
+  int cell_w() const { return 4 * font_scale_; }
+  int cell_h() const { return 5 * font_scale_; }
+  // Layout helper: values authored for the 2X (font=3) baseline, scaled to the active font.
+  int L(int px_at_2x) const { int v = (px_at_2x * font_scale_ + 1) / 3; return v < 1 ? 1 : v; }
   int sx(const Camera& cam, float wx) const;  // world -> screen px (zoom applied)
   int sy(float wy) const;
   int Z(float world_len) const;               // a world length in screen px, at least 1
@@ -62,6 +67,7 @@ class Gfx {
   int w_ = 1280, h_ = 720;           // screen (output) size in px
   float scale_ = 1.f;                // screen px per world px (animates while zooming)
   float bake_scale_ = 1.f;           // scale the cached chunk textures were rasterised at (the zoom level's)
+  int font_scale_ = 3;              // 3x5 glyph multiplier; set from UiState::ui_scale each frame
   View view_{0, 0};
   const char* glyph_bits_[95] = {};  // 3x5 bit strings per printable ASCII char
   Texture* overlay_ = nullptr;

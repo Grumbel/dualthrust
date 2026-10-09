@@ -334,6 +334,9 @@ int main(int argc, char** argv) {
   SDL_DisplayMode desktop;
   if (SDL_GetDesktopDisplayMode(0, &desktop) == 0) display_h = desktop.h;  // the panel, not the window
   set_zoom(game, user.zoom >= 0 ? user.zoom : auto_zoom_for_height(display_h));
+  const int ui_scale_init = user.ui_scale >= 0 && user.ui_scale < UI_SCALE_COUNT
+                                ? user.ui_scale
+                                : auto_ui_scale_for_height(display_h);
   update_view(game, 0.f, aspect(), true);
   auto new_game_at = [&](float wx) {
     respawn_ship(game, wx);
@@ -358,6 +361,7 @@ int main(int argc, char** argv) {
   ui.crt = user.crt;
   ui.music_vol = std::clamp(user.music, 0, SLIDER_MAX);
   ui.sfx_vol = std::clamp(user.sfx, 0, SLIDER_MAX);
+  ui.ui_scale = ui_scale_init;
   if (opt.play) ui.screen = Screen::Play;
   else if (opt.screen == "pause") { ui.screen = Screen::Pause; ui.page = MenuPage::Pause; }
   else if (opt.screen == "stats") { ui.screen = Screen::Pause; ui.page = MenuPage::Stats; ui.options_back = MenuPage::Pause; }
@@ -382,6 +386,7 @@ int main(int argc, char** argv) {
     c.sound = opt.mute ? user.sound : ui.sound;
     c.ship = ship_def_index(game);
     c.zoom = game.cam.zoom;
+    c.ui_scale = ui.ui_scale;
     c.crt = ui.crt;
     c.music = ui.music_vol;
     c.sfx = ui.sfx_vol;
@@ -470,6 +475,11 @@ int main(int argc, char** argv) {
       case MenuAction::Back: open_page(ui.options_back, ui.back_cursor); break;  // back on the entry it came from
       case MenuAction::Ship: cycle_ship(delta); break;
       case MenuAction::Zoom: zoom_to(game.cam.zoom + delta, true); break;
+      case MenuAction::UiScale: {
+        ui.ui_scale = (ui.ui_scale + UI_SCALE_COUNT + delta) % UI_SCALE_COUNT;
+        persist_config();
+        break;
+      }
       case MenuAction::SwapEngines: toggle_swap(); break;
       case MenuAction::Crt: ui.crt = !ui.crt; persist_config(); break;
       case MenuAction::Fullscreen: toggle_fullscreen(); break;

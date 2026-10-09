@@ -14,7 +14,7 @@ enum class MenuPage { Title, Pause, Options, Stats };
 
 enum class MenuAction {
   Start, Resume, NewCave, Options, Stats, MainMenu, Quit, Back,  // actions
-  Ship, Zoom, SwapEngines, Crt, Fullscreen,               // choices (on/off or a list), changed with left/right
+  Ship, Zoom, UiScale, SwapEngines, Crt, Fullscreen,       // choices (on/off or a list), changed with left/right
   Music, Effects,                                         // sliders 0..SLIDER_MAX
 };
 enum class ItemKind { Action, Choice, Slider };
@@ -53,6 +53,7 @@ inline constexpr MenuItem PAUSE_ITEMS[] = {
 inline constexpr MenuItem OPTION_ITEMS[] = {
     {MenuAction::Ship, "SHIP", ItemKind::Choice},
     {MenuAction::Zoom, "ZOOM", ItemKind::Choice},
+    {MenuAction::UiScale, "UI SCALE", ItemKind::Choice},
     {MenuAction::SwapEngines, "SWAP ENGINES", ItemKind::Choice},
     {MenuAction::Music, "MUSIC", ItemKind::Slider},
     {MenuAction::Effects, "EFFECTS", ItemKind::Slider},
@@ -91,6 +92,7 @@ struct UiState {
   bool sound = true;  // master switch (M); the sliders set the levels
   bool crt = true;    // scanlines + vignette
   int music_vol = 7, sfx_vol = 10;
+  int ui_scale = 1;  // index into UI_SCALE_LEVELS (1 = 2X, the desktop default)
   InputDevice device = InputDevice::Keyboard;
   double time = 0.0;      // real seconds, for UI animation
   char toast[40] = "";    // short message above the minimap, fading out

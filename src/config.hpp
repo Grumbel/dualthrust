@@ -12,7 +12,8 @@ struct UserConfig {
   int ship = 1;
   bool crt = true;
   int music = 7, sfx = 10;  // volumes 0..10
-  int zoom = -1;  // index into ZOOM_LEVELS; -1 = pick by screen size
+  int zoom = -1;      // index into ZOOM_LEVELS; -1 = pick by screen size
+  int ui_scale = -1;  // index into UI_SCALE_LEVELS; -1 = pick by screen size
 };
 
 void set_config_dir_override(const std::string& dir);

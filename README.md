@@ -97,13 +97,15 @@ stripes, each with hydraulic landing struts and a winch under the belly.
 On-screen hints follow the device you used last: they name keyboard keys or gamepad buttons accordingly.
 
 **Menus.** The game opens on a title screen (Start, Options, Statistics, Quit). Pausing shows Resume, New Cave, Options,
-Statistics, Main Menu and Quit. **Options** has Ship, Zoom, Swap Engines, Music and Effects volume (sliders), CRT Effect
+Statistics, Main Menu and Quit. **Options** has Ship, Zoom, UI Scale (1X–4X), Swap Engines, Music and Effects volume (sliders), CRT Effect
 (scanlines and vignette on or off) and Fullscreen; change a value with left/right, or Enter/A to step it forward.
 Everything is remembered between runs.
 
 **Zoom** is independent of the screen resolution: Near shows 480 world pixels of height, Medium 720 and Far 1080,
 whatever the window or display size. The first start picks Near on small screens such as the R36S's and Medium
 elsewhere; after that your choice is remembered.
+
+**UI Scale** multiplies the HUD, menus and minimap. 2X is the classic desktop size; 1X is about half that (the default on a 480p panel such as the R36S); 3X and 4X suit 1440p and 4K. The first start picks a level from the panel height unless a value is already saved in the config.
 
 ## Sound
 
