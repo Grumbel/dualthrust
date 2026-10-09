@@ -11,6 +11,8 @@
 #include <array>
 #include <cstdio>
 
+void release_crate(Game& g);
+
 namespace {
 
 Vec2 to_world(const Transform& t, Vec2 local) { return t.pos + rotate(local, t.angle); }
@@ -454,12 +456,25 @@ void cargo_system(Game& g, float dt) {
     const float bottom = t.pos.y + c.def->half_h;
     if (!p.active || std::abs(bottom - p.y) >= 12.f || t.pos.x < p.x0 || t.pos.x > p.x1) return;
 
-    const int pts = c.def->score > 0 ? c.def->score : tune::SCORE_CARGO;
+    int pts = c.def->score > 0 ? c.def->score : tune::SCORE_CARGO;
+    float dist_bonus = 0.f;
+    if (c.has_origin) {
+      const float dx = t.pos.x - c.haul_origin.x, dy = t.pos.y - c.haul_origin.y;
+      const float dist = std::sqrt(dx * dx + dy * dy);
+      dist_bonus = clampf(dist / tune::HAUL_DIST_REF, 0.f, 1.5f);
+      pts = static_cast<int>(pts * (1.f + dist_bonus) + 0.5f);
+    }
     c.picked = false;
+    c.has_origin = false;
     stat_add(g, &Stats::cargo_delivered, 1);
+    g.hauls_run += 1;
     g.score += pts;
-    char msg[32];
-    std::snprintf(msg, sizeof msg, "+%d %s", pts, c.def->name);
+    char msg[40];
+    if (dist_bonus > 0.05f)
+      std::snprintf(msg, sizeof msg, "+%d %s (+%d%%)", pts, c.def->name,
+                    static_cast<int>(dist_bonus * 100.f + 0.5f));
+    else
+      std::snprintf(msg, sizeof msg, "+%d %s", pts, c.def->name);
     notice(g, msg);
     beep(g, SimEventKind::Delivered);
 
@@ -495,8 +510,6 @@ bool touching_pad(const Cave& cave, Vec2 pt) {
       return true;
   return false;
 }
-
-void release_crate(Game& g);
 
 // Impacts from Box2D's hit events: hard hits destroy the ship, softer ones bounce with sparks and noise.
 void impact_system(Game& g) {
@@ -622,6 +635,14 @@ void ground_system(Game& g, float dt) {
     for (int i = 0; i < 6; ++i) demand += th.level[i];
     if (f.state != FlightState::Crashed && f.fuel > 0.f && demand > 0.02f)
       f.fuel = std::max(0.f, f.fuel - tune::FUEL_BURN * demand * 0.25f * dt);
+    // Extra burn while hauling — heavier loads cost more to fly home
+    if (f.state == FlightState::Flying && f.fuel > 0.f && g.ecs.has<Rope>(g.ship)) {
+      const Rope& r = g.ecs.get<Rope>(g.ship);
+      if (r.held != NULL_ENTITY && g.ecs.has<Cargo>(r.held) && g.ecs.get<Cargo>(r.held).def) {
+        const float m = g.ecs.get<Cargo>(r.held).def->mass;
+        f.fuel = std::max(0.f, f.fuel - tune::FUEL_HAUL * m * dt);
+      }
+    }
     if (f.state == FlightState::Landed && touching_pad(g.cave, f.contact_pt)) {
       f.fuel = std::min(1.f, f.fuel + tune::FUEL_REFUEL * dt);
       if (f.hurt > 0.f) f.hurt = std::max(0.f, f.hurt - tune::HURT_REPAIR * dt);
@@ -837,6 +858,10 @@ void grab_crate(Game& g, Entity best) {
   r.held = best;
   if (!c.picked) stat_add(g, &Stats::cargo_picked, 1);
   c.picked = true;
+  if (g.ecs.has<Transform>(best)) {
+    c.haul_origin = g.ecs.get<Transform>(best).pos;
+    c.has_origin = true;
+  }
   notice(g, "CARGO PICKED UP");
   beep(g, SimEventKind::Grab);
 }
@@ -984,6 +1009,7 @@ void reset_fog(Game& g) {
   g.sonar = {};
   g.last_pad = -1;
   g.home_pad = 0;
+  g.hauls_run = 0;
   g.cells_explored = 0;
   g.explore_tier = 0;
   g.signals_cleared = false;

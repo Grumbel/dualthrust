@@ -62,7 +62,9 @@ struct Cargo {
   const CargoDef* def = nullptr;
   bool picked = false;      // lifted since it last stood on a pad: counts as delivered when it rests on one
   float rest_time = 0.f;    // how long it has been still
-  int dest_pad = -1;        // preferred active pad index for a delivery bonus (-1 = any)
+  int dest_pad = -1;        // home pad index for return-to-base
+  Vec2 haul_origin{};       // where it was first lifted (distance bonus)
+  bool has_origin = false;
 };
 
 // Short-lived visual: fades `from`→`to` over `ttl`, optionally affected by gravity and drag.
@@ -147,7 +149,8 @@ struct Game {
   int score = 0;             // this session (resets on quit; not permanent stats)
   float sonar_cool = 0.f;    // seconds until the next ping is allowed
   int last_pad = -1;
-  int home_pad = 0;  // cargo return-to-base pad         // index of last pad the ship settled on (-1 = none yet)
+  int home_pad = 0;  // cargo return-to-base pad
+  int hauls_run = 0; // deliveries completed this cave
 
   // Debug menu multipliers (1 = stock). Applied live; mass rebuild happens when mass_mul changes.
   float dbg_mass_mul = 1.f;

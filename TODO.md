@@ -9,10 +9,12 @@
 - Crash drops the load; landing on base with winch in auto-drops for delivery.
 - Nearby crates show their name; home pad always labeled BASE.
 - Cargo: Parcel(M), Crate/Barrel(H), Container/Heavy/Anvil(Clamp) with per-type scores.
+- Distance bonus (up to +150% at HAUL_DIST_REF); PAY ~ estimate on HUD; hauls_run counter.
+- Extra fuel burn while carrying (mass × FUEL_HAUL); compass → CARGO / BASE.
 
 ## Tip
 
-- Bundle line: `dualthrust-050.1-cargo-polish-9a093cd` → tip `b540553`
+- Bundle line: `dualthrust-051.1-haul-bonus-nav-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap

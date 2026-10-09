@@ -967,9 +967,10 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   text(m20, y, buf, pal::BRIGHT);
   y += lh;
   {
-    int hauled = 0;
-    // Stats track lifetime; for this cave count delivered via score is awkward — show held + tip
-    std::snprintf(buf, sizeof(buf), "HAUL %s", d.winch ? grip_label(d.grip) : "—");
+    if (d.winch)
+      std::snprintf(buf, sizeof(buf), "HAUL %s  x%d", grip_label(d.grip), g.hauls_run);
+    else
+      std::snprintf(buf, sizeof(buf), "HAUL —");
     text(m20, y, buf, d.winch ? pal::CARGO : pal::DIM);
     y += lh;
   }
@@ -1003,14 +1004,30 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     std::snprintf(legbuf, sizeof legbuf, "LOAD %s %.2f  %s", held.def->name, held.def->mass, bname);
     text(m20, y, legbuf, pal::CARGO);
     y += lh;
-    if (held.dest_pad >= 0 && held.dest_pad < static_cast<int>(g.cave.pads.size())) {
-      const LandingPad& dp = g.cave.pads[static_cast<size_t>(held.dest_pad)];
-      const float cx = 0.5f * (dp.x0 + dp.x1);
-      const float dx = cx - tf.pos.x, dy = dp.y - tf.pos.y;
-      const float dist = std::sqrt(dx * dx + dy * dy);
-      std::snprintf(legbuf, sizeof legbuf, "BASE %s %.0f", dp.active ? "HOME" : "???", dist / PPM);
-      text(m20, y, legbuf, dp.active ? pal::WARN : pal::DIM);
+    if (held.def) {
+      int est = held.def->score > 0 ? held.def->score : tune::SCORE_CARGO;
+      if (held.has_origin) {
+        const float dx = tf.pos.x - held.haul_origin.x, dy = tf.pos.y - held.haul_origin.y;
+        const float dist = std::sqrt(dx * dx + dy * dy);
+        const float bonus = clampf(dist / tune::HAUL_DIST_REF, 0.f, 1.5f);
+        est = static_cast<int>(est * (1.f + bonus) + 0.5f);
+      }
+      std::snprintf(legbuf, sizeof legbuf, "PAY ~%d", est);
+      text(m20, y, legbuf, pal::WARN);
       y += lh;
+    }
+    {
+      const int base = (g.home_pad >= 0 && g.home_pad < static_cast<int>(g.cave.pads.size()))
+                           ? g.home_pad : 0;
+      if (base < static_cast<int>(g.cave.pads.size())) {
+        const LandingPad& dp = g.cave.pads[static_cast<size_t>(base)];
+        const float cx = 0.5f * (dp.x0 + dp.x1);
+        const float dx = cx - tf.pos.x, dy = dp.y - tf.pos.y;
+        const float dist = std::sqrt(dx * dx + dy * dy);
+        std::snprintf(legbuf, sizeof legbuf, "BASE %.0f", dist / PPM);
+        text(m20, y, legbuf, pal::WARN);
+        y += lh;
+      }
     }
   } else {
     std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", bname);
@@ -1066,33 +1083,34 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   const int rx = w_ - text_width("SPEED OK") - m24;
   fill(rx - L(12), m8, w_ - rx + L(4), lh * 4 + m16, with_alpha(pal::MENU, 120));
   for (int i = 0; i < 3; ++i) text(rx, m16 + lh * i, status[i].s, status[i].ok ? pal::PAD : pal::HOT);
-  // Compass: cargo destination while hauling, otherwise nearest unfound signal
+  // Compass: BASE while hauling, otherwise nearest cargo this ship can lift
   {
     float best_d = 1e12f;
     Vec2 best{};
     bool any = false;
-    const char* tag = "SIG";
+    const char* tag = "CARGO";
     Rgba col = pal::CARGO;
     const Rope& rope = g.ecs.get<Rope>(g.ship);
     if (rope.held != NULL_ENTITY) {
-      const Cargo& held = g.ecs.get<Cargo>(rope.held);
-      if (held.dest_pad >= 0 && held.dest_pad < static_cast<int>(g.cave.pads.size())) {
-        const LandingPad& dp = g.cave.pads[static_cast<size_t>(held.dest_pad)];
+      const int base = (g.home_pad >= 0 && g.home_pad < static_cast<int>(g.cave.pads.size()))
+                           ? g.home_pad : 0;
+      if (base < static_cast<int>(g.cave.pads.size())) {
+        const LandingPad& dp = g.cave.pads[static_cast<size_t>(base)];
         best = {0.5f * (dp.x0 + dp.x1) - tf.pos.x, dp.y - tf.pos.y};
         best_d = best.x * best.x + best.y * best.y;
         any = true;
-        tag = dp.active ? "BASE" : "BASE?";
+        tag = "BASE";
         col = pal::WARN;
       }
-    }
-    if (!any) {
-      for (const Game::Signal& sig : g.signals) {
-        if (sig.found) continue;
-        const float dx = sig.pos.x - tf.pos.x, dy = sig.pos.y - tf.pos.y;
-        const float d = dx * dx + dy * dy;
-        if (d < best_d) { best_d = d; best = {dx, dy}; any = true; }
-      }
-      tag = "SIG";
+    } else if (d.winch) {
+      g.ecs.view<Cargo, Transform>([&](Entity, const Cargo& c, const Transform& ct) {
+        if (!c.def || !b2Body_IsEnabled(c.body)) return;
+        if (d.grip < c.def->grip || c.def->mass > d.lift_cap + 0.001f) return;
+        const float dx = ct.pos.x - tf.pos.x, dy = ct.pos.y - tf.pos.y;
+        const float dd = dx * dx + dy * dy;
+        if (dd < best_d) { best_d = dd; best = {dx, dy}; any = true; }
+      });
+      tag = "CARGO";
       col = pal::CARGO;
     }
     if (any) {
@@ -1105,8 +1123,8 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
       const int ex = ax + static_cast<int>(std::cos(ang) * L(10));
       const int ey = ay + static_cast<int>(std::sin(ang) * L(10));
       line(ax, ay, ex, ey, col);
-    } else if (!g.signals.empty()) {
-      text(rx, m16 + lh * 3, "SIG DONE", pal::PAD);
+    } else if (d.winch) {
+      text(rx, m16 + lh * 3, "NO CARGO", pal::DIM);
     }
   }
 
