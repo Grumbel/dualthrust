@@ -270,22 +270,31 @@ inline void read_thrust_bound(const BindMap& m, SDL_GameController* pad, int cha
   const Uint8* keys = SDL_GetKeyboardState(nullptr);
   for (int i = 0; i < 6; ++i) out[i] = 0.f;
 
-  const float stick_l = std::max(action_value(m, Action::ThrustLS, pad, keys),
-                                 action_value(m, Action::ThrustLSd, pad, keys));
-  const float stick_r = std::max(action_value(m, Action::ThrustRS, pad, keys),
-                                 action_value(m, Action::ThrustRSd, pad, keys));
+  const float stick_lu = action_value(m, Action::ThrustLS, pad, keys);
+  const float stick_ld = action_value(m, Action::ThrustLSd, pad, keys);
+  const float stick_ru = action_value(m, Action::ThrustRS, pad, keys);
+  const float stick_rd = action_value(m, Action::ThrustRSd, pad, keys);
   const float key_l = action_value_kbd(m, Action::ThrustL, keys);
   const float key_r = action_value_kbd(m, Action::ThrustR, keys);
   const float trig_l = action_value_pad(m, Action::ThrustL, pad);
   const float trig_r = action_value_pad(m, Action::ThrustR, pad);
 
-  // Primary mains
-  out[0] = std::max(stick_l, key_l);
-  out[1] = std::max(stick_r, key_r);
-  // Secondary verniers / boosters
+  // Secondary verniers / boosters on triggers
   out[2] = trig_l;
   out[3] = trig_r;
   out[4] = out[5] = 0.f;
+
+  if (channels > 4) {
+    // Stick-up = primary (0/1); stick-down = channels 4/5 (top thrusters, Seesaw pairs, …)
+    out[0] = std::max(stick_lu, key_l);
+    out[1] = std::max(stick_ru, key_r);
+    out[4] = stick_ld;
+    out[5] = stick_rd;
+  } else {
+    // 2/4-channel: stick up *or* down feeds primary
+    out[0] = std::max(std::max(stick_lu, stick_ld), key_l);
+    out[1] = std::max(std::max(stick_ru, stick_rd), key_r);
+  }
 
   // Shift = half primary (keyboard convenience)
   if (keys) {
@@ -298,10 +307,6 @@ inline void read_thrust_bound(const BindMap& m, SDL_GameController* pad, int cha
     out[0] = std::max(out[0], trig_l * 0.85f);
     out[1] = std::max(out[1], trig_r * 0.85f);
     out[2] = out[3] = 0.f;
-  } else if (channels > 4) {
-    // Stick-down halves stay on 4/5 for ships that use them (Bidraft, Seesaw)
-    out[4] = action_value(m, Action::ThrustLSd, pad, keys);
-    out[5] = action_value(m, Action::ThrustRSd, pad, keys);
   }
 }
 

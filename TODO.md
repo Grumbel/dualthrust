@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-047.1-flake-cmake-flags-9a093cd` → tip `7093cac`
+- Bundle line: `dualthrust-048.1-stack-stick-up-down-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
@@ -55,6 +55,7 @@
 - **Seesaw**: each stick is an opposing pair (no triggers required).
 - **Lurch**: deliberately unbalanced engines (fat left, weak canted right); equal primary input yaws hard.
   Trigger verniers for recovery. Built for differential-thrust practice.
+- **Stack**: four axial thrusters — bottom on stick-up, top on stick-down (brake).
 - **Titan**: super-heavy needle rocket; twin primary mains (sticks) + small top L/R RCS (triggers).
 - Controls: sticks = primary L/R, triggers = secondary
 - Winch/hook only on haulers (`ShipDef.winch`): Medium, Frigate, Atlas, Dragonfly, Colossus, Vernier, Bidraft.

@@ -352,6 +352,12 @@ inline constexpr ThrusterDef LURCH_T[] = {
     {52.f, 10.f, -1.25f, 0.35f, 3},   // secondary: right nozzle, exhaust outward
 };
 
+// Stack: four axial thrusters. Bottom pair = stick up (lift); top pair = stick down (brake / invert).
+inline constexpr ThrusterDef STACK_T[] = {
+    {-36.f, 38.f, 0.f, 1.0f, 0},  {36.f, 38.f, 0.f, 1.0f, 1},             // bottom mains: stick up
+    {-30.f, -28.f, 3.1416f, 0.85f, 4}, {30.f, -28.f, 3.1416f, 0.85f, 5}, // top: stick down (push down)
+};
+
 // Titan: very tall heavy rocket. Twin primary mains (sticks); small top RCS for L/R (triggers).
 inline constexpr ThrusterDef TITAN_T[] = {
     {-32.f, 108.f, 0.f, 1.25f, 0}, {32.f, 108.f, 0.f, 1.25f, 1},           // primary twin bells
@@ -387,6 +393,9 @@ inline constexpr ShipDef SHIP_DEFS[] = {
     // Super-heavy needle: taller than Rocket, twin mains + nose RCS
     {"Titan", 24.f, 128.f, 32.f, 108.f, 3.2f, 16000.f, 520.f, false,
      STYLE_FINS | STYLE_STRIPES | STYLE_DISH | STYLE_TANKS, TITAN_T, 4, false},
+    // Bottom lift on stick-up, top brake on stick-down
+    {"Stack", 40.f, 40.f, 36.f, 38.f, 1.6f, 2600.f, 440.f, false,
+     STYLE_DECK | STYLE_STRIPES | STYLE_DISH | STYLE_TANKS, STACK_T, 4, true},
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;
