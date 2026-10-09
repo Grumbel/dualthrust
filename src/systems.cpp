@@ -983,7 +983,10 @@ float home_pad_x(const Game& g) {
 
 // Teleport to a specific pad index (must be visited). Returns false if invalid.
 bool teleport_pad(Game& g, int pad_index) {
-  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return false;
+  if (g.ecs.get<Flight>(g.ship).state != FlightState::Landed) {
+    notice(g, "LAND FIRST");
+    return false;
+  }
   if (pad_index < 0 || pad_index >= static_cast<int>(g.cave.pads.size())) return false;
   const LandingPad& pad = g.cave.pads[static_cast<size_t>(pad_index)];
   if (!pad.visited) {
@@ -998,7 +1001,10 @@ bool teleport_pad(Game& g, int pad_index) {
 
 // Teleport between visited (explored) pads. delta = +1 next, -1 previous.
 bool cycle_pad(Game& g, int delta) {
-  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return false;
+  if (g.ecs.get<Flight>(g.ship).state != FlightState::Landed) {
+    notice(g, "LAND FIRST");
+    return false;
+  }
   std::vector<int> visited;
   visited.reserve(g.cave.pads.size());
   for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i)

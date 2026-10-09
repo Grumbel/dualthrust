@@ -310,7 +310,7 @@ inline float com_y(const ShipDef& d) { return 0.45f * leg_geom(d).foot_y; }
 // Big ships: channels 0/1 = primary (sticks), 2/3 = secondary (triggers)
 inline constexpr ThrusterDef FRIGATE_T[] = {
     {-62.f, 34.f, 0.f, 1.f, 0},   {62.f, 34.f, 0.f, 1.f, 1},                    // main engines: sticks
-    {-70.f, 26.f, 1.5708f, 0.5f, 2}, {70.f, 26.f, -1.5708f, 0.5f, 3},          // side thrusters: triggers
+    {-70.f, 26.f, -1.5708f, 0.5f, 2}, {70.f, 26.f, 1.5708f, 0.5f, 3},         // side thrusters: outward strafe
 };
 inline constexpr ThrusterDef ATLAS_T[] = {
     {-56.f, 40.f, 0.f, 1.f, 0},   {56.f, 40.f, 0.f, 1.f, 1},                    // main engines: sticks

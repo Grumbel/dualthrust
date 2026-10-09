@@ -1009,6 +1009,13 @@ int main(int argc, char** argv) {
     ui.time += dt;
     ui.toast_timer = std::max(0.f, ui.toast_timer - dt);
     update_view(game, dt, aspect());
+    // When a menu covers the centre of the screen, frame the ship in the upper
+    // band so the hull is still visible above the panel (ship select / hangar).
+    if (ui.screen == Screen::Pause && game.ecs.has<Transform>(game.ship)) {
+      const Vec2 p = game.ecs.get<Transform>(game.ship).pos;
+      game.cam.x = p.x - game.cam.vw * 0.5f;
+      game.cam.y = p.y - game.cam.vh * 0.22f;
+    }
 
     const double t0 = stamp();
     // Pause menu and held map both freeze the simulation

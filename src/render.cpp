@@ -508,24 +508,22 @@ void Gfx::draw_pads(const Game& g, double t) const {
     be_->line(mid - Z(8), y, mid + Z(8), y, edge_col);
     be_->line(mid, y - z6, mid, y + z2, edge_col);
 
-    // Status label above the pad — the clear activated / dest cue
+    // Status label *below* the pad deck
     if (is_dest) {
       const char* label = ghost ? "DEST?" : "DEST";
       const int tw = text_width(label);
-      text(mid - tw / 2, y - Z(52), label, with_alpha(pal::HOT, static_cast<uint8_t>(160 + 95 * pulse)));
+      text(mid - tw / 2, y + Z(28), label, with_alpha(pal::HOT, static_cast<uint8_t>(160 + 95 * pulse)));
     } else if (online) {
-      // ACTIVE pulses; VISITED pads add a second line so hangar targets are obvious
       const char* label = p.visited ? "ACTIVE" : "ONLINE";
       const int tw = text_width(label);
       const uint8_t la = static_cast<uint8_t>(150 + 105 * pulse_fast);
-      text(mid - tw / 2, y - Z(52), label, with_alpha(pal::BRIGHT, la));
-      // Small status lamp under the text
-      fill(mid - Z(3), y - Z(58), Z(6), Z(4), with_alpha(pal::BRIGHT, la));
+      text(mid - tw / 2, y + Z(28), label, with_alpha(pal::BRIGHT, la));
+      fill(mid - Z(3), y + Z(22), Z(6), Z(4), with_alpha(pal::BRIGHT, la));
     }
 
-    // Visited mark: filled diamond (teleport/hangar target); online-only: open ring
+    // Visited mark above the deck: filled diamond (teleport target); online-only: open ring
     if (!ghost) {
-      const int mx = mid, my = y - Z(32);
+      const int mx = mid, my = y - Z(28);
       const int rr = Z(5);
       if (p.visited) {
         be_->line(mx, my - rr, mx + rr, my, pal::BRIGHT);
