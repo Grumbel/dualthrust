@@ -1,15 +1,16 @@
 # TODO
 
+## Tip
+
+- Bundle line: `dualthrust-018.1-scrub-rstick-respawn-9a093cd` → tip `062ca07`
+- Base of this work line: `9a093cd`
+
 ## Roadmap
 
 - **0.1.0** (released): flight, caves and pads, zoom, title screen and options, sound, GLES2 renderer, web and R36S builds.
 - **0.2.0**: rigid-body rewrite with Box2D 3.1 (done: world, streamed terrain, sprung/retractable legs, slopes, statistics).
-  - Done: landing possible anywhere (contact-based: upright, slow, settled); pads are flat and grippy.
-  - Done: landing legs on prismatic joints with a hand-applied spring + damper, retract on Space / X; permanent statistics.
-  - Done: rope (distance-joint cable with a winch, hook) and cargo crates (cyan on the minimap, delivery to pads counted).
-  - Rope ideas: wrap around rock corners (a chain of bodies would, a distance joint does not), a magnet/auto-grab, crate
-    weights shown on the HUD, cargo with destinations.
-  - Done: pads as score/refuel spots (fuel gauge, session score).
+  - Done: landing anywhere; pads flat and grippy; legs; rope + cargo; fuel/score.
+  - Rope ideas (open): wrap around rock corners, magnet/auto-grab, crate weights on HUD, cargo destinations.
   - Next: tune the feel on the handheld (leg Hz/damping, crash limits, `TIME_SCALE`).
 
 ## Open
@@ -17,35 +18,53 @@
 - [ ] Real-hardware pass through the PortMaster launcher; controller mapping basically works but still needs
       tweaks and customization (R36S)
 - [ ] Audio in the browser untested (gamepad in the browser works)
-- [x] Fuel / score (tank burns with thrust, refills on pads; pad landings +100, cargo +250; HUD bar + score)
-- [x] Box2D on the R36S and in the browser (builds and runs on device / in browser)
-- [x] UI scale option (1X/2X/3X/4X; auto by display height; R36S → 1X, desktop → 2X)
+- [x] Fuel / score
+- [x] Box2D on the R36S and in the browser
+- [x] UI scale option
+- [x] Debug menu (title → Debug, or F3 in play): live tune + Y resets one row; changed rows highlight
+- [x] Data-driven sonar modes (REFLECT / PAINT / BOTH) + passive explore
+- [x] Bidirectional stick thrust (channels 4/5 = stick-down) + Vernier / Bidraft / Seesaw ships
+- [x] Zoom cycle action (Tab); zoom in/out unbound on pad by default
+- [x] Menu nav stack (Options → Controls → Back → Options → Back works)
+- [x] Right-stick click scrubbed from Respawn / NextShip on load (legacy configs)
 
 ## Notes
 
-- Ship **Rocket**: tall 1950s sci-fi needle (half_h 96, narrow, tail fins + dish). Select via Options → Ship.
-- Debug menu (Options → Debug, or F3 in play): live-tweaks gravity, time scale, mass/thrust multipliers,
-  fuel burn/refuel/limp, sonar range/speed/cooldown, leg spring, crash speeds, friction, rope length/reel,
-  grab reach. RESET DEFAULTS restores stock. Mass mul rebuilds Box2D mass data immediately; gravity
-  updates the world. Drag/friction on existing bodies need a respawn to fully re-apply.
+### Ships
+- **Rocket**: tall 1950s sci-fi needle (`half_h` 96). Options → Ship or **S**.
+- **Vernier**: mains on triggers; **LS up/down** opposing lateral thrusters.
+- **Bidraft**: mains + LS lateral + **RS up/down** nose/belly.
+- **Seesaw**: each stick is an opposing pair (no triggers required).
 
+### Debug
+- Title menu → **Debug** (not under Options). F3 opens it from play.
+- Rows that differ from stock defaults draw in HOT orange.
+- **Y** resets the selected row; footer **RESET DEFAULTS** restores all.
+- Mass mul rebuilds Box2D mass immediately; gravity syncs the world. Drag/friction on
+  existing bodies need a respawn to fully re-apply.
 
-- Respawn: after a crash, Enter / B (and A on the gamepad) respawn immediately on the home pad.
-  Intentional respawn while alive is pause-menu only (Respawn item). New Cave is pause-menu only.
+### Respawn
+- After a crash: Enter / B (and A on the pad) respawn on the home pad.
+- While alive: pause-menu **Respawn** only. New Cave is pause-menu only.
+- Right-stick click is not bound to Respawn or NextShip (stripped on load).
 
-- Exploration: sonar reveal strength fades past 75% range; deep-cave signals (+75);
-  fuel limps instead of cutting out; map exploration awards small score.
+### Zoom
+- **Tab** = cycle Near → Medium → Far. **=** / **-** and mouse wheel = in/out.
+- No default gamepad zoom binds (rebind in Controls).
 
-- Map is 4:3 (7680×5760). Unexplored minimap cells are radio static, not flat black.
-- Fog of war: passive circular uncover around the ship (EXPLORE_RADIUS ~900 ≈ FAR zoom size, LOS-limited). Minimap starts
-  as radio static; flying opens the chart. Select/Z holds the full revealed map. Ship switch teleports
-  to the nearest active pad.
-- Sonar is mode-table driven (`SONAR_MODES`): REFLECT (default search pulse + reflections), PAINT (classic
-  fog annulus), BOTH. Passive explore is a separate flag. Debug: SONAR MODE / PASSIVE MAP.
+### Fog / sonar
+- Passive circular uncover (`EXPLORE_RADIUS` ~900 ≈ FAR zoom size, LOS-limited).
+- Sonar modes (`tune::SONAR_MODES`): **REFLECT** (default), **PAINT**, **BOTH**.
+  Systems dispatch on flags; classic paint path is kept. Debug: SONAR MODE / PASSIVE MAP.
+- Reflect hits draw as mirrored circular arc segments; ring expands while fading (never freezes).
 
-- Controls rebinding: Options → Controls lists every play action; Enter/A starts listening for a key or
-  button/axis. Tab/Y toggles keyboard vs gamepad view. Binds save as `bind.K.*` / `bind.P.*` lines.
-  Menu navigation stays fixed. Reset Defaults restores the historical layout. HUD hints follow the binds.
-- UI scale: Options → UI SCALE cycles 1X (font 2, ~half of old desktop), 2X (font 3, previous default),
-  3X (font 5), 4X (font 6). First start without a saved value picks by panel height (≤480 → 1X,
-  ≥1440 → 3X, ≥2160 → 4X, else 2X). HUD, menus, minimap panel and toast all scale with the font.
+### Controls
+- Options → Controls: rebind every play action. Tab/Y toggles keyboard vs pad view.
+- Channels: 0/1 triggers, 2/3 stick-up, 4/5 stick-down (LSd/RSd; keyboard F/G by default).
+- Menu navigation is fixed (not rebindable).
+
+### UI scale
+- 1X–4X; first start picks by panel height (≤480 → 1X, else 2X, etc.).
+
+### Platforms
+- Box2D works on R36S and in browser. Gamepad works in browser.
