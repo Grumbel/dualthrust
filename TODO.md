@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-031.1-hangar-map-pause-pad-visit-9a093cd` → tip `3a2830a`
+- Bundle line: `dualthrust-032.1-sonar-echo-mirrored-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap

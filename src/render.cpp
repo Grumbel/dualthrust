@@ -1072,7 +1072,7 @@ void Gfx::draw_minimap(Game& g, double t) {
         py0 = py1;
       }
     }
-    // Reflection segments (bright arcs at hit bearings)
+    // Reflection segments: chord-mirrored arcs (bulge toward origin on the chart)
     for (const SonarReflection& e : g.sonar.echoes) {
       if (e.age > e.life) continue;
       const float life_u = 1.f - e.age / e.life;
@@ -1081,11 +1081,32 @@ void Gfx::draw_minimap(Game& g, double t) {
       else if (e.kind == SonarReflection::Kind::Signal) base = pal::BRIGHT;
       const float arc = 0.28f;
       const float rr = e.hit_r * MM_K;
+      const float a0 = e.angle - arc, a1 = e.angle + arc;
+      const float half = 0.5f * (a1 - a0);
+      const float amid = 0.5f * (a0 + a1);
+      const float ux = std::cos(amid), uy = std::sin(amid);
+      const float d_chord = rr * std::cos(half);
+      // Origin of the ping in panel-local (pre-scale) coords is (ox_w, oy_w)
+      const float ocx = ox_w + 2.f * d_chord * ux;
+      const float ocy = oy_w + 2.f * d_chord * uy;
+      const float c0x = ox_w + rr * std::cos(a0), c0y = oy_w + rr * std::sin(a0);
+      const float mrad = std::sqrt((c0x - ocx) * (c0x - ocx) + (c0y - ocy) * (c0y - ocy));
+      float ma0 = std::atan2(oy_w + rr * std::sin(a0) - ocy, c0x - ocx);
+      float ma1 = std::atan2(oy_w + rr * std::sin(a1) - ocy, ox_w + rr * std::cos(a1) - ocx);
+      float d = ma1 - ma0;
+      while (d > PI) d -= 2.f * PI;
+      while (d < -PI) d += 2.f * PI;
       const int segs = 6;
-      auto [px0, py0] = mm_pt(e.angle - arc, rr);
+      if (mrad < 0.5f) continue;
+      auto mm_m = [&](float a) -> std::pair<int, int> {
+        const float lx = ocx + mrad * std::cos(a);
+        const float ly = ocy + mrad * std::sin(a);
+        return {x + static_cast<int>(lx * sx_k), y + static_cast<int>(ly * sy_k)};
+      };
+      auto [px0, py0] = mm_m(ma0);
       for (int i = 1; i <= segs; ++i) {
-        const float a = e.angle - arc + (2.f * arc) * (static_cast<float>(i) / segs);
-        auto [px1, py1] = mm_pt(a, rr);
+        const float a = ma0 + d * (static_cast<float>(i) / segs);
+        auto [px1, py1] = mm_m(a);
         if (on_panel(px0, py0) && on_panel(px1, py1))
           line(px0, py0, px1, py1, with_alpha(base, static_cast<uint8_t>(80 + 160 * life_u)));
         px0 = px1;
@@ -1461,16 +1482,37 @@ void Gfx::draw_sonar(const Game& g) const {
 
   auto W = [&](float wx, float wy) { return SDL_Point{sx(g.cam, wx), sy(wy)}; };
 
-  // Draw a circular arc polyline; break the stroke when a segment is skipped so we
-  // never chord across the circle (that was the "line through the middle" artifact).
-  auto stroke_arc = [&](float radius, float a0, float a1, int segs, Rgba col) {
+  // Mirrored circular segment: the arc from a0..a1 on the ring is reflected across
+  // its chord so it bulges the other way (toward the origin for the short arc).
+  // That is the echo "segment" — the inverse of the ring arc.
+  auto stroke_mirrored_segment = [&](float radius, float a0, float a1, int segs, Rgba col) {
     if (radius < 1.f || segs < 1) return;
+    const float half = 0.5f * (a1 - a0);
+    if (std::fabs(half) < 1e-4f) return;
+    // Chord is perpendicular to the mid-radius; distance origin→chord = r·cos(half)
+    const float amid = 0.5f * (a0 + a1);
+    const float ux = std::cos(amid), uy = std::sin(amid);
+    const float d_chord = radius * std::cos(half);
+    // Reflect the ring centre across the chord → mirrored arc centre
+    const float ocx = o.x + 2.f * d_chord * ux;
+    const float ocy = o.y + 2.f * d_chord * uy;
+    // Endpoints on the ring
+    const float c0x = o.x + radius * std::cos(a0), c0y = o.y + radius * std::sin(a0);
+    const float c1x = o.x + radius * std::cos(a1), c1y = o.y + radius * std::sin(a1);
+    const float mrad = std::sqrt((c0x - ocx) * (c0x - ocx) + (c0y - ocy) * (c0y - ocy));
+    if (mrad < 1.f) return;
+    float ma0 = std::atan2(c0y - ocy, c0x - ocx);
+    float ma1 = std::atan2(c1y - ocy, c1x - ocx);
+    // Shortest angular path (the mirrored minor segment)
+    float d = ma1 - ma0;
+    while (d > PI) d -= 2.f * PI;
+    while (d < -PI) d += 2.f * PI;
     bool have = false;
     SDL_Point prev{};
     for (int i = 0; i <= segs; ++i) {
       const float t = static_cast<float>(i) / static_cast<float>(segs);
-      const float a = a0 + (a1 - a0) * t;
-      const SDL_Point cur = W(o.x + radius * std::cos(a), o.y + radius * std::sin(a));
+      const float a = ma0 + d * t;
+      const SDL_Point cur = W(ocx + mrad * std::cos(a), ocy + mrad * std::sin(a));
       if (have) line(prev.x, prev.y, cur.x, cur.y, col);
       prev = cur;
       have = true;
@@ -1511,8 +1553,9 @@ void Gfx::draw_sonar(const Game& g) const {
     }
   }
 
-  // Reflections: mirrored circular segments (arc on the ring + returning arc).
-  // No radial spoke — that was the second "line in the middle".
+  // Reflections: circular segments *reversed* across their chord (bulge toward the
+  // origin) so they read as echo returns rather than pieces of the search ring.
+  // Returning pulse uses the same mirrored geometry at a shrinking radius.
   constexpr float ARC = 0.35f;  // half-width of the reflected segment (radians)
   for (const SonarReflection& e : g.sonar.echoes) {
     if (e.age > e.life) continue;
@@ -1525,20 +1568,20 @@ void Gfx::draw_sonar(const Game& g) const {
     const float a0 = e.angle - ARC;
     const float a1 = e.angle + ARC;
 
-    // Bright mirrored segment on the expanding wave while the front is near the hit
+    // Bright reversed segment on the expanding wave while the front is near the hit
     if (r > 1.f && std::abs(r - e.hit_r) < 50.f && ring_bright > 0.05f) {
       const uint8_t aa = static_cast<uint8_t>(90 + 165 * ring_bright);
-      stroke_arc(r, a0, a1, 12, with_alpha(base, aa));
-      // Slightly thicker segment: parallel arc just inside
-      stroke_arc(r - 3.f, a0, a1, 12, with_alpha(base, static_cast<uint8_t>(aa * 0.55f)));
+      stroke_mirrored_segment(r, a0, a1, 12, with_alpha(base, aa));
+      // Slightly thicker twin, a little farther in
+      stroke_mirrored_segment(r - 4.f, a0, a1, 12, with_alpha(base, static_cast<uint8_t>(aa * 0.55f)));
     }
 
-    // Returning mirrored segment: same angular width, radius shrinks toward origin
+    // Returning reversed segment: same angular width, radius shrinks toward origin
     const float ret_r = e.hit_r - e.age * g.sonar.speed * 0.85f;
     if (ret_r > 8.f && life_u > 0.05f) {
       const uint8_t aa = static_cast<uint8_t>(70 + 170 * life_u);
-      stroke_arc(ret_r, a0, a1, 12, with_alpha(base, aa));
-      stroke_arc(ret_r + 3.f, a0, a1, 12, with_alpha(base, static_cast<uint8_t>(aa * 0.5f)));
+      stroke_mirrored_segment(ret_r, a0, a1, 12, with_alpha(base, aa));
+      stroke_mirrored_segment(ret_r - 4.f, a0, a1, 12, with_alpha(base, static_cast<uint8_t>(aa * 0.5f)));
     }
   }
 }
