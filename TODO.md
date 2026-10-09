@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-032.1-sonar-echo-mirrored-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-032.1-sonar-echo-mirrored-9a093cd` → tip `55df269`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
