@@ -371,10 +371,11 @@ void ground_system(Game& g, float dt) {
     } else if (f.state == FlightState::Landed) {
       stat_add(g, &Stats::landed_time, real_dt);
     }
-    if (f.state != FlightState::Crashed)
+    if (f.state != FlightState::Crashed) {
       float thr_sum = 0.f;
       for (int i = 0; i < 6; ++i) thr_sum += th.level[i];
       stat_add(g, &Stats::thrust_time, thr_sum * real_dt);
+    }
 
     // Fuel: burn while thrusting; refill while settled on a pad
     float demand = 0.f;
