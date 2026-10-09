@@ -14,7 +14,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-051.1-haul-bonus-nav-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-051.1-haul-bonus-nav-9a093cd` → tip `93086d0`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
