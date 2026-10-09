@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-037.1-explore-open-only-9a093cd` → tip `ee0f82d`
+- Bundle line: `dualthrust-038.1-engine-damage-warn-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap

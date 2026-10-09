@@ -579,9 +579,10 @@ void Gfx::draw_ship(const Game& g, double t) const {
   const Rgba body = fl.state == FlightState::Crashed ? pal::HOT
                     : fl.state == FlightState::Landed ? pal::PAD
                                                       : pal::BRIGHT;
-  auto seg = [&](Vec2 a, Vec2 b) {
+  auto seg = [&](Vec2 a, Vec2 b, Rgba c = {}) {
+    if (c.a == 0 && c.r == 0 && c.g == 0 && c.b == 0) c = body;
     SDL_Point pa = W(a), pb = W(b);
-    line(pa.x, pa.y, pb.x, pb.y, body);
+    line(pa.x, pa.y, pb.x, pb.y, c);
   };
 
   const float nose_y = hg.nose_y, cabin_y = hg.cabin_y, belly = hg.belly_y;
@@ -711,19 +712,52 @@ void Gfx::draw_ship(const Game& g, double t) const {
     seg({hw, belly - 1.f}, {hw, belly + 3.f});
     for (float x = -hw + 8.f; x < hw - 4.f; x += 14.f) seg({x, belly - 1.f}, {x, belly + 3.f});  // ribs
   }
+  // Engine damage colour: healthy = body, hurt = amber, dead = hot
+  auto eng_col = [&](int ti) -> Rgba {
+    if (ti < 0 || ti >= Thrusters::MAX) return body;
+    const float dmg = clampf(th.damage[ti], 0.f, 1.f);
+    if (dmg < 0.04f) return body;
+    if (dmg >= tune::ENGINE_DEAD) return pal::HOT;
+    if (dmg >= tune::ENGINE_SPUTTER)
+      return mix(pal::WARN, pal::HOT, (dmg - tune::ENGINE_SPUTTER) / std::max(1.f - tune::ENGINE_SPUTTER, 0.01f));
+    return mix(body, pal::WARN, dmg / std::max(tune::ENGINE_SPUTTER, 0.01f));
+  };
+  auto eng_mark = [&](int ti, Vec2 c, Vec2 f, Vec2 perp, float scale) {
+    if (ti < 0 || ti >= Thrusters::MAX) return;
+    const float dmg = clampf(th.damage[ti], 0.f, 1.f);
+    if (dmg < 0.04f) return;
+    const Rgba mc = eng_col(ti);
+    seg(c - perp * scale, c + perp * scale * 0.3f + f * scale * 0.4f, mc);
+    seg(c + perp * scale * 0.5f - f * scale * 0.2f, c - perp * scale * 0.2f + f * scale * 0.5f, mc);
+    if (dmg >= tune::ENGINE_SPUTTER) {
+      const Vec2 tip = c + f * scale * 1.2f;
+      seg(tip, tip - f * scale * 0.5f + perp * scale * 0.6f, mc);
+      seg(tip, tip - f * scale * 0.5f - perp * scale * 0.6f, mc);
+    }
+    if (dmg >= tune::ENGINE_DEAD) {
+      const float s = scale * 0.9f;
+      seg(c - perp * s - f * s * 0.3f, c + perp * s + f * s * 0.3f, pal::HOT);
+      seg(c + perp * s - f * s * 0.3f, c - perp * s + f * s * 0.3f, pal::HOT);
+    }
+  };
+
   if (d.thruster_n == 0) {
     // Engine bells: the open end points ground-ward so top mounts still fire "down"
+    int ti = 0;
     for (float side : {-1.f, 1.f}) {
       float ex = side * ox;
       float back = top ? ey + 2.f : ey - 2.f, rim = top ? ey + 16.f : ey + 12.f;
       float bw = top ? 8.f : 7.f, rw = top ? 11.f : 10.f;
-      seg({ex - bw, back}, {ex + bw, back});
-      seg({ex - bw, back}, {ex - rw, rim});
-      seg({ex + bw, back}, {ex + rw, rim});
-      seg({ex - rw, rim}, {ex + rw, rim});
+      const Rgba ec = eng_col(ti);
+      seg({ex - bw, back}, {ex + bw, back}, ec);
+      seg({ex - bw, back}, {ex - rw, rim}, ec);
+      seg({ex + bw, back}, {ex + rw, rim}, ec);
+      seg({ex - rw, rim}, {ex + rw, rim}, ec);
       const float mid = 0.5f * (back + rim), mw = 0.5f * (bw + rw);  // cooling rib and nozzle throat
-      seg({ex - mw, mid}, {ex + mw, mid});
-      seg({ex - rw * 0.55f, rim - 2.f}, {ex + rw * 0.55f, rim - 2.f});
+      seg({ex - mw, mid}, {ex + mw, mid}, ec);
+      seg({ex - rw * 0.55f, rim - 2.f}, {ex + rw * 0.55f, rim - 2.f}, ec);
+      eng_mark(ti, {ex, mid}, {0.f, 1.f}, {1.f, 0.f}, rw * 0.55f);
+      ++ti;
     }
   } else {
     for (int i = 0; i < d.thruster_n; ++i) {  // a bell along each thruster's exhaust
@@ -731,12 +765,14 @@ void Gfx::draw_ship(const Game& g, double t) const {
       const Vec2 f = tp.flame, p{-f.y, f.x};
       const float w0 = 5.f + 2.f * tp.power, w1 = 8.f + 2.f * tp.power;
       const Vec2 b0 = tp.pos - f * 2.f, b1 = tp.pos + f * 12.f, mid = tp.pos + f * 5.f;
-      seg(b0 - p * w0, b0 + p * w0);
-      seg(b0 - p * w0, b1 - p * w1);
-      seg(b0 + p * w0, b1 + p * w1);
-      seg(b1 - p * w1, b1 + p * w1);
-      seg(mid - p * (0.5f * (w0 + w1)), mid + p * (0.5f * (w0 + w1)));  // cooling rib
-      seg(b1 - p * w1 * 0.55f - f * 2.f, b1 + p * w1 * 0.55f - f * 2.f);
+      const Rgba ec = eng_col(i);
+      seg(b0 - p * w0, b0 + p * w0, ec);
+      seg(b0 - p * w0, b1 - p * w1, ec);
+      seg(b0 + p * w0, b1 + p * w1, ec);
+      seg(b1 - p * w1, b1 + p * w1, ec);
+      seg(mid - p * (0.5f * (w0 + w1)), mid + p * (0.5f * (w0 + w1)), ec);  // cooling rib
+      seg(b1 - p * w1 * 0.55f - f * 2.f, b1 + p * w1 * 0.55f - f * 2.f, ec);
+      eng_mark(i, mid, f, p, w1 * 0.5f);
       // mounting pylon to the nearest hull edge or deck, so no thruster floats free
       {
         const float ys = clampf(b0.y, cabin_y, belly);
@@ -855,21 +891,29 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     y += bar_step;
   }
   // Per-engine damage row (thruster index order, not control channel)
+  float max_eng_dmg = 0.f;
+  int dead_eng = 0, hurt_eng = 0;
   {
     const int n_eng = std::min(thruster_count(d), Thrusters::MAX);
     if (n_eng > 0) {
       const int cell = std::max(L(8), bar_w / n_eng - L(2));
       for (int i = 0; i < n_eng; ++i) {
         const float dmg = clampf(th.damage[i], 0.f, 1.f);
+        max_eng_dmg = std::max(max_eng_dmg, dmg);
+        if (dmg >= tune::ENGINE_DEAD) ++dead_eng;
+        else if (dmg >= tune::ENGINE_SPUTTER) ++hurt_eng;
         const int x = m20 + i * (cell + L(2));
         fill(x, y, cell, bar_h, pal::DIM);
         if (dmg > 0.02f) {
           Rgba col = dmg >= tune::ENGINE_DEAD ? pal::HOT : mix(pal::WARN, pal::HOT, dmg);
           fill(x, y, cell, static_cast<int>(bar_h * dmg), col);
         }
-        outline(x, y, cell, bar_h, with_alpha(pal::MID, 120));
+        // Flash outline when sputtering or dead
+        const bool flash = dmg >= tune::ENGINE_SPUTTER && std::fmod(ui.time, 0.5) < 0.25;
+        outline(x, y, cell, bar_h, flash ? pal::HOT : with_alpha(pal::MID, 120));
       }
-      text(L(148), y - L(3), "ENG", pal::MID);
+      text(L(148), y - L(3), dead_eng ? "OUT" : (hurt_eng ? "HURT" : "ENG"),
+           dead_eng ? pal::HOT : (hurt_eng ? pal::WARN : pal::MID));
       y += bar_step;
     }
   }
@@ -1043,6 +1087,16 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   if (g.notice_timer > 0.f)
     text_centered(w_ / 2, L(48) + (fl.state != FlightState::Flying ? 2 * lh + L(8) : 0), g.notice,
                   with_alpha(pal::CARGO, static_cast<uint8_t>(255 * clampf(g.notice_timer / 0.5f, 0.f, 1.f))));
+  // Persistent engine-damage warning (separate from the transient notice)
+  if (max_eng_dmg >= 0.04f && fl.state != FlightState::Crashed) {
+    const bool flash = std::fmod(ui.time, 0.6) < 0.35;
+    const char* msg = dead_eng ? "ENGINE OUT" : (max_eng_dmg >= tune::ENGINE_SPUTTER ? "ENGINE DAMAGE" : "ENGINE WEAR");
+    Rgba wc = dead_eng ? pal::HOT : (max_eng_dmg >= tune::ENGINE_SPUTTER ? pal::WARN : mix(pal::MID, pal::WARN, 0.6f));
+    if (flash || max_eng_dmg < tune::ENGINE_SPUTTER)
+      text_centered(w_ / 2, L(48) + lh + (fl.state != FlightState::Flying ? 2 * lh + L(8) : 0) +
+                            (g.notice_timer > 0.f ? lh : 0),
+                    msg, wc);
+  }
   if (fl.state != FlightState::Flying) {
     const bool landed = fl.state == FlightState::Landed;
     float pulse = 0.65f + 0.35f * std::sin(fl.timer * 10.f);
