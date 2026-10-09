@@ -1261,11 +1261,16 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
   auto on_panel = [&](int px, int py) {
     return px >= x && py >= y && px < x + mm_w && py < y + mm_h;
   };
-  // Filled downward triangle (landing pad marker)
+  // Filled downward triangle: tip sits on the pad, base flares upward
   auto tri_down = [&](int cx, int cy, int s, Rgba c) {
     if (!on_panel(cx, cy)) return;
-    SDL_Point pts[3] = {{cx, cy + s}, {cx - s, cy - s / 2}, {cx + s, cy - s / 2}};
+    // Tip at (cx, cy) = pad centre; base above so the marker hangs from the ceiling of the map
+    SDL_Point pts[3] = {{cx, cy}, {cx - s, cy - s}, {cx + s, cy - s}};
     be_->polygon(pts, 3, c);
+    // Outline for contrast on bright rock
+    line(pts[0].x, pts[0].y, pts[1].x, pts[1].y, pal::BRIGHT);
+    line(pts[1].x, pts[1].y, pts[2].x, pts[2].y, pal::BRIGHT);
+    line(pts[2].x, pts[2].y, pts[0].x, pts[0].y, pal::BRIGHT);
   };
   auto is_rev = [&](float wx, float wy) {
     const int gx = static_cast<int>(wx / Cave::CELL), gy = static_cast<int>(wy / Cave::CELL);
@@ -1276,17 +1281,17 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
   if (g.ecs.get<Rope>(g.ship).held != NULL_ENTITY)
     dest_pi = g.ecs.get<Cargo>(g.ecs.get<Rope>(g.ship).held).dest_pad;
 
-  // Landing pads: downward triangle (▼) — larger when dest, brighter when visited
-  const int pad_s = L(5);
+  // Landing pads: big ▼ with tip on the pad — home/dest larger
+  const int pad_s = L(9);
   for (int pi = 0; pi < static_cast<int>(g.cave.pads.size()); ++pi) {
     const LandingPad& p = g.cave.pads[static_cast<size_t>(pi)];
     if (!p.active) continue;
     const float cxw = 0.5f * (p.x0 + p.x1);
     if (!is_rev(cxw, p.y)) continue;
-    const bool is_dest = (pi == dest_pi);
+    const bool is_dest = (pi == dest_pi) || (pi == g.home_pad);
     Rgba col = is_dest ? pal::HOT : (p.visited ? pal::BRIGHT : pal::WARN);
     auto [px, py] = to_panel(cxw, p.y);
-    tri_down(px, py, is_dest ? pad_s + L(2) : pad_s, col);
+    tri_down(px, py, is_dest ? pad_s + L(3) : pad_s, col);
   }
   // Cargo: squares — bright if this ship can lift them, dim otherwise
   {
