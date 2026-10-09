@@ -424,14 +424,32 @@ void rope_system(Game& g, float dt) {
 void cargo_system(Game& g, float dt) {
   Entity held = NULL_ENTITY;
   g.ecs.view<Rope>([&](Entity, Rope& r) { held = r.held; });
+  // Convenience: landed on home with the winch almost in → drop the load for delivery
+  if (held != NULL_ENTITY && g.ecs.has<Flight>(g.ship) && g.ecs.has<Rope>(g.ship) &&
+      g.ecs.get<Flight>(g.ship).state == FlightState::Landed) {
+    Rope& r = g.ecs.get<Rope>(g.ship);
+    const int base = (g.home_pad >= 0 && g.home_pad < static_cast<int>(g.cave.pads.size()))
+                         ? g.home_pad : 0;
+    if (!g.cave.pads.empty() && r.length <= rope::MIN_LEN + 12.f) {
+      const LandingPad& hp = g.cave.pads[static_cast<size_t>(base)];
+      const Vec2 sp = ship_transform(g).pos;
+      if (hp.active && sp.x >= hp.x0 - 8.f && sp.x <= hp.x1 + 8.f &&
+          std::abs(sp.y - hp.y) < 120.f) {
+        release_crate(g);
+        held = NULL_ENTITY;
+        notice(g, "LOAD DROPPED");
+      }
+    }
+  }
   g.ecs.view<Cargo, Transform>([&](Entity e, Cargo& c, Transform& t) {
     if (!b2Body_IsEnabled(c.body)) return;
     const float speed = length(from_b2(b2Body_GetLinearVelocity(c.body)));
     c.rest_time = (speed < 8.f && e != held) ? c.rest_time + dt : 0.f;
     if (!c.picked || c.rest_time < 1.f) return;
-    // Return-to-base: only the home pad (index 0) counts as a delivery
+    // Return-to-base: only the home pad counts as a delivery
     if (g.cave.pads.empty()) return;
-    const int base = 0;
+    const int base = (g.home_pad >= 0 && g.home_pad < static_cast<int>(g.cave.pads.size()))
+                         ? g.home_pad : 0;
     const LandingPad& p = g.cave.pads[static_cast<size_t>(base)];
     const float bottom = t.pos.y + c.def->half_h;
     if (!p.active || std::abs(bottom - p.y) >= 12.f || t.pos.x < p.x0 || t.pos.x > p.x1) return;
@@ -477,6 +495,8 @@ bool touching_pad(const Cave& cave, Vec2 pt) {
       return true;
   return false;
 }
+
+void release_crate(Game& g);
 
 // Impacts from Box2D's hit events: hard hits destroy the ship, softer ones bounce with sparks and noise.
 void impact_system(Game& g) {
@@ -636,7 +656,7 @@ void ensure_cargo(Game& g) {
     const Vec2 pos{s.x, s.floor_y - def.half_h - 1.f};
     Entity e = g.ecs.create();
     g.ecs.add<Transform>(e, {pos, 0.f});
-    const int dest = g.cave.pads.empty() ? -1 : 0;  // always return to base (pad 0)
+    const int dest = g.cave.pads.empty() ? -1 : g.home_pad;  // return to base
     g.ecs.add<Cargo>(e, {g.phys.create_cargo(pos, 0.f, def), &def, false, 0.f, dest});
   }
 }
@@ -963,6 +983,7 @@ void reset_fog(Game& g) {
   g.reveal_dirty = true;
   g.sonar = {};
   g.last_pad = -1;
+  g.home_pad = 0;
   g.cells_explored = 0;
   g.explore_tier = 0;
   g.signals_cleared = false;
@@ -1022,6 +1043,7 @@ void activate_home_pad(Game& g, float wx) {
   home.active = true;
   home.visited = true;  // spawn pad is already explored
   g.last_pad = best;
+  g.home_pad = best;
   // Paint a small revealed blob so the home pad shows on the chart
   const int gy = static_cast<int>(home.y / Cave::CELL);
   for (float x = home.x0 - Cave::CELL; x <= home.x1 + Cave::CELL; x += Cave::CELL * 0.5f) {

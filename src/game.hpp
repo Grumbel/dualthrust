@@ -146,7 +146,8 @@ struct Game {
   float time = 0.f;  // accumulated sim time
   int score = 0;             // this session (resets on quit; not permanent stats)
   float sonar_cool = 0.f;    // seconds until the next ping is allowed
-  int last_pad = -1;         // index of last pad the ship settled on (-1 = none yet)
+  int last_pad = -1;
+  int home_pad = 0;  // cargo return-to-base pad         // index of last pad the ship settled on (-1 = none yet)
 
   // Debug menu multipliers (1 = stock). Applied live; mass rebuild happens when mass_mul changes.
   float dbg_mass_mul = 1.f;

@@ -106,6 +106,7 @@ bool save_world(const Game& g, int ship_index) {
   std::fprintf(f, "ship=%d\n", ship_index);
   std::fprintf(f, "score=%d\n", g.score);
   std::fprintf(f, "last_pad=%d\n", g.last_pad);
+  std::fprintf(f, "home_pad=%d\n", g.home_pad);
   std::fprintf(f, "time=%.4f\n", g.time);
   std::fprintf(f, "explore_tier=%d\n", g.explore_tier);
   std::fprintf(f, "cells_explored=%d\n", g.cells_explored);
@@ -216,6 +217,7 @@ bool load_world(Game& g, int* ship_index_out) {
     else if (std::strcmp(key, "ship") == 0) std::sscanf(val, "%d", &ship);
     else if (std::strcmp(key, "score") == 0) std::sscanf(val, "%d", &score);
     else if (std::strcmp(key, "last_pad") == 0) std::sscanf(val, "%d", &last_pad);
+    else if (std::strcmp(key, "home_pad") == 0) std::sscanf(val, "%d", &home_pad);
     else if (std::strcmp(key, "time") == 0) std::sscanf(val, "%f", &time);
     else if (std::strcmp(key, "explore_tier") == 0) std::sscanf(val, "%d", &explore_tier);
     else if (std::strcmp(key, "cells_explored") == 0) std::sscanf(val, "%d", &cells_explored);
@@ -296,6 +298,7 @@ bool load_world(Game& g, int* ship_index_out) {
   g.pads_cleared = pads_cleared != 0;
   g.score = score;
   g.last_pad = last_pad;
+  g.home_pad = home_pad;
   g.time = time;
   g.explore_tier = explore_tier;
   g.cells_explored = cells_explored;

@@ -518,8 +518,9 @@ void Gfx::draw_pads(const Game& g, double t) const {
     be_->line(mid, y - z6, mid, y + z2, edge_col);
 
     // Status label *below* the pad deck
-    if (is_dest) {
-      const char* label = ghost ? "BASE?" : "BASE";
+    const bool is_home = (pi == g.home_pad);
+    if (is_dest || is_home) {
+      const char* label = (!online && is_dest) ? "BASE?" : "BASE";
       const int tw = text_width(label);
       text(mid - tw / 2, y + Z(28), label, with_alpha(pal::HOT, static_cast<uint8_t>(160 + 95 * pulse)));
     } else if (online) {
@@ -831,6 +832,20 @@ void Gfx::draw_cargo(const Game& g, double t) const {
     seg(W(hw, -hh), W(-hw, hh), dim);
     seg(W(-hw * 0.5f, -hh), W(-hw * 0.5f, hh), dim);  // straps
     seg(W(hw * 0.5f, -hh), W(hw * 0.5f, hh), dim);
+    // Grip tier colour: magnet=mid, hook=cargo, clamp=hot edge
+    if (c.def) {
+      Rgba edge = pal::CARGO;
+      if (c.def->grip <= GRIP_MAGNET) edge = pal::MID;
+      else if (c.def->grip >= GRIP_CLAMP) edge = pal::HOT;
+      const int cx = sx(g.cam, tf.pos.x), cy = sy(tf.pos.y - hh - 10.f);
+      // Name when nearby or held
+      const Vec2 sp = g.ecs.get<Transform>(g.ship).pos;
+      const float ddx = tf.pos.x - sp.x, ddy = tf.pos.y - sp.y;
+      if (held || ddx * ddx + ddy * ddy < 280.f * 280.f) {
+        const int tw = text_width(c.def->name);
+        text(cx - tw / 2, cy, c.def->name, edge);
+      }
+    }
   });
 }
 
