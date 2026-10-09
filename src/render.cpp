@@ -440,66 +440,95 @@ void Gfx::draw_pads(const Game& g, double t) const {
     const int w = std::max(1, x1 - x0), mid = (x0 + x1) / 2;
     const int z2 = Z(2), z4 = Z(4), z6 = Z(6);
     const bool ghost = !p.active && is_dest;
+    const bool online = p.active;  // sonar-activated (or landed-discovered)
     const float pulse = 0.55f + 0.45f * static_cast<float>(0.5 + 0.5 * std::sin(t * 6.0));
+    const float pulse_fast = 0.5f + 0.5f * static_cast<float>(0.5 + 0.5 * std::sin(t * 10.0));
+
+    // Deck colour: dest = hot, online = bright pad green, ghost = dim
+    const Rgba deck_col = is_dest ? pal::HOT : (online ? pal::PAD : pal::DIM);
+    const Rgba edge_col = is_dest ? pal::HOT : (online ? pal::BRIGHT : pal::MID);
 
     // Deck slab with cross-hatch
-    const uint8_t deck_a = ghost ? static_cast<uint8_t>(50 + 40 * pulse) : 200;
-    fill(x0, y - z2, w, Z(5), with_alpha(is_dest ? pal::HOT : pal::PAD, deck_a));
-    outline(x0, y - z2, w, Z(5), is_dest ? pal::HOT : pal::BRIGHT);
+    const uint8_t deck_a = ghost ? static_cast<uint8_t>(50 + 40 * pulse) : 220;
+    fill(x0, y - z2, w, Z(5), with_alpha(deck_col, deck_a));
+    outline(x0, y - z2, w, Z(5), edge_col);
     if (!ghost) {
       for (int i = 0; i < w - z4; i += z6)
         be_->line(x0 + i, y - z2, x0 + i + z4, y + z2, with_alpha(pal::MID, 180));
     }
 
+    // Activated: lit edge rails along the deck so the pad reads as "powered"
+    if (online) {
+      const uint8_t rail_a = static_cast<uint8_t>(140 + 100 * pulse);
+      fill(x0, y - z2 - Z(2), w, Z(2), with_alpha(pal::BRIGHT, rail_a));
+      fill(x0, y + Z(3), w, Z(2), with_alpha(pal::BRIGHT, static_cast<uint8_t>(rail_a * 0.7f)));
+      // Corner ticks
+      fill(x0 - z2, y - z4, z4, z4, with_alpha(pal::BRIGHT, rail_a));
+      fill(x1 - z2, y - z4, z4, z4, with_alpha(pal::BRIGHT, rail_a));
+    }
+
     // Support struts into the rock
-    const Rgba strut = with_alpha(is_dest ? pal::HOT : pal::PAD, ghost ? 80 : 160);
+    const Rgba strut = with_alpha(is_dest ? pal::HOT : (online ? pal::PAD : pal::DIM), ghost ? 80 : 180);
     be_->line(x0 + z4, y + Z(3), x0 + z4, y + Z(18), strut);
     be_->line(x1 - z4, y + Z(3), x1 - z4, y + Z(18), strut);
     be_->line(mid, y + Z(3), mid, y + Z(22), strut);
     be_->line(x0 + z4, y + Z(18), x1 - z4, y + Z(18), strut);
 
-    // Approach chevrons, chasing upward (faster / brighter for dest)
-    const int chase = static_cast<int>(t * (is_dest ? 5.0 : 3.0)) % 3;
+    // Approach chevrons, chasing upward (faster / brighter when online or dest)
+    const int chase = static_cast<int>(t * (is_dest ? 5.0 : (online ? 4.0 : 2.5))) % 3;
     for (int c = 0; c < 3; ++c) {
       const int cy = y - Z(14) - c * Z(10), inset = Z(8) + c * z6;
-      const Rgba chev = with_alpha(is_dest ? pal::HOT : pal::WARN, c == chase ? 255 : (is_dest ? 160 : 110));
+      Rgba chev_base = is_dest ? pal::HOT : (online ? pal::BRIGHT : pal::WARN);
+      const Rgba chev = with_alpha(chev_base, c == chase ? 255 : (online || is_dest ? 160 : 100));
       be_->line(x0 + inset, cy, mid, cy + z6, chev);
       be_->line(x1 - inset, cy, mid, cy + z6, chev);
     }
 
-    // Alternating end beacons with a soft halo
-    const bool on = (static_cast<int>(t * (is_dest ? 4.0 : 2.5)) + pi) % 2 == 0;
-    const Rgba beacon = on ? pal::HOT : (is_dest ? pal::WARN : pal::PAD);
+    // End beacons — activated pads blink hard with a wide halo
+    const bool on = (static_cast<int>(t * (is_dest ? 4.0 : (online ? 3.5 : 2.0))) + pi) % 2 == 0;
+    const Rgba beacon = on ? (is_dest ? pal::HOT : pal::BRIGHT) : (is_dest ? pal::WARN : (online ? pal::PAD : pal::DIM));
     for (int bxp : {x0, x1}) {
-      fill(bxp - Z(5), y - Z(9), Z(10), Z(10), with_alpha(beacon, on ? 50 : 20));
+      if (online || is_dest) {
+        // Outer halo so activated pads read at a glance
+        fill(bxp - Z(8), y - Z(12), Z(16), Z(16), with_alpha(beacon, on ? 55 : 18));
+        fill(bxp - Z(5), y - Z(9), Z(10), Z(10), with_alpha(beacon, on ? 90 : 30));
+      } else {
+        fill(bxp - Z(5), y - Z(9), Z(10), Z(10), with_alpha(beacon, on ? 40 : 15));
+      }
       fill(bxp - z2, y - z6, z4, z4, beacon);
     }
 
     // Centre T-mark
-    be_->line(mid - Z(8), y, mid + Z(8), y, is_dest ? pal::HOT : pal::BRIGHT);
-    be_->line(mid, y - z6, mid, y + z2, is_dest ? pal::HOT : pal::BRIGHT);
+    be_->line(mid - Z(8), y, mid + Z(8), y, edge_col);
+    be_->line(mid, y - z6, mid, y + z2, edge_col);
 
-    // DEST tag above the preferred pad while hauling
+    // Status label above the pad — the clear activated / dest cue
     if (is_dest) {
       const char* label = ghost ? "DEST?" : "DEST";
       const int tw = text_width(label);
-      text(mid - tw / 2, y - Z(48), label, with_alpha(pal::HOT, static_cast<uint8_t>(160 + 95 * pulse)));
+      text(mid - tw / 2, y - Z(52), label, with_alpha(pal::HOT, static_cast<uint8_t>(160 + 95 * pulse)));
+    } else if (online) {
+      // ACTIVE pulses; VISITED pads add a second line so hangar targets are obvious
+      const char* label = p.visited ? "ACTIVE" : "ONLINE";
+      const int tw = text_width(label);
+      const uint8_t la = static_cast<uint8_t>(150 + 105 * pulse_fast);
+      text(mid - tw / 2, y - Z(52), label, with_alpha(pal::BRIGHT, la));
+      // Small status lamp under the text
+      fill(mid - Z(3), y - Z(58), Z(6), Z(4), with_alpha(pal::BRIGHT, la));
     }
 
-    // Explored indicator: solid filled diamond when visited, hollow ring when only sonar-lit
+    // Visited mark: filled diamond (teleport/hangar target); online-only: open ring
     if (!ghost) {
-      const int mx = mid, my = y - Z(28);
-      const int r = Z(5);
+      const int mx = mid, my = y - Z(32);
+      const int rr = Z(5);
       if (p.visited) {
-        // Filled diamond — pad is a hangar / teleport target
-        be_->line(mx, my - r, mx + r, my, pal::BRIGHT);
-        be_->line(mx + r, my, mx, my + r, pal::BRIGHT);
-        be_->line(mx, my + r, mx - r, my, pal::BRIGHT);
-        be_->line(mx - r, my, mx, my - r, pal::BRIGHT);
+        be_->line(mx, my - rr, mx + rr, my, pal::BRIGHT);
+        be_->line(mx + rr, my, mx, my + rr, pal::BRIGHT);
+        be_->line(mx, my + rr, mx - rr, my, pal::BRIGHT);
+        be_->line(mx - rr, my, mx, my - rr, pal::BRIGHT);
         fill(mx - Z(2), my - Z(2), Z(4), Z(4), pal::BRIGHT);
-      } else {
-        // Hollow ring — discovered but not yet landed
-        outline(mx - r, my - r, r * 2, r * 2, with_alpha(pal::WARN, 200));
+      } else if (online) {
+        outline(mx - rr, my - rr, rr * 2, rr * 2, with_alpha(pal::WARN, 220));
       }
     }
   }

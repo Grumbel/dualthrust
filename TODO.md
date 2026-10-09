@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-032.1-sonar-echo-mirrored-9a093cd` → tip `55df269`
+- Bundle line: `dualthrust-033.1-pad-active-indicator-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
