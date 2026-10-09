@@ -1302,6 +1302,22 @@ void Gfx::draw_sonar(const Game& g) const {
 
   auto W = [&](float wx, float wy) { return SDL_Point{sx(g.cam, wx), sy(wy)}; };
 
+  // Draw a circular arc polyline; break the stroke when a segment is skipped so we
+  // never chord across the circle (that was the "line through the middle" artifact).
+  auto stroke_arc = [&](float radius, float a0, float a1, int segs, Rgba col) {
+    if (radius < 1.f || segs < 1) return;
+    bool have = false;
+    SDL_Point prev{};
+    for (int i = 0; i <= segs; ++i) {
+      const float t = static_cast<float>(i) / static_cast<float>(segs);
+      const float a = a0 + (a1 - a0) * t;
+      const SDL_Point cur = W(o.x + radius * std::cos(a), o.y + radius * std::sin(a));
+      if (have) line(prev.x, prev.y, cur.x, cur.y, col);
+      prev = cur;
+      have = true;
+    }
+  };
+
   // Main expanding ring (dim search wave)
   if (r > 1.f && fade > 0.02f) {
     const int segments = std::clamp(static_cast<int>(r / 8.f), 24, 96);
@@ -1319,19 +1335,26 @@ void Gfx::draw_sonar(const Game& g) const {
       }
       return static_cast<uint8_t>(clampf(a, 0.f, 255.f));
     };
-    SDL_Point prev = W(o.x + r, o.y);
-    for (int i = 1; i <= segments; ++i) {
+    bool have_prev = false;
+    SDL_Point prev{};
+    for (int i = 0; i <= segments; ++i) {
       const float a = (static_cast<float>(i) / segments) * 6.2831853f;
       const float wx = o.x + r * std::cos(a), wy = o.y + r * std::sin(a);
       const SDL_Point cur = W(wx, wy);
       const uint8_t aa = seg_alpha(wx, wy, 160.f);
-      if (aa > 8) line(prev.x, prev.y, cur.x, cur.y, with_alpha(pal::CARGO, aa));
-      prev = cur;
+      if (aa > 8) {
+        if (have_prev) line(prev.x, prev.y, cur.x, cur.y, with_alpha(pal::CARGO, aa));
+        prev = cur;
+        have_prev = true;
+      } else {
+        have_prev = false;
+      }
     }
   }
 
-  // Reflections: bright arc on the circle at the hit bearing, then a pulse returning inward
-  constexpr float ARC = 0.28f;  // half-width of the reflected segment (radians)
+  // Reflections: mirrored circular segments (arc on the ring + returning arc).
+  // No radial spoke — that was the second "line in the middle".
+  constexpr float ARC = 0.35f;  // half-width of the reflected segment (radians)
   for (const SonarReflection& e : g.sonar.echoes) {
     if (e.age > e.life) continue;
     const float life_u = 1.f - e.age / e.life;
@@ -1340,39 +1363,23 @@ void Gfx::draw_sonar(const Game& g) const {
     if (e.kind == SonarReflection::Kind::Pad) base = pal::WARN;
     else if (e.kind == SonarReflection::Kind::Signal) base = pal::BRIGHT;
 
-    // Arc still on the expanding wave while the front is near the hit
-    if (r > 1.f && std::abs(r - e.hit_r) < 40.f && ring_bright > 0.05f) {
-      const int segs = 10;
-      const float a0 = e.angle - ARC;
-      SDL_Point prev = W(o.x + r * std::cos(a0), o.y + r * std::sin(a0));
-      for (int i = 1; i <= segs; ++i) {
-        const float a = a0 + (2.f * ARC) * (static_cast<float>(i) / segs);
-        const SDL_Point cur = W(o.x + r * std::cos(a), o.y + r * std::sin(a));
-        line(prev.x, prev.y, cur.x, cur.y,
-             with_alpha(base, static_cast<uint8_t>(80 + 175 * ring_bright)));
-        prev = cur;
-      }
+    const float a0 = e.angle - ARC;
+    const float a1 = e.angle + ARC;
+
+    // Bright mirrored segment on the expanding wave while the front is near the hit
+    if (r > 1.f && std::abs(r - e.hit_r) < 50.f && ring_bright > 0.05f) {
+      const uint8_t aa = static_cast<uint8_t>(90 + 165 * ring_bright);
+      stroke_arc(r, a0, a1, 12, with_alpha(base, aa));
+      // Slightly thicker segment: parallel arc just inside
+      stroke_arc(r - 3.f, a0, a1, 12, with_alpha(base, static_cast<uint8_t>(aa * 0.55f)));
     }
 
-    // Returning pulse: segment travels from hit_r back toward the origin
+    // Returning mirrored segment: same angular width, radius shrinks toward origin
     const float ret_r = e.hit_r - e.age * g.sonar.speed * 0.85f;
     if (ret_r > 8.f && life_u > 0.05f) {
-      const int segs = 8;
-      const float a0 = e.angle - ARC * 0.7f;
-      SDL_Point prev = W(o.x + ret_r * std::cos(a0), o.y + ret_r * std::sin(a0));
-      for (int i = 1; i <= segs; ++i) {
-        const float a = a0 + (1.4f * ARC) * (static_cast<float>(i) / segs);
-        const SDL_Point cur = W(o.x + ret_r * std::cos(a), o.y + ret_r * std::sin(a));
-        line(prev.x, prev.y, cur.x, cur.y,
-             with_alpha(base, static_cast<uint8_t>(60 + 160 * life_u)));
-        prev = cur;
-      }
-      // Spoke from origin toward the hit for a radar-return feel
-      const float spoke_r = std::max(ret_r, 12.f);
-      line(W(o.x, o.y).x, W(o.x, o.y).y,
-           W(o.x + spoke_r * std::cos(e.angle), o.y + spoke_r * std::sin(e.angle)).x,
-           W(o.x + spoke_r * std::cos(e.angle), o.y + spoke_r * std::sin(e.angle)).y,
-           with_alpha(base, static_cast<uint8_t>(30 + 90 * life_u)));
+      const uint8_t aa = static_cast<uint8_t>(70 + 170 * life_u);
+      stroke_arc(ret_r, a0, a1, 12, with_alpha(base, aa));
+      stroke_arc(ret_r + 3.f, a0, a1, 12, with_alpha(base, static_cast<uint8_t>(aa * 0.5f)));
     }
   }
 }
