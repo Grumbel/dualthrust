@@ -4,6 +4,8 @@
 
 #include "game.hpp"
 
+#include <string>
+
 // Persistent world snapshot under $XDG_STATE_HOME/dualthrust/ (world + world.fog).
 // Restored on the next launch so the pilot continues where they left off.
 

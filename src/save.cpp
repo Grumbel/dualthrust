@@ -339,7 +339,7 @@ bool load_world(Game& g, int* ship_index_out) {
     // Re-grab held cargo
     if (held >= 0) {
       std::vector<Entity> ents;
-      g.ecs.view<Cargo>([&](Entity e, Cargo&) { ents.push_back(e); });
+      g.ecs.view<Cargo>([&](Entity e, const Cargo&) { ents.push_back(e); });
       if (held < static_cast<int>(ents.size())) grab_crate(g, ents[static_cast<size_t>(held)]);
     }
   }
