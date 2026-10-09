@@ -22,8 +22,6 @@ enum class Action : int {
   WinchOut,
   WinchIn,
   Grip,
-  Respawn,
-  NewCave,
   ZoomCloser,
   ZoomFarther,
   NextShip,
@@ -74,8 +72,6 @@ inline constexpr ActionInfo ACTION_INFO[] = {
     {Action::WinchOut, "WINCH OUT", "WINCH+", false},
     {Action::WinchIn, "WINCH IN", "WINCH-", false},
     {Action::Grip, "HOOK", "HOOK", false},
-    {Action::Respawn, "RESPAWN", "RESPAWN", false},
-    {Action::NewCave, "NEW CAVE", "CAVE", false},
     {Action::ZoomCloser, "ZOOM IN", "ZOOM+", false},
     {Action::ZoomFarther, "ZOOM OUT", "ZOOM-", false},
     {Action::NextShip, "NEXT SHIP", "SHIP", false},
@@ -130,9 +126,6 @@ inline void set_default_binds(BindMap& m) {
   K(Action::WinchOut, 0, SDL_SCANCODE_Q);
   K(Action::WinchIn, 0, SDL_SCANCODE_E);
   K(Action::Grip, 0, SDL_SCANCODE_R);
-  K(Action::Respawn, 0, SDL_SCANCODE_RETURN);
-  K(Action::NewCave, 0, SDL_SCANCODE_G);
-  K(Action::NewCave, 1, SDL_SCANCODE_Y);
   K(Action::ZoomCloser, 0, SDL_SCANCODE_EQUALS);  // optional; Tab still cycles via ZoomFarther path in UI
   K(Action::ZoomFarther, 0, SDL_SCANCODE_TAB);
   K(Action::NextShip, 0, SDL_SCANCODE_S);
@@ -154,9 +147,6 @@ inline void set_default_binds(BindMap& m) {
   B(Action::WinchOut, 0, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
   B(Action::WinchIn, 0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
   B(Action::Grip, 0, SDL_CONTROLLER_BUTTON_A);
-  B(Action::Respawn, 0, SDL_CONTROLLER_BUTTON_B);
-  B(Action::Respawn, 1, SDL_CONTROLLER_BUTTON_A);  // A also respawns when crashed (handled in play logic)
-  B(Action::NewCave, 0, SDL_CONTROLLER_BUTTON_Y);
   B(Action::ZoomCloser, 0, SDL_CONTROLLER_BUTTON_DPAD_UP);
   B(Action::ZoomFarther, 0, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
   B(Action::NextShip, 0, SDL_CONTROLLER_BUTTON_RIGHTSTICK);

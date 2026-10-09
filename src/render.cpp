@@ -818,10 +818,10 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     if (landed) {
       text_centered(w_ / 2, L(48) + lh, "THRUST TO LIFT OFF", pal::MID);
     } else {
-      char rb[24];
-      action_bind_label(binds, Action::Respawn, !pad, rb, sizeof rb);
-      char msg[40];
-      std::snprintf(msg, sizeof msg, "%s TO RESPAWN", rb);
+      char pb[24];
+      action_bind_label(binds, Action::Pause, !pad, pb, sizeof pb);
+      char msg[48];
+      std::snprintf(msg, sizeof msg, "%s MENU / RESPAWN", pb);
       text_centered(w_ / 2, L(48) + lh, msg, pal::MID);
     }
   }

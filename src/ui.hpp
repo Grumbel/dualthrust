@@ -13,7 +13,7 @@ enum class Screen { Title, Play, Pause };
 enum class MenuPage { Title, Pause, Options, Stats, Controls };
 
 enum class MenuAction {
-  Start, Resume, NewCave, Options, Stats, MainMenu, Quit, Back,  // actions
+  Start, Resume, Respawn, NewCave, Options, Stats, MainMenu, Quit, Back,  // actions
   Ship, Zoom, UiScale, SwapEngines, Crt, Fullscreen,       // choices (on/off or a list), changed with left/right
   Music, Effects,                                         // sliders 0..SLIDER_MAX
   Controls, ResetBinds,                                   // open Controls page / restore defaults
@@ -43,6 +43,7 @@ inline constexpr MenuItem TITLE_ITEMS[] = {
 };
 inline constexpr MenuItem PAUSE_ITEMS[] = {
     {MenuAction::Resume, "RESUME", ItemKind::Action},
+    {MenuAction::Respawn, "RESPAWN", ItemKind::Action},
     {MenuAction::NewCave, "NEW CAVE", ItemKind::Action},
     {MenuAction::Options, "OPTIONS", ItemKind::Action},
     {MenuAction::Stats, "STATISTICS", ItemKind::Action},
