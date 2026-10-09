@@ -142,8 +142,10 @@ bool save_world(const Game& g, int ship_index) {
   }
 
   std::fprintf(f, "pad_n=%d\n", static_cast<int>(g.cave.pads.size()));
-  for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i)
-    std::fprintf(f, "pad_%d=%d\n", i, g.cave.pads[static_cast<size_t>(i)].active ? 1 : 0);
+  for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i) {
+    const LandingPad& pad = g.cave.pads[static_cast<size_t>(i)];
+    std::fprintf(f, "pad_%d=%d,%d\n", i, pad.active ? 1 : 0, pad.visited ? 1 : 0);
+  }
 
   std::fprintf(f, "signal_n=%d\n", static_cast<int>(g.signals.size()));
   for (int i = 0; i < static_cast<int>(g.signals.size()); ++i) {
@@ -191,6 +193,7 @@ bool load_world(Game& g, int* ship_index_out) {
   bool have_pos = false;
 
   std::vector<int> pad_active;
+  std::vector<int> pad_visited;
   std::vector<Game::Signal> signals;
   struct CargoRow {
     int kind = 0;
@@ -235,10 +238,16 @@ bool load_world(Game& g, int* ship_index_out) {
       int n = 0;
       std::sscanf(val, "%d", &n);
       pad_active.assign(std::max(0, n), 0);
+      pad_visited.assign(std::max(0, n), 0);
     } else if (std::strncmp(key, "pad_", 4) == 0) {
-      int i = 0, a = 0;
-      if (std::sscanf(key, "pad_%d", &i) == 1 && std::sscanf(val, "%d", &a) == 1) {
-        if (i >= 0 && i < static_cast<int>(pad_active.size())) pad_active[static_cast<size_t>(i)] = a;
+      int i = 0, a = 0, v = 0;
+      if (std::sscanf(key, "pad_%d", &i) == 1) {
+        const int nread = std::sscanf(val, "%d,%d", &a, &v);
+        if (nread >= 1 && i >= 0 && i < static_cast<int>(pad_active.size())) {
+          pad_active[static_cast<size_t>(i)] = a;
+          if (nread >= 2) pad_visited[static_cast<size_t>(i)] = v;
+          else if (a) pad_visited[static_cast<size_t>(i)] = 1;  // legacy: active implied home visits
+        }
       }
     } else if (std::strcmp(key, "signal_n") == 0) {
       int n = 0;
@@ -276,8 +285,11 @@ bool load_world(Game& g, int* ship_index_out) {
   }
   g.reveal_dirty = true;
 
-  for (int i = 0; i < static_cast<int>(g.cave.pads.size()) && i < static_cast<int>(pad_active.size()); ++i)
+  for (int i = 0; i < static_cast<int>(g.cave.pads.size()) && i < static_cast<int>(pad_active.size()); ++i) {
     g.cave.pads[static_cast<size_t>(i)].active = pad_active[static_cast<size_t>(i)] != 0;
+    if (i < static_cast<int>(pad_visited.size()))
+      g.cave.pads[static_cast<size_t>(i)].visited = pad_visited[static_cast<size_t>(i)] != 0;
+  }
 
   g.signals = std::move(signals);
   g.signals_cleared = signals_cleared != 0;

@@ -485,6 +485,23 @@ void Gfx::draw_pads(const Game& g, double t) const {
       const int tw = text_width(label);
       text(mid - tw / 2, y - Z(48), label, with_alpha(pal::HOT, static_cast<uint8_t>(160 + 95 * pulse)));
     }
+
+    // Explored indicator: solid filled diamond when visited, hollow ring when only sonar-lit
+    if (!ghost) {
+      const int mx = mid, my = y - Z(28);
+      const int r = Z(5);
+      if (p.visited) {
+        // Filled diamond — pad is a hangar / teleport target
+        be_->line(mx, my - r, mx + r, my, pal::BRIGHT);
+        be_->line(mx + r, my, mx, my + r, pal::BRIGHT);
+        be_->line(mx, my + r, mx - r, my, pal::BRIGHT);
+        be_->line(mx - r, my, mx, my - r, pal::BRIGHT);
+        fill(mx - Z(2), my - Z(2), Z(4), Z(4), pal::BRIGHT);
+      } else {
+        // Hollow ring — discovered but not yet landed
+        outline(mx - r, my - r, r * 2, r * 2, with_alpha(pal::WARN, 200));
+      }
+    }
   }
 }
 
@@ -918,7 +935,16 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     std::snprintf(legbuf, sizeof legbuf, "PAD %s/%s", pb, qb);
     text(m20, y, legbuf, pal::MID);
   }
-  y += lh + L(4);
+  y += lh;
+  // Hangar: ship select + teleport when settled on a pad
+  if (fl.state == FlightState::Landed && g.cave.pad_below(tf.pos.x, tf.pos.y, 140.f)) {
+    char hb[24];
+    action_bind_label(binds, Action::Hangar, !pad, hb, sizeof hb);
+    std::snprintf(legbuf, sizeof legbuf, "HANGAR %s", hb);
+    text(m20, y, legbuf, pal::PAD);
+    y += lh;
+  }
+  y += L(4);
 
   const float alt = g.cave.floor_below(tf.pos.x, tf.pos.y) - tf.pos.y;
   std::snprintf(buf, sizeof(buf), "ALT %.0f", alt);
@@ -1092,7 +1118,8 @@ void Gfx::draw_minimap(Game& g, double t) {
     const float cx = 0.5f * (p.x0 + p.x1);
     if (!is_rev(cx, p.y)) continue;
     const bool is_dest = (pi == dest_pi);
-    dot(cx, p.y, is_dest ? d_pad + L(2) : d_pad, is_dest ? pal::HOT : pal::WARN);
+    Rgba col = is_dest ? pal::HOT : (p.visited ? pal::BRIGHT : pal::WARN);
+    dot(cx, p.y, is_dest ? d_pad + L(2) : d_pad, col);
   }
   for (const Game::Signal& sig : g.signals) {
     if (!sig.found) continue;
@@ -1250,6 +1277,69 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
     const bool kbd = ui.device != InputDevice::Gamepad;
     text_centered(w_ / 2, py + panel_h - cell_h() - L(12),
                   kbd ? "LEFT/RIGHT TWEAK  Y RESET  ESC BACK" : "D-PAD TWEAK  Y RESET  B BACK", pal::MID);
+    return;
+  }
+
+  if (ui.page == MenuPage::Hangar) {
+    // Dynamic rows: SHIP + each visited pad + CLOSE footer
+    std::vector<int> visited;
+    for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i)
+      if (g.cave.pads[static_cast<size_t>(i)].visited) visited.push_back(i);
+    const int pad_rows = static_cast<int>(visited.size());
+    const int rows = 1 + pad_rows + item_count(HANGAR_ITEMS);  // ship + pads + close
+    const int lh = cell_h() + L(8);
+    const int panel_w = std::min(w_ - L(16), L(520));
+    const int max_vis = std::max(8, (h_ - L(100)) / lh);
+    const int panel_h = L(70) + std::min(rows, max_vis) * lh + L(44);
+    const int px = w_ / 2 - panel_w / 2, py = std::max(L(4), h_ / 2 - panel_h / 2);
+    fill(0, 0, w_, h_, with_alpha(pal::BG, 120));
+    fill(px, py, panel_w, panel_h, pal::MENU);
+    outline(px, py, panel_w, panel_h, pal::BRIGHT);
+    outline(px + L(3), py + L(3), panel_w - L(6), panel_h - L(6), with_alpha(pal::MID, 90));
+    text_centered(w_ / 2, py + L(14), "HANGAR", pal::BRIGHT);
+    fill(px + L(20), py + L(14) + cell_h() + L(6), panel_w - L(40), 1, with_alpha(pal::MID, 140));
+
+    int scroll = 0;
+    if (rows > max_vis)
+      scroll = std::clamp(ui.hangar_cursor - max_vis / 2, 0, rows - max_vis);
+
+    int row_y = py + L(14) + cell_h() + L(16);
+    for (int vis = 0; vis < std::min(rows, max_vis); ++vis) {
+      const int i = scroll + vis;
+      const bool sel = ui.hangar_cursor == i;
+      const int ly = row_y + vis * lh;
+      const Rgba col = sel ? pal::WARN : pal::MID;
+      if (sel) {
+        fill(px + L(12), ly - L(4), panel_w - L(24), cell_h() + L(8), with_alpha(pal::MID, 40));
+        if (std::fmod(ui.time, 0.8) < 0.55) text(px + L(28) - cell_w() - L(4), ly, ">", pal::WARN);
+      }
+      if (i == 0) {
+        // Ship row
+        text(px + L(28), ly, "SHIP", col);
+        char val[40];
+        const char* name = g.ecs.has<Hull>(g.ship) ? g.ecs.get<Hull>(g.ship).def->name : "?";
+        if (sel)
+          std::snprintf(val, sizeof val, "< %s >", name);
+        else
+          std::snprintf(val, sizeof val, "%s", name);
+        text(px + panel_w - L(28) - text_width(val), ly, val, col);
+      } else if (i <= pad_rows) {
+        const int pi = visited[static_cast<size_t>(i - 1)];
+        char lab[40];
+        const bool here = (pi == g.last_pad);
+        std::snprintf(lab, sizeof lab, "PAD %d%s", pi + 1, here ? "  (HERE)" : "");
+        text(px + L(28), ly, lab, col);
+        if (!here) {
+          const char* go = sel ? "TELEPORT >" : "TELEPORT";
+          text(px + panel_w - L(28) - text_width(go), ly, go, sel ? pal::HOT : pal::DIM);
+        }
+      } else {
+        text(px + L(28), ly, HANGAR_ITEMS[i - 1 - pad_rows].label, col);
+      }
+    }
+    const bool kbd = ui.device != InputDevice::Gamepad;
+    text_centered(w_ / 2, py + panel_h - cell_h() - L(12),
+                  kbd ? "LEFT/RIGHT SHIP  ENTER GO  ESC CLOSE" : "D-PAD SHIP  A GO  B CLOSE", pal::MID);
     return;
   }
 
@@ -1473,6 +1563,25 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
   const int sy = dy + static_cast<int>(tf.pos.y / Cave::CELL * scale);
   const int sz = std::max(3, L(6));
   fill(sx - sz / 2, sy - sz / 2, sz, sz, pal::HOT);
+  // Pads: bright = visited (teleport), warn = sonar only, hot = dest
+  int dest_pi = -1;
+  if (g.ship != NULL_ENTITY && g.ecs.has<Rope>(g.ship) && g.ecs.get<Rope>(g.ship).held != NULL_ENTITY)
+    dest_pi = g.ecs.get<Cargo>(g.ecs.get<Rope>(g.ship).held).dest_pad;
+  int n_vis = 0, n_act = 0;
+  for (int pi = 0; pi < static_cast<int>(g.cave.pads.size()); ++pi) {
+    const LandingPad& pad = g.cave.pads[static_cast<size_t>(pi)];
+    if (!pad.active) continue;
+    ++n_act;
+    if (pad.visited) ++n_vis;
+    const float cx = 0.5f * (pad.x0 + pad.x1);
+    const int px = dx + static_cast<int>(cx / Cave::CELL * scale);
+    const int py = dy + static_cast<int>(pad.y / Cave::CELL * scale);
+    const int ps = std::max(3, L(5));
+    Rgba col = (pi == dest_pi) ? pal::HOT : (pad.visited ? pal::BRIGHT : pal::WARN);
+    fill(px - ps / 2, py - ps / 2, ps, ps, col);
+    if (!pad.visited)  // hollow look: dark centre for unvisited
+      fill(px - ps / 4, py - ps / 4, std::max(1, ps / 2), std::max(1, ps / 2), with_alpha(pal::BG, 220));
+  }
   // Found signals on the chart
   for (const Game::Signal& sig : g.signals) {
     if (!sig.found) continue;
@@ -1487,11 +1596,13 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
   if (!g.revealed.empty())
     for (uint8_t v : g.revealed) if (v >= 80) ++lit;
   const int pct = total_cells > 0 ? (lit * 100) / total_cells : 0;
-  char line[64];
-  text_centered(w_ / 2, dy - cell_h() - L(10), "MAP", pal::BRIGHT);
-  std::snprintf(line, sizeof line, "EXPLORED %d%%   SIGNALS %d/%d   SCORE %d", pct, found,
-                static_cast<int>(g.signals.size()), g.score);
+  char line[72];
+  text_centered(w_ / 2, dy - cell_h() - L(10), "MAP  (HOLD TO PAUSE)", pal::BRIGHT);
+  std::snprintf(line, sizeof line, "EXPLORED %d%%   PADS %d/%d   SIGNALS %d/%d   SCORE %d", pct, n_vis,
+                n_act, found, static_cast<int>(g.signals.size()), g.score);
   text_centered(w_ / 2, dy + dh + L(8), line, pal::MID);
+  text_centered(w_ / 2, dy + dh + L(8) + cell_h() + L(4),
+                "PAD: BRIGHT=VISITED  AMBER=FOUND", pal::DIM);
 }
 
 void Gfx::draw(Game& g, const UiState& ui, const BindMap& binds) {

@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-030.1-debug-in-pause-9a093cd` → tip `31582f8`
+- Bundle line: `dualthrust-031.1-hangar-map-pause-pad-visit-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
@@ -53,6 +53,13 @@
 - **Vernier**: mains on triggers; **LS up/down** opposing lateral thrusters.
 - **Bidraft**: mains + LS lateral + **RS up/down** nose/belly.
 - **Seesaw**: each stick is an opposing pair (no triggers required).
+
+### Hangar / pads
+- Landed on a pad → **H** / gamepad **Y** opens Hangar: cycle ships, teleport to **visited** pads.
+- Pad **visited** = ship has settled there (home pad starts visited). Sonar only marks **active**.
+- World: filled diamond = visited, hollow ring = found-but-not-landed. Minimap/full map same colours
+  (bright vs amber). Teleport (`[/]` / shoulders) only between visited pads.
+- Holding **Map** (Z / Select) freezes the simulation until released.
 
 ### Debug
 - Pause menu → **Debug** (not under Options). F3 opens it from play (via Pause).

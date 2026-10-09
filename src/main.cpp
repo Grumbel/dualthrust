@@ -13,6 +13,7 @@
 #include <memory>
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "audio.hpp"
 #include "config.hpp"
@@ -568,6 +569,10 @@ int main(int argc, char** argv) {
       case MenuPage::Debug:
         if (!pop_page()) open_page(MenuPage::Pause);
         break;
+      case MenuPage::Hangar:
+        // Hangar is opened from play (nav_depth 0); Back resumes the game
+        if (!pop_page()) ui.screen = Screen::Play;
+        break;
       default: break;
     }
   };
@@ -577,6 +582,86 @@ int main(int argc, char** argv) {
     ui.screen = Screen::Pause;
     ui.nav_depth = 0;
     open_page(MenuPage::Pause);
+  };
+  // Pad terminal: ship select + teleport to visited pads. Only while landed on a pad.
+  auto open_hangar = [&] {
+    const Flight& fl = game.ecs.get<Flight>(game.ship);
+    if (fl.state != FlightState::Landed) {
+      show_toast("LAND FIRST");
+      return;
+    }
+    const Transform& tf = ship_transform(game);
+    if (!game.cave.pad_below(tf.pos.x, tf.pos.y, 140.f)) {
+      show_toast("NEED A PAD");
+      return;
+    }
+    // Mark current pad visited (settle already does; belt-and-braces)
+    if (const LandingPad* p = game.cave.pad_below(tf.pos.x, tf.pos.y, 140.f)) {
+      // find index
+      for (int i = 0; i < static_cast<int>(game.cave.pads.size()); ++i) {
+        if (&game.cave.pads[static_cast<size_t>(i)] == p) {
+          game.cave.pads[static_cast<size_t>(i)].visited = true;
+          game.cave.pads[static_cast<size_t>(i)].active = true;
+          game.last_pad = i;
+          break;
+        }
+      }
+    }
+    flush_stats();
+    persist_world();
+    ui.screen = Screen::Pause;
+    ui.nav_depth = 0;
+    ui.hangar_cursor = 0;
+    open_page(MenuPage::Hangar);
+  };
+  auto hangar_row_count = [&] {
+    int n = 1;  // ship
+    for (const LandingPad& p : game.cave.pads)
+      if (p.visited) ++n;
+    return n + item_count(HANGAR_ITEMS);
+  };
+  auto hangar_activate = [&](int delta, bool confirm) {
+    const int rows = hangar_row_count();
+    int pad_rows = 0;
+    std::vector<int> visited;
+    for (int i = 0; i < static_cast<int>(game.cave.pads.size()); ++i)
+      if (game.cave.pads[static_cast<size_t>(i)].visited) {
+        visited.push_back(i);
+        ++pad_rows;
+      }
+    const int i = ui.hangar_cursor;
+    if (i == 0) {
+      // Ship choice: left/right or confirm cycles
+      if (confirm || delta != 0) {
+        const int d = confirm ? +1 : delta;
+        set_ship_def(game, ship_def_index(game) + d);
+        respawn_ship(game, home_pad_x(game));
+        snap_camera(game);
+        char buf[40];
+        std::snprintf(buf, sizeof buf, "SHIP %s", game.ecs.get<Hull>(game.ship).def->name);
+        show_toast(buf);
+        persist_config();
+      }
+    } else if (i <= pad_rows) {
+      if (confirm) {
+        const int pi = visited[static_cast<size_t>(i - 1)];
+        if (pi == game.last_pad) {
+          show_toast("ALREADY HERE");
+        } else if (teleport_pad(game, pi)) {
+          char buf[32];
+          std::snprintf(buf, sizeof buf, "PAD %d", pi + 1);
+          show_toast(buf);
+          ui.screen = Screen::Play;  // leave hangar after jump
+          ui.nav_depth = 0;
+        }
+      }
+    } else {
+      if (confirm) {
+        // CLOSE
+        if (!pop_page()) ui.screen = Screen::Play;
+      }
+    }
+    (void)rows;
   };
 
   SDL_GameController* pad = nullptr;
@@ -674,6 +759,17 @@ int main(int argc, char** argv) {
             break;
           }
 
+          if (ui.page == MenuPage::Hangar && ui.screen != Screen::Play) {
+            const int n = hangar_row_count();
+            if (k == SDLK_UP || k == SDLK_w) ui.hangar_cursor = (ui.hangar_cursor + n - 1) % n;
+            else if (k == SDLK_DOWN || k == SDLK_s) ui.hangar_cursor = (ui.hangar_cursor + 1) % n;
+            else if (k == SDLK_LEFT || k == SDLK_a) hangar_activate(-1, false);
+            else if (k == SDLK_RIGHT || k == SDLK_d) hangar_activate(+1, false);
+            else if (k == SDLK_ESCAPE) menu_back();
+            else if (enter || k == SDLK_SPACE) hangar_activate(0, true);
+            break;
+          }
+
           if (ui.screen == Screen::Play) {
             if (k == SDLK_F3) {
               ui.screen = Screen::Pause;
@@ -694,6 +790,7 @@ int main(int argc, char** argv) {
             if (action_pressed_key(binds, Action::NextShip, sc)) cycle_ship(+1);
             if (action_pressed_key(binds, Action::NextPad, sc)) cycle_pad(game, +1);
             if (action_pressed_key(binds, Action::PrevPad, sc)) cycle_pad(game, -1);
+            if (action_pressed_key(binds, Action::Hangar, sc)) open_hangar();
             if (action_pressed_key(binds, Action::SwapEngines, sc)) toggle_swap();
             if (action_pressed_key(binds, Action::Legs, sc)) toggle_legs(game);
             if (action_pressed_key(binds, Action::Grip, sc)) toggle_grip(game);
@@ -781,11 +878,23 @@ int main(int argc, char** argv) {
             break;
           }
 
+          if (ui.page == MenuPage::Hangar && ui.screen != Screen::Play) {
+            const int n = hangar_row_count();
+            if (b == SDL_CONTROLLER_BUTTON_DPAD_UP) ui.hangar_cursor = (ui.hangar_cursor + n - 1) % n;
+            else if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN) ui.hangar_cursor = (ui.hangar_cursor + 1) % n;
+            else if (b == SDL_CONTROLLER_BUTTON_DPAD_LEFT) hangar_activate(-1, false);
+            else if (b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) hangar_activate(+1, false);
+            else if (b == SDL_CONTROLLER_BUTTON_B) menu_back();
+            else if (b == SDL_CONTROLLER_BUTTON_A) hangar_activate(0, true);
+            break;
+          }
+
           if (ui.screen == Screen::Play) {
             if (action_pressed_button(binds, Action::Pause, b)) open_pause();
             if (action_pressed_button(binds, Action::NextShip, b)) cycle_ship(+1);
             if (action_pressed_button(binds, Action::NextPad, b)) cycle_pad(game, +1);
             if (action_pressed_button(binds, Action::PrevPad, b)) cycle_pad(game, -1);
+            if (action_pressed_button(binds, Action::Hangar, b)) open_hangar();
             if (action_pressed_button(binds, Action::ZoomCycle, b)) zoom_to(game.cam.zoom + 1, true);
             if (action_pressed_button(binds, Action::ZoomCloser, b)) zoom_to(game.cam.zoom - 1, false);
             if (action_pressed_button(binds, Action::ZoomFarther, b)) zoom_to(game.cam.zoom + 1, false);
@@ -888,7 +997,8 @@ int main(int argc, char** argv) {
     update_view(game, dt, aspect());
 
     const double t0 = stamp();
-    if (ui.screen != Screen::Pause) {  // the title screen runs the world too: the ship settles onto its pad
+    // Pause menu and held map both freeze the simulation
+    if (ui.screen != Screen::Pause && !ui.show_map) {
       // Fixed-step simulation, independent of display refresh
       accumulator += dt;
       for (int n = 0; accumulator >= tune::SIM_STEP && n < tune::MAX_STEPS_PER_FRAME; ++n) {

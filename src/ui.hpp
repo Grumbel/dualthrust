@@ -10,7 +10,7 @@
 enum class InputDevice { Keyboard, Gamepad };
 
 enum class Screen { Title, Play, Pause };
-enum class MenuPage { Title, Pause, Options, Stats, Controls, Debug };
+enum class MenuPage { Title, Pause, Options, Stats, Controls, Debug, Hangar };
 
 enum class MenuAction {
   Start, Resume, Respawn, NewCave, Options, Stats, MainMenu, Quit, Back,  // actions
@@ -83,6 +83,11 @@ inline constexpr MenuItem STATS_ITEMS[] = {
     {MenuAction::Back, "BACK", ItemKind::Action},
 };
 
+// Hangar (pad terminal): ship/pad rows are custom-drawn; footer closes the page.
+inline constexpr MenuItem HANGAR_ITEMS[] = {
+    {MenuAction::Back, "CLOSE", ItemKind::Action},
+};
+
 template <std::size_t N>
 constexpr int item_count(const MenuItem (&)[N]) {
   return static_cast<int>(N);
@@ -96,6 +101,7 @@ inline const MenuPageDef& page_def(MenuPage p) {
       {"STATISTICS", STATS_ITEMS, item_count(STATS_ITEMS)},
       {"CONTROLS", CONTROL_ITEMS, item_count(CONTROL_ITEMS)},
       {"DEBUG", DEBUG_ITEMS, item_count(DEBUG_ITEMS)},  // param rows are custom-drawn
+      {"HANGAR", HANGAR_ITEMS, item_count(HANGAR_ITEMS)},  // ships + pads custom-drawn
   };
   return defs[static_cast<int>(p)];
 }
@@ -128,7 +134,9 @@ struct UiState {
   bool rebind_keyboard = true;
   int controls_cursor = 0;   // 0..ACTION_COUNT-1 = action rows, then footer items
   int debug_cursor = 0;      // 0..DEBUG_PARAM_COUNT-1 = param rows, then DEBUG_ITEMS footer
-  bool show_map = false;     // hold MapView: full fog-of-war chart
+  // Hangar: 0 = ship row, 1..N = visited pad teleport, then HANGAR_ITEMS footer
+  int hangar_cursor = 0;
+  bool show_map = false;     // hold MapView: full fog-of-war chart (freezes the sim while held)
 
   bool in_menu() const { return screen != Screen::Play; }
 };

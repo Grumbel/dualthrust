@@ -436,10 +436,12 @@ void ground_system(Game& g, float dt) {
           g.score += tune::SCORE_PAD_LANDING;
           notice(g, "+100 PAD");
           for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i) {
-            const LandingPad& p = g.cave.pads[static_cast<size_t>(i)];
-            if (p.active && std::abs(f.contact_pt.y - p.y) < Cave::CELL &&
+            LandingPad& p = g.cave.pads[static_cast<size_t>(i)];
+            if (std::abs(f.contact_pt.y - p.y) < Cave::CELL &&
                 f.contact_pt.x >= p.x0 - 4.f && f.contact_pt.x <= p.x1 + 4.f) {
               g.last_pad = i;
+              p.active = true;   // landing discovers the pad if sonar had not
+              p.visited = true;  // teleportable
               break;
             }
           }
@@ -785,7 +787,7 @@ void reset_fog(Game& g) {
   g.signals.clear();
   g.residues.clear();
   g.echoes.clear();
-  for (LandingPad& p : g.cave.pads) p.active = false;
+  for (LandingPad& p : g.cave.pads) { p.active = false; p.visited = false; }
 }
 
 // Scatter a few deep-cave signals in open air for the pilot to find with sonar.
@@ -832,6 +834,7 @@ void activate_home_pad(Game& g, float wx) {
   }
   LandingPad& home = g.cave.pads[static_cast<size_t>(best)];
   home.active = true;
+  home.visited = true;  // spawn pad is already explored
   g.last_pad = best;
   // Paint a small revealed blob so the home pad shows on the chart
   const int gy = static_cast<int>(home.y / Cave::CELL);
@@ -859,41 +862,50 @@ float home_pad_x(const Game& g) {
   return Cave::WORLD_W * 0.5f;
 }
 
-// Teleport between active (sonar-discovered) pads. delta = +1 next, -1 previous.
-bool cycle_pad(Game& g, int delta) {
+// Teleport to a specific pad index (must be visited). Returns false if invalid.
+bool teleport_pad(Game& g, int pad_index) {
   if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return false;
-  // Active pad indices in map order
-  std::vector<int> active;
-  active.reserve(g.cave.pads.size());
-  for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i)
-    if (g.cave.pads[static_cast<size_t>(i)].active) active.push_back(i);
-  if (active.size() < 2) {
-    notice(g, active.empty() ? "NO PADS" : "ONLY ONE PAD");
+  if (pad_index < 0 || pad_index >= static_cast<int>(g.cave.pads.size())) return false;
+  const LandingPad& pad = g.cave.pads[static_cast<size_t>(pad_index)];
+  if (!pad.visited) {
+    notice(g, "PAD UNKNOWN");
     return false;
   }
-  // Current: last_pad if active, else nearest active to the ship
+  g.last_pad = pad_index;
+  respawn_ship(g, 0.5f * (pad.x0 + pad.x1));
+  snap_camera(g);
+  return true;
+}
+
+// Teleport between visited (explored) pads. delta = +1 next, -1 previous.
+bool cycle_pad(Game& g, int delta) {
+  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return false;
+  std::vector<int> visited;
+  visited.reserve(g.cave.pads.size());
+  for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i)
+    if (g.cave.pads[static_cast<size_t>(i)].visited) visited.push_back(i);
+  if (visited.size() < 2) {
+    notice(g, visited.empty() ? "NO PADS" : "ONLY ONE PAD");
+    return false;
+  }
   int cur = -1;
   if (g.last_pad >= 0) {
-    for (int i = 0; i < static_cast<int>(active.size()); ++i)
-      if (active[static_cast<size_t>(i)] == g.last_pad) { cur = i; break; }
+    for (int i = 0; i < static_cast<int>(visited.size()); ++i)
+      if (visited[static_cast<size_t>(i)] == g.last_pad) { cur = i; break; }
   }
   if (cur < 0) {
     const float sx = ship_transform(g).pos.x;
     float best_d = 1e12f;
-    for (int i = 0; i < static_cast<int>(active.size()); ++i) {
-      const LandingPad& p = g.cave.pads[static_cast<size_t>(active[static_cast<size_t>(i)])];
+    for (int i = 0; i < static_cast<int>(visited.size()); ++i) {
+      const LandingPad& p = g.cave.pads[static_cast<size_t>(visited[static_cast<size_t>(i)])];
       const float d = std::abs(0.5f * (p.x0 + p.x1) - sx);
       if (d < best_d) { best_d = d; cur = i; }
     }
   }
-  const int n = static_cast<int>(active.size());
+  const int n = static_cast<int>(visited.size());
   const int next = (cur + delta % n + n) % n;
-  const int pi = active[static_cast<size_t>(next)];
-  const LandingPad& pad = g.cave.pads[static_cast<size_t>(pi)];
-  g.last_pad = pi;
-  // respawn_ship / build_bodies already release any held crate
-  respawn_ship(g, 0.5f * (pad.x0 + pad.x1));
-  snap_camera(g);
+  const int pi = visited[static_cast<size_t>(next)];
+  if (!teleport_pad(g, pi)) return false;
   char buf[32];
   std::snprintf(buf, sizeof buf, "PAD %d/%d", next + 1, n);
   notice(g, buf);

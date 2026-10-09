@@ -9,7 +9,8 @@
 
 struct LandingPad {
   float x0, x1, y;  // world surface y of the pad
-  bool active = false;  // true once a sonar ping has painted the deck
+  bool active = false;   // true once a sonar ping has painted the deck
+  bool visited = false;  // true once the ship has settled on this pad (teleport target)
 };
 
 struct CargoSpot {

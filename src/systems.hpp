@@ -11,7 +11,8 @@ int ship_def_index(const Game& g);
 void respawn_ship(Game& g, float wx);  // last visited / active pad near wx, clears particles
 void activate_home_pad(Game& g, float wx);  // first pad online at cave start
 float home_pad_x(const Game& g);            // centre x of last visited (or first active) pad
-bool cycle_pad(Game& g, int delta);         // teleport to next/prev active pad
+bool cycle_pad(Game& g, int delta);         // teleport to next/prev visited pad
+bool teleport_pad(Game& g, int pad_index);  // teleport to a specific visited pad
 void place_ship(Game& g, Vec2 pos, float angle);  // debugging: at rest anywhere (px, radians)
 void snap_camera(Game& g);
 // Zoom: set the level (clamped); update_view animates the camera's viewport toward it and keeps it at the
