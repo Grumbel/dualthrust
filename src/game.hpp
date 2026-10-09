@@ -177,6 +177,18 @@ struct Game {
   };
   std::vector<Residue> residues;
 
+  // Permanent crash debris: line scraps that settle on the rock and survive respawns
+  // (cleared only on a new cave). Caps so a long session stays cheap to draw.
+  struct WreckPart {
+    Vec2 a{}, b{};     // world-space endpoints of a scrap segment
+    Vec2 vel{};
+    float ang_vel = 0.f;
+    float life = 1.f;  // 1 while airborne; not used for expiry, just settled flag via vel
+    bool settled = false;
+    Rgba col{};
+  };
+  std::vector<WreckPart> wreckage;
+
   // Ambient cave life: slow wanderers that answer a sonar ping (exploration flavour)
   struct Echo {
     Vec2 pos;

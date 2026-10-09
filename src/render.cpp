@@ -1651,6 +1651,16 @@ void Gfx::draw_title(const Game& g, const UiState& ui) const {
 // ---------------------------------------------------------------------------
 
 void Gfx::draw_residues(const Game& g) const {
+  // Permanent crash wreckage (line scraps)
+  for (const Game::WreckPart& w : g.wreckage) {
+    const int x0 = sx(g.cam, w.a.x), y0 = sy(w.a.y);
+    const int x1 = sx(g.cam, w.b.x), y1 = sy(w.b.y);
+    // Cull if both ends far off-screen
+    if ((x0 < -40 && x1 < -40) || (x0 > w_ + 40 && x1 > w_ + 40) ||
+        (y0 < -40 && y1 < -40) || (y0 > h_ + 40 && y1 > h_ + 40))
+      continue;
+    line(x0, y0, x1, y1, w.settled ? with_alpha(w.col, 200) : w.col);
+  }
   for (const Game::Residue& r : g.residues) {
     const float u = clampf(r.life / tune::RESIDUE_TTL, 0.f, 1.f);
     const int s = std::max(2, Z(3));

@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-038.1-engine-damage-warn-9a093cd` → tip `215af19`
+- Bundle line: `dualthrust-039.1-crash-wreckage-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap

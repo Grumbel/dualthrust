@@ -105,6 +105,7 @@ inline float HULL_FRICTION = 0.4f;
 inline float FOOT_FRICTION = 0.6f;
 
 inline constexpr size_t MAX_PARTICLES = 1500;
+inline constexpr size_t MAX_WRECKAGE = 600;  // crash scraps that stay in the cave
 inline float EXHAUST_RATE = 150.f;  // particles / sec / engine at full thrust
 }  // namespace tune
 

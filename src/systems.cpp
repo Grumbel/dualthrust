@@ -92,6 +92,51 @@ void exhaust_system(Game& g, float dt) {
       });
 }
 
+
+void wreckage_system(Game& g, float dt) {
+  if (g.wreckage.empty()) return;
+  for (Game::WreckPart& w : g.wreckage) {
+    if (w.settled) continue;
+    // Integrate
+    w.vel.y += tune::GRAVITY * 0.85f * dt;
+    w.vel.x *= (1.f - 0.4f * dt);
+    w.vel.y *= (1.f - 0.15f * dt);
+    const Vec2 mid0 = (w.a + w.b) * 0.5f;
+    const Vec2 d = (w.b - w.a) * 0.5f;
+    float ang = std::atan2(d.y, d.x);
+    ang += w.ang_vel * dt;
+    w.ang_vel *= (1.f - 1.2f * dt);
+    const float half = length(d);
+    const Vec2 mid1 = mid0 + w.vel * dt;
+    // Ground / rock collision at midpoint
+    if (g.cave.is_solid_world(mid1.x, mid1.y)) {
+      // Nudge out and settle
+      w.vel = {};
+      w.ang_vel = 0.f;
+      w.settled = true;
+      // Rest just above rock: step up a few cells
+      Vec2 rest = mid0;
+      for (int k = 0; k < 12; ++k) {
+        if (!g.cave.is_solid_world(rest.x, rest.y - 2.f)) break;
+        rest.y -= 2.f;
+      }
+      const float c = std::cos(ang), s = std::sin(ang);
+      w.a = {rest.x - half * c, rest.y - half * s};
+      w.b = {rest.x + half * c, rest.y + half * s};
+      continue;
+    }
+    const float c = std::cos(ang), s = std::sin(ang);
+    w.a = {mid1.x - half * c, mid1.y - half * s};
+    w.b = {mid1.x + half * c, mid1.y + half * s};
+    // Low speed settle
+    if (length(w.vel) < 18.f && g.cave.is_solid_world(mid1.x, mid1.y + 4.f)) {
+      w.vel = {};
+      w.ang_vel = 0.f;
+      w.settled = true;
+    }
+  }
+}
+
 void particle_system(Game& g, float dt) {
   const Cave& cave = g.cave;
   g.ecs.view<Particle, Transform, Motion>([&](Entity e, Particle& p, Transform& t, Motion& m) {
@@ -106,6 +151,84 @@ void particle_system(Game& g, float dt) {
   for (Entity e : g.dead) g.ecs.destroy(e);
   g.dead.clear();
 }
+
+// Scatter ship outline scraps into permanent wreckage (survives respawn).
+static void spawn_wreckage(Game& g) {
+  if (!g.ecs.has<Transform>(g.ship) || !g.ecs.has<Hull>(g.ship)) return;
+  const Transform& tf = g.ecs.get<Transform>(g.ship);
+  const Motion& m = g.ecs.get<Motion>(g.ship);
+  const ShipDef& d = *g.ecs.get<Hull>(g.ship).def;
+  const HullGeom hg = hull_geom(d);
+  const LegGeom lg = leg_geom(d);
+
+  auto push_part = [&](Vec2 la, Vec2 lb, Rgba col) {
+    while (g.wreckage.size() >= tune::MAX_WRECKAGE) {
+      // Drop oldest settled first, else oldest
+      size_t drop = 0;
+      for (size_t i = 0; i < g.wreckage.size(); ++i)
+        if (g.wreckage[i].settled) { drop = i; break; }
+      g.wreckage[drop] = g.wreckage.back();
+      g.wreckage.pop_back();
+    }
+    const Vec2 wa = tf.pos + rotate(la, tf.angle);
+    const Vec2 wb = tf.pos + rotate(lb, tf.angle);
+    const Vec2 mid = (wa + wb) * 0.5f;
+    const Vec2 outward = mid - tf.pos;
+    const float olen = length(outward);
+    Vec2 kick = olen > 1.f ? outward * (1.f / olen) : Vec2{0.f, -1.f};
+    kick = kick * g.rng.range(80.f, 220.f) + m.vel * g.rng.range(0.2f, 0.7f);
+    kick.x += g.rng.range(-60.f, 60.f);
+    kick.y += g.rng.range(-40.f, 40.f);
+    Game::WreckPart p;
+    p.a = wa;
+    p.b = wb;
+    p.vel = kick;
+    p.ang_vel = g.rng.range(-8.f, 8.f);
+    p.settled = false;
+    p.col = col;
+    g.wreckage.push_back(p);
+  };
+
+  // Hull silhouette broken into short segments
+  const Vec2 outline[] = {{0.f, hg.nose_y}, {hg.cabin_hw(), hg.cabin_y}, {hg.belly_hw(), hg.belly_y},
+                          {-hg.belly_hw(), hg.belly_y}, {-hg.cabin_hw(), hg.cabin_y}};
+  constexpr int N = 5;
+  for (int i = 0; i < N; ++i) {
+    const Vec2 a = outline[i], b = outline[(i + 1) % N];
+    // Split each edge into 2–3 scraps
+    for (int k = 0; k < 3; ++k) {
+      const float t0 = static_cast<float>(k) / 3.f;
+      const float t1 = static_cast<float>(k + 1) / 3.f;
+      push_part(a + (b - a) * t0, a + (b - a) * t1, mix(pal::BRIGHT, pal::HOT, g.rng.range(0.f, 0.5f)));
+    }
+  }
+  // Engine bells
+  for (int i = 0; i < thruster_count(d); ++i) {
+    const ThrusterPose tp = thruster_pose(d, i);
+    const Vec2 f = tp.flame, p = {-f.y, f.x};
+    const float w = 6.f + 2.f * tp.power;
+    push_part(tp.pos - p * w, tp.pos + p * w, pal::WARN);
+    push_part(tp.pos, tp.pos + f * 10.f, mix(pal::MID, pal::HOT, 0.4f));
+  }
+  // Legs
+  for (int i = 0; i < 2; ++i) {
+    const float side = i == 0 ? -1.f : 1.f;
+    const Vec2 attach{side * lg.attach_x, lg.attach_y};
+    const Vec2 foot{side * lg.foot_x, lg.foot_y};
+    push_part(attach, foot, pal::MID);
+    push_part({foot.x - lg.foot_half_w, foot.y}, {foot.x + lg.foot_half_w, foot.y}, pal::DIM);
+  }
+  // Extra random scrap cloud
+  for (int i = 0; i < 18; ++i) {
+    const float lx = g.rng.range(-d.half_w, d.half_w);
+    const float ly = g.rng.range(-d.half_h, d.half_h);
+    const float ang = g.rng.range(0.f, 6.28f);
+    const float len = g.rng.range(4.f, 14.f);
+    push_part({lx, ly}, {lx + std::cos(ang) * len, ly + std::sin(ang) * len},
+              mix(pal::BRIGHT, pal::SMOKE, g.rng.range(0.2f, 0.8f)));
+  }
+}
+
 
 void event_system(Game& g) {
   for (SimEvent& ev : g.events) {
@@ -126,12 +249,14 @@ void event_system(Game& g) {
         burst(g, ev.pos, ev.normal, 140, 340.f, PI * 1.6f, pal::FLAME_CORE, with_alpha(pal::HOT, 0), 0.8f,
               1.6f);
         burst(g, ev.pos, ev.normal, 40, 160.f, PI * 2.f, pal::BRIGHT, with_alpha(pal::DIM, 0), 1.f, 2.2f);
+        spawn_wreckage(g);
         g.cam.shake = 1.f;
         break;
     }
   }
   g.events.clear();
 }
+
 
 // ---------------------------------------------------------------------------
 // Rigid body: forces in, Box2D step, state out
@@ -787,6 +912,7 @@ void reset_fog(Game& g) {
   g.signals.clear();
   g.residues.clear();
   g.echoes.clear();
+  g.wreckage.clear();
   for (LandingPad& p : g.cave.pads) { p.active = false; p.visited = false; }
 }
 
@@ -1415,6 +1541,7 @@ void step_sim(Game& g, float dt) {
   event_system(g);
   exhaust_system(g, dt);
   particle_system(g, dt);
+  wreckage_system(g, dt);
   update_explore(g, dt);
   update_sonar(g, dt);
 }
