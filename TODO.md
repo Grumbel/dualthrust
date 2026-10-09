@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-040.1-titan-stick-primary-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-040.1-titan-stick-primary-9a093cd` → tip `1ddf84f`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
