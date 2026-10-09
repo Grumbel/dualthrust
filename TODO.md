@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-045.1-cargo-world-init-debug-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-045.1-cargo-world-init-debug-9a093cd` → tip `5dc60e4`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
