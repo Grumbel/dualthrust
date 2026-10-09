@@ -25,6 +25,9 @@ struct Thrusters {
   float level[6] = {};           // control channels 0..5
   float emit_acc[MAX] = {};      // fractional exhaust particles owed, per thruster index
   float damage[MAX] = {};        // 0 = healthy, 1 = dead; per thruster, not per channel
+  // Effective nozzle output after damage, fuel/hurt power and random flutter (written by forces_system;
+  // exhaust, flames and audio read it so visuals, physics and sound stay in lockstep).
+  float output[MAX] = {};
 };
 // Flying / Landed / Crashed is a label on top of the rigid-body simulation: the body never stops simulating.
 struct Flight {

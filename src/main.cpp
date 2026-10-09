@@ -855,8 +855,30 @@ int main(int argc, char** argv) {
       std::swap(in[2], in[3]);
     }
     set_thrusts(game, in);
-    const bool flying = game.ecs.get<Flight>(game.ship).state == FlightState::Flying;
-    audio.set_engines(flying ? std::max(in[0], in[2]) : 0.f, flying ? std::max(in[1], in[3]) : 0.f);  // the rumble is stereo: left / right
+    // Engine audio from effective nozzle output (damage + flutter) and side damage.
+    // Aggregate by hull-local X so multi-engine ships still pan L/R correctly.
+    {
+      float left = 0.f, right = 0.f, left_dmg = 0.f, right_dmg = 0.f;
+      if (game.ecs.get<Flight>(game.ship).state == FlightState::Flying &&
+          game.ecs.has<Thrusters>(game.ship) && game.ecs.has<Hull>(game.ship)) {
+        const Thrusters& th = game.ecs.get<Thrusters>(game.ship);
+        const ShipDef& def = *game.ecs.get<Hull>(game.ship).def;
+        const int n = std::min(thruster_count(def), Thrusters::MAX);
+        for (int i = 0; i < n; ++i) {
+          const ThrusterPose tp = thruster_pose(def, i);
+          const float dmg = clampf(th.damage[i], 0.f, 1.f);
+          const float out = th.output[i];
+          if (tp.pos.x < 0.f) {
+            left = std::max(left, out);
+            left_dmg = std::max(left_dmg, dmg);
+          } else {
+            right = std::max(right, out);
+            right_dmg = std::max(right_dmg, dmg);
+          }
+        }
+      }
+      audio.set_engines(left, right, left_dmg, right_dmg);
+    }
 
     const Uint64 now = SDL_GetPerformanceCounter();
     const float dt = std::min(static_cast<float>((now - prev) / freq), 0.05f);

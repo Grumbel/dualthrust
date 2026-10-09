@@ -90,6 +90,7 @@ inline float ENGINE_DAMAGE_FROM_HIT = 0.22f;  // added to the nearest engine(s) 
 inline float ENGINE_REPAIR = 0.28f;           // per-engine repair rate /s on an active pad
 inline float ENGINE_SPUTTER = 0.18f;          // damage above this: thrust flickers
 inline float ENGINE_DEAD = 0.92f;             // damage above this: engine produces no thrust
+inline float ENGINE_FLUTTER = 0.04f;          // always-on random thrust amplitude (± this fraction)
 inline constexpr float RESIDUE_TTL = 1.4f;      // seconds a scan glow lingers on rock
 
 // Landing legs: spring along the strut (Hz, damping ratio), leg body mass as a fraction of the ship's
@@ -120,6 +121,8 @@ inline constexpr Rgba MENU{20, 40, 24, 230};
 inline constexpr Rgba HULL_FILL{4, 26, 12, 255};
 inline constexpr Rgba FLAME_CORE{255, 245, 210, 255};
 inline constexpr Rgba FLAME_EDGE{255, 90, 20, 255};
+inline constexpr Rgba SMOKE{48, 52, 44, 255};      // damaged-engine soot
+inline constexpr Rgba SPARK{255, 220, 80, 255};     // damage sparks in exhaust
 inline constexpr Rgba CARGO{90, 205, 255, 255};   // crates, their minimap dots (cyan stands out from the green and amber)
 inline constexpr Rgba ROPE{150, 215, 170, 255};
 }  // namespace pal

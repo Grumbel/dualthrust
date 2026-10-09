@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-021.1-magnet-hud-debug-9a093cd` → tip `62c1e26`
+- Bundle line: `dualthrust-029.1-engine-damage-audio-particles-9a093cd` → tip `bd3bd6e`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
@@ -13,6 +13,8 @@
   - Rope ideas (open): wrap around rock corners.
   - Done: magnet/auto-grab; crate name+mass on HUD; dest pad highlighted in-world while hauling
     (ghost + DEST? label if the pad is not yet activated by sonar).
+  - Done: per-engine damage (thrust loss, sputter, HUD); damage-aware exhaust particles and engine audio;
+    always-on random thrust flutter (stronger when damaged).
   - Next: tune the feel on the handheld (leg Hz/damping, crash limits, `TIME_SCALE`).
 
 ## Open
@@ -32,8 +34,19 @@
 - [x] Zoom cycle action (Tab); zoom in/out unbound on pad by default
 - [x] Menu nav stack (Options → Controls → Back → Options → Back works)
 - [x] Right-stick click scrubbed from Respawn / NextShip on load (legacy configs)
+- [x] Per-engine damage → force, exhaust particles, flames, and engine audio
+- [x] Random thrust fluctuations (always-on flutter + damage misfires)
 
 ## Notes
+
+### Engine damage
+- Each thruster tracks `damage` 0..1. Hull impacts wound the nearest nozzle(s); foot hits are gentler.
+- `forces_system` writes `Thrusters::output[]` (channel level × power × fuel/hurt × health × flutter).
+  Exhaust, flames and audio all read that so physics, particles and sound stay in lockstep.
+- Above `ENGINE_SPUTTER` (~0.18): irregular cough + random hard misfires. Above `ENGINE_DEAD` (~0.92): no force.
+- Always-on `ENGINE_FLUTTER` (~±4%) multi-sine + rng so healthy thrust is never perfectly flat.
+- Damaged exhaust: soot/smoke palette, larger spread, occasional sparks. Damaged audio: brighter noise,
+  amplitude flutter, crackle bursts. Pads repair engines over time (`ENGINE_REPAIR`).
 
 ### Ships
 - **Rocket**: tall 1950s sci-fi needle (`half_h` 96). Options → Ship or **S**.

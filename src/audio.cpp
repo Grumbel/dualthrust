@@ -80,11 +80,13 @@ void Audio::set_volumes(float music, float sfx) {
   SDL_UnlockAudioDevice(dev_);
 }
 
-void Audio::set_engines(float left, float right) {
+void Audio::set_engines(float left, float right, float left_dmg, float right_dmg) {
   if (!dev_) return;
   SDL_LockAudioDevice(dev_);
   target_[0] = left;
   target_[1] = right;
+  dmg_target_[0] = left_dmg < 0.f ? 0.f : (left_dmg > 1.f ? 1.f : left_dmg);
+  dmg_target_[1] = right_dmg < 0.f ? 0.f : (right_dmg > 1.f ? 1.f : right_dmg);
   SDL_UnlockAudioDevice(dev_);
 }
 
@@ -119,16 +121,41 @@ void Audio::render(float* out, int frames) {
     float l = 0.f, r = 0.f;
 
     // --- Engines: filtered noise + low rumble, panned per side ---
+    // Damage adds crackle, amplitude flutter and a dirtier (brighter) noise bed.
     for (int e = 0; e < 2; ++e) {
       level_[e] += (target_[e] - level_[e]) * 0.0015f;
+      dmg_[e] += (dmg_target_[e] - dmg_[e]) * 0.0008f;
       const float lv = level_[e];
+      const float dg = dmg_[e];
       if (lv < 0.002f) continue;
-      float cutoff = 0.03f + 0.22f * lv;  // one-pole coefficient: brighter when pushed
+      // Brighter noise floor when damaged (metal scraping / open exhaust)
+      float cutoff = 0.03f + 0.22f * lv + 0.18f * dg;
       lp_[e] += (noise() - lp_[e]) * cutoff;
-      rumble_phase_[e] += (48.f + 38.f * lv + (e ? 1.5f : 0.f)) * dt;  // slight detune L/R
+      // Rumble rate wobbles with damage
+      float rumble_hz = 48.f + 38.f * lv + (e ? 1.5f : 0.f) + 12.f * dg * noise();
+      rumble_phase_[e] += rumble_hz * dt;
       rumble_phase_[e] -= std::floor(rumble_phase_[e]);
       float rumble = std::sin(rumble_phase_[e] * TAU) + 0.4f * std::sin(rumble_phase_[e] * TAU * 2.f);
-      float s = (lp_[e] * 1.6f + rumble * 0.35f) * lv * (0.35f + 0.65f * lv) * 0.55f;
+      // Amplitude flutter: healthy engines are steady; damaged ones pulse irregularly
+      float flutter = 1.f;
+      if (dg > 0.05f) {
+        crackle_phase_[e] += (9.f + 28.f * dg) * dt;
+        crackle_phase_[e] -= std::floor(crackle_phase_[e]);
+        float wave = 0.5f + 0.5f * std::sin(crackle_phase_[e] * TAU);
+        // Random hard cuts (misfire pops) when heavily damaged
+        if (dg > 0.25f && (noise() * 0.5f + 0.5f) < 0.012f + 0.04f * dg)
+          wave *= 0.05f + 0.2f * (noise() * 0.5f + 0.5f);
+        flutter = (1.f - 0.55f * dg) + 0.55f * dg * wave;
+      }
+      // Crackle: sparse high-amplitude noise bursts
+      float crackle = 0.f;
+      if (dg > 0.08f) {
+        float burst = noise();
+        if (burst > 0.92f - 0.25f * dg)
+          crackle = burst * burst * (0.35f + 0.65f * dg);
+      }
+      float s = (lp_[e] * (1.6f + 0.9f * dg) + rumble * 0.35f * (1.f - 0.4f * dg) + crackle) *
+                lv * (0.35f + 0.65f * lv) * 0.55f * flutter;
       l += s * (e == 0 ? 0.85f : 0.35f);
       r += s * (e == 0 ? 0.35f : 0.85f);
     }

@@ -534,16 +534,15 @@ void Gfx::draw_ship(const Game& g, double t) const {
 
   const float nose_y = hg.nose_y, cabin_y = hg.cabin_y, belly = hg.belly_y;
 
-  // Flames first so the hull draws over them
+  // Flames first so the hull draws over them. Length follows thruster output (damage + flutter)
+  // so the plume matches the force the sim is applying this step.
   if (fl.state != FlightState::Crashed) {
     be_->set_blend(Blend::Add);
     for (int i = 0; i < thruster_count(d); ++i) {
       const ThrusterPose tp = thruster_pose(d, i);
       const float dmg = i < Thrusters::MAX ? clampf(th.damage[i], 0.f, 1.f) : 0.f;
       if (dmg >= tune::ENGINE_DEAD) continue;
-      float lvl = th.level[tp.channel] * tp.power * (1.f - 0.9f * dmg);
-      if (dmg >= tune::ENGINE_SPUTTER)
-        lvl *= 0.55f + 0.45f * (0.5f + 0.5f * std::sin(t * (14.0 + 9.0 * dmg) + i * 2.1));
+      const float lvl = i < Thrusters::MAX ? th.output[i] : 0.f;
       if (lvl < 0.05f) continue;
       const float len = (10.f + 46.f * lvl) * (0.8f + 0.4f * flicker(t, i * 1.7f));
       const float wd = d.thruster_n ? 4.f + 3.f * tp.power : (top ? 8.f : 7.f);
@@ -551,8 +550,12 @@ void Gfx::draw_ship(const Game& g, double t) const {
       auto tri = [&](float half_w, float length, Rgba base, Rgba tip) {
         be_->gradient_triangle(W(tp.nozzle - perp * half_w), W(tp.nozzle + perp * half_w), W(tp.nozzle + tp.flame * length), base, tip);
       };
-      tri(wd, len, with_alpha(pal::FLAME_EDGE, 220), with_alpha(pal::FLAME_EDGE, 0));
-      tri(wd * 0.5f, len * 0.6f, with_alpha(pal::FLAME_CORE, 255), with_alpha(pal::FLAME_CORE, 0));
+      // Damaged flames go sooty / amber instead of clean white-orange
+      const Rgba edge = dmg > 0.05f ? mix(pal::FLAME_EDGE, pal::SMOKE, 0.35f + 0.5f * dmg) : pal::FLAME_EDGE;
+      const Rgba core = dmg > 0.05f ? mix(pal::FLAME_CORE, pal::SPARK, 0.2f + 0.5f * dmg) : pal::FLAME_CORE;
+      const uint8_t edge_a = static_cast<uint8_t>(220 - 80 * dmg);
+      tri(wd, len, with_alpha(edge, edge_a), with_alpha(edge, 0));
+      tri(wd * 0.5f, len * 0.6f, with_alpha(core, 255), with_alpha(core, 0));
     }
     be_->set_blend(Blend::Alpha);
   }

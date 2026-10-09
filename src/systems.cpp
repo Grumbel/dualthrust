@@ -50,24 +50,43 @@ void exhaust_system(Game& g, float dt) {
         for (int i = 0; i < std::min(thruster_count(d), Thrusters::MAX); ++i) {
           const ThrusterPose tp = thruster_pose(d, i);
           const float dmg = clampf(th.damage[i], 0.f, 1.f);
-          if (dmg >= tune::ENGINE_DEAD) { th.emit_acc[i] = 0.f; continue; }
-          float lvl = th.level[tp.channel] * tp.power * (1.f - 0.9f * dmg);
-          if (dmg >= tune::ENGINE_SPUTTER)
-            lvl *= 0.55f + 0.45f * (0.5f + 0.5f * std::sin(g.time * (14.f + 9.f * dmg) + float(i) * 2.1f));
-          if (lvl < 0.05f) { th.emit_acc[i] = 0.f; continue; }
+          const float lvl = th.output[i];  // damage + flutter already baked in by forces_system
+          if (dmg >= tune::ENGINE_DEAD || lvl < 0.05f) { th.emit_acc[i] = 0.f; continue; }
           const Vec2 down = rotate(tp.flame, t.angle);  // exhaust direction
           const Vec2 side{-down.y, down.x};
-          th.emit_acc[i] += tune::EXHAUST_RATE * lvl * dt;
+          // Damaged nozzles belch more volume of dirtier gas for the same thrust
+          const float rate_mul = 1.f + 0.7f * dmg;
+          th.emit_acc[i] += tune::EXHAUST_RATE * lvl * rate_mul * dt;
           Vec2 nozzle = to_world(t, tp.nozzle);
           for (; th.emit_acc[i] >= 1.f; th.emit_acc[i] -= 1.f) {
             Particle p;
-            p.ttl = p.life = g.rng.range(0.18f, 0.45f);
-            p.size = g.rng.range(1.5f, 3.f);
-            p.drag = 1.5f;
-            p.from = pal::FLAME_CORE;
-            p.to = with_alpha(pal::FLAME_EDGE, 0);
-            Vec2 v = m.vel + down * (140.f + 160.f * lvl * g.rng.next()) + side * g.rng.range(-35.f, 35.f);
-            emit(g, nozzle + down * g.rng.range(0.f, 6.f), v, p);
+            const bool spark = dmg > 0.08f && g.rng.next() < 0.12f + 0.35f * dmg;
+            if (spark) {
+              // Hot sparks: short-lived, fast, gravity-affected
+              p.ttl = p.life = g.rng.range(0.08f, 0.22f);
+              p.size = g.rng.range(1.0f, 2.2f);
+              p.drag = 0.6f;
+              p.gravity = 0.35f;
+              p.from = pal::SPARK;
+              p.to = with_alpha(pal::HOT, 0);
+              Vec2 v = m.vel + down * (180.f + 220.f * g.rng.next()) + side * g.rng.range(-55.f, 55.f);
+              emit(g, nozzle + down * g.rng.range(0.f, 4.f), v, p);
+            } else {
+              p.ttl = p.life = g.rng.range(0.18f, 0.45f + 0.25f * dmg);
+              p.size = g.rng.range(1.5f, 3.f + 1.5f * dmg);
+              p.drag = 1.5f + 0.8f * dmg;
+              // Healthy: bright flame. Damaged: soot/smoke mixed in, core dims toward grey.
+              if (dmg < 0.05f) {
+                p.from = pal::FLAME_CORE;
+                p.to = with_alpha(pal::FLAME_EDGE, 0);
+              } else {
+                p.from = mix(pal::FLAME_CORE, pal::SMOKE, 0.25f + 0.65f * dmg);
+                p.to = with_alpha(mix(pal::FLAME_EDGE, pal::SMOKE, 0.4f + 0.5f * dmg), 0);
+              }
+              const float spread = 35.f + 40.f * dmg;
+              Vec2 v = m.vel + down * (140.f + 160.f * lvl * g.rng.next()) + side * g.rng.range(-spread, spread);
+              emit(g, nozzle + down * g.rng.range(0.f, 6.f), v, p);
+            }
           }
         }
       });
@@ -132,19 +151,54 @@ void forces_system(Game& g) {
     const ShipBodies& sb = body.b;
     const b2Rot q = b2Body_GetRotation(sb.hull);
 
+    // Clear effective outputs every step so landed/crashed ships go silent in exhaust and audio.
+    for (int i = 0; i < Thrusters::MAX; ++i) th.output[i] = 0.f;
+
     if (f.state != FlightState::Crashed) {
       // Power scales with fuel but floors at FUEL_LIMP so the ship can always limp home
       float power = f.fuel >= tune::FUEL_LIMP ? 1.f
                     : (0.35f + 0.65f * (f.fuel / tune::FUEL_LIMP));
       power *= 1.f - 0.45f * f.hurt;  // soft damage trims thrust; still flies
-      for (int i = 0; i < thruster_count(d); ++i) {
+      const int n_eng = std::min(thruster_count(d), Thrusters::MAX);
+      for (int i = 0; i < n_eng; ++i) {
         const ThrusterPose tp = thruster_pose(d, i);
+        const float dmg = clampf(th.damage[i], 0.f, 1.f);
         float level = th.level[tp.channel];
-        if (level <= 0.f) continue;
+        if (level <= 0.f || dmg >= tune::ENGINE_DEAD) continue;
         // Mild sputter when limping or hurt (fun feedback, not a hard fail)
         if ((f.fuel < tune::FUEL_LIMP || f.hurt > 0.2f) && (tp.channel & 1))
           level *= 0.75f + 0.25f * std::sin(g.time * 17.f + float(i));
-        const float force = d.mass * g.dbg_mass_mul * d.max_thrust * g.dbg_thrust_mul / PPM * level * tp.power * power;
+
+        // Per-engine health: damaged nozzles lose most of their force before going dead.
+        float health = 1.f - 0.9f * dmg;
+
+        // Always-on random flutter so thrust is never perfectly steady.
+        // Multi-frequency sines + a small rng kick keep it irregular without pure noise jitter.
+        {
+          const float fi = float(i);
+          const float wave =
+              0.50f * std::sin(g.time * 19.3f + fi * 4.7f) +
+              0.30f * std::sin(g.time * 31.1f + fi * 2.3f) +
+              0.20f * std::sin(g.time * 7.9f + fi * 9.1f);
+          health *= 1.f + tune::ENGINE_FLUTTER * wave + tune::ENGINE_FLUTTER * (g.rng.next() - 0.5f);
+        }
+
+        // Above ENGINE_SPUTTER the nozzle coughs: deep irregular cuts + random misfires.
+        if (dmg >= tune::ENGINE_SPUTTER) {
+          const float t_sp = (dmg - tune::ENGINE_SPUTTER) / (1.f - tune::ENGINE_SPUTTER);
+          const float depth = 0.35f + 0.55f * t_sp;
+          float wave = 0.5f + 0.5f * std::sin(g.time * (12.f + 18.f * dmg) + float(i) * 2.1f);
+          wave = wave * 0.55f + g.rng.next() * 0.45f;  // less mechanical than pure sine
+          if (g.rng.next() < 0.03f + 0.22f * t_sp)
+            wave *= g.rng.range(0.0f, 0.3f);  // hard misfire
+          health *= (1.f - depth) + depth * wave;
+        }
+
+        health = std::max(0.f, health);
+        const float out = level * tp.power * power * health;
+        th.output[i] = out;
+        if (out < 0.01f) continue;
+        const float force = d.mass * g.dbg_mass_mul * d.max_thrust * g.dbg_thrust_mul / PPM * out;
         const b2Vec2 at = b2Body_GetWorldPoint(sb.hull, to_b2(tp.pos));
         b2Body_ApplyForce(sb.hull, b2MulSV(force, b2RotateVector(q, {tp.push.x, tp.push.y})), at, true);
       }
