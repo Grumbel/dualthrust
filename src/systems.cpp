@@ -5,6 +5,7 @@
 
 #include <vector>
 
+#include <algorithm>
 #include <cmath>
 
 #include <array>
@@ -655,7 +656,10 @@ void snap_camera(Game& g) {
 }
 
 void reset_fog(Game& g) {
-  g.revealed.assign(static_cast<size_t>(Cave::GW) * Cave::GH, 0);
+  const size_t ncells = static_cast<size_t>(Cave::GW) * Cave::GH;
+  g.revealed.assign(ncells, 0);
+  g.sonar_touch.assign(ncells, 0);
+  g.sonar_base.assign(ncells, 0);
   g.reveal_dirty = true;
   g.sonar = {};
   g.last_pad = -1;
@@ -788,7 +792,15 @@ void fire_sonar(Game& g) {
   if (fl.fuel > 0.f)
     fl.fuel = std::max(0.f, fl.fuel - tune::FUEL_SONAR);
   const Vec2 p = ship_transform(g).pos;
-  g.sonar = SonarPing{true, p, 0.f, 0.f, tune::SONAR_MAX_RADIUS, tune::SONAR_SPEED, 1.f};
+  const size_t ncells = static_cast<size_t>(Cave::GW) * Cave::GH;
+  if (g.sonar_touch.size() != ncells) {
+    g.sonar_touch.assign(ncells, 0);
+    g.sonar_base.assign(ncells, 0);
+  } else {
+    std::fill(g.sonar_touch.begin(), g.sonar_touch.end(), 0);
+    std::fill(g.sonar_base.begin(), g.sonar_base.end(), 0);
+  }
+  g.sonar = SonarPing{true, false, p, 0.f, 0.f, tune::SONAR_MAX_RADIUS, tune::SONAR_SPEED, 1.f};
   g.sonar_cool = tune::SONAR_COOLDOWN;
   g.events.push_back({SimEventKind::SonarPing, p, {}, 200.f});
 }
@@ -859,19 +871,71 @@ void discover_pads(Game& g) {
 void update_sonar(Game& g, float dt) {
   if (!g.sonar.active) return;
   SonarPing& s = g.sonar;
-  s.prev_radius = s.radius;
-  // Keep expanding at full speed; opacity falls off past max_radius (no hard stop)
-  s.radius += s.speed * dt;
-  const float fade_start = s.max_radius * 0.9f;
-  const float fade_end = s.max_radius * 1.4f;
-  if (s.radius <= fade_start)
-    s.fade = 1.f;
-  else if (s.radius >= fade_end) {
-    s.active = false;
+
+  // --- Fade-out period: ring held at max range; opacity and minimap uncover dim ---
+  if (s.fading) {
+    const float fade_t = std::max(0.05f, tune::SONAR_FADE_TIME);
+    s.fade = std::max(0.f, s.fade - dt / fade_t);
+    // Dim this ping's temporary uncover toward a permanent residual (keeps exploration).
+    if (!g.sonar_touch.empty() && g.sonar_touch.size() == g.revealed.size()) {
+      bool dirty = false;
+      for (size_t i = 0; i < g.sonar_touch.size(); ++i) {
+        const uint8_t peak = g.sonar_touch[i];
+        if (peak == 0) continue;
+        const uint8_t base = g.sonar_base[i];
+        // Residual floor: keep a readable chart after the bright sweep dies
+        uint8_t residual = base;
+        if (peak >= 200)
+          residual = std::max(residual, static_cast<uint8_t>(160));
+        else if (peak >= 80)
+          residual = std::max(residual, static_cast<uint8_t>(90));
+        else
+          residual = std::max(residual, static_cast<uint8_t>(40));
+        const float f = s.fade;
+        const uint8_t next =
+            static_cast<uint8_t>(std::lround(residual + (static_cast<float>(peak) - residual) * f));
+        if (next != g.revealed[i]) {
+          g.revealed[i] = next;
+          dirty = true;
+        }
+      }
+      if (dirty) g.reveal_dirty = true;
+    }
+    if (s.fade <= 0.02f) {
+      // Settle to residual and end the ping
+      if (!g.sonar_touch.empty() && g.sonar_touch.size() == g.revealed.size()) {
+        for (size_t i = 0; i < g.sonar_touch.size(); ++i) {
+          const uint8_t peak = g.sonar_touch[i];
+          if (peak == 0) continue;
+          const uint8_t base = g.sonar_base[i];
+          uint8_t residual = base;
+          if (peak >= 200)
+            residual = std::max(residual, static_cast<uint8_t>(160));
+          else if (peak >= 80)
+            residual = std::max(residual, static_cast<uint8_t>(90));
+          else
+            residual = std::max(residual, static_cast<uint8_t>(40));
+          g.revealed[i] = residual;
+        }
+        g.reveal_dirty = true;
+        std::fill(g.sonar_touch.begin(), g.sonar_touch.end(), 0);
+      }
+      s.active = false;
+      s.fading = false;
+      s.fade = 0.f;
+    }
     return;
-  } else
-    s.fade = 1.f - (s.radius - fade_start) / (fade_end - fade_start);
-  // Paint only while the wavefront is still in the useful range
+  }
+
+  // --- Active expand period: grow the wavefront and paint ---
+  s.prev_radius = s.radius;
+  s.radius += s.speed * dt;
+  s.fade = 1.f;
+  if (s.radius >= s.max_radius) {
+    s.radius = s.max_radius;
+    s.fading = true;
+    // fall through to paint the final annulus slice, then next ticks fade
+  }
   if (s.prev_radius >= s.max_radius) return;
   const float r0 = s.prev_radius, r1 = std::min(s.radius, s.max_radius);
   // Bounding box of the annulus in cell coordinates
@@ -893,6 +957,10 @@ void update_sonar(Game& g, float dt) {
   auto mark = [&](int gx, int gy, uint8_t str, bool residue = false) {
     if (!Cave::in_grid(gx, gy) || str == 0) return;
     const size_t i = static_cast<size_t>(gy * Cave::GW + gx);
+    if (i >= g.revealed.size()) return;
+    if (g.sonar_touch.size() == g.revealed.size() && g.sonar_touch[i] == 0) {
+      g.sonar_base[i] = g.revealed[i];
+    }
     const uint8_t old = g.revealed[i];
     // Echo memory: a second pass brightens an existing fade-band cell toward full
     uint8_t next = str;
@@ -905,6 +973,8 @@ void update_sonar(Game& g, float dt) {
       g.revealed[i] = next;
       painted = true;
     }
+    if (g.sonar_touch.size() == g.revealed.size())
+      g.sonar_touch[i] = std::max(g.sonar_touch[i], next);
     if (residue && g.cave.is_solid_cell(gx, gy) && next >= 80) {
       if (g.residues.size() < 120)
         g.residues.push_back({Vec2{(gx + 0.5f) * Cave::CELL, (gy + 0.5f) * Cave::CELL}, tune::RESIDUE_TTL});

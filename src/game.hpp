@@ -95,14 +95,18 @@ struct SimEvent {
 };
 
 // Expanding sonar ring: paints solid cells (and cargo) it sweeps into the fog-of-war map.
+// Two periods: active expand (radius 0→max, fade=1, paints) then fade-out (radius held,
+// fade 1→0 over SONAR_FADE_TIME). During fade-out the ring, ground-contact arcs, and the
+// temporary minimap uncover all lose intensity.
 struct SonarPing {
   bool active = false;
+  bool fading = false;       // true once the wavefront has reached max_radius
   Vec2 origin;
   float radius = 0.f;
   float prev_radius = 0.f;
   float max_radius = 900.f;  // world px — painting stops here
   float speed = 720.f;       // world px per sim second
-  float fade = 1.f;          // 1..0 visual life after the wave reaches max_radius
+  float fade = 1.f;          // 1 during expand; 1→0 during fade-out
 };
 
 struct Game {
@@ -133,6 +137,11 @@ struct Game {
   // Fog of war: one byte per cave cell, 0 = unknown, 1..255 = reveal strength (sonar distance fade).
   // Size GW*GH after the first cave generate; reset when the cave regenerates.
   std::vector<uint8_t> revealed;
+  // Per-ping paint bookkeeping so fade-out can dim the temporary uncover toward a residual.
+  // sonar_touch = peak strength written this ping (0 = not touched); sonar_base = revealed
+  // value before this ping's first touch (so older exploration is not wiped).
+  std::vector<uint8_t> sonar_touch;
+  std::vector<uint8_t> sonar_base;
   bool reveal_dirty = true;  // minimap texture needs a rebuild
   SonarPing sonar;
 

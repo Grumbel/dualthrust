@@ -49,6 +49,7 @@ inline float FUEL_LIMP = 0.22f;       // below this, thrust power floors here (s
 inline float SONAR_COOLDOWN = 0.9f;   // seconds between pings
 inline float SONAR_MAX_RADIUS = 900.f; // world px — painting stops here
 inline float SONAR_SPEED = 720.f;      // world px per sim second
+inline float SONAR_FADE_TIME = 0.9f;   // seconds of fade-out after the wave reaches max range
 
 // Score (session): exploration-friendly rewards, not win conditions
 inline constexpr int SCORE_PAD_LANDING = 100;

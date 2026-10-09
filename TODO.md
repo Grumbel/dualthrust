@@ -39,6 +39,9 @@
 - Map is 4:3 (7680×5760). Unexplored minimap cells are radio static, not flat black.
 - Fog of war + sonar: minimap starts black; C / left-stick-click pings a ring that paints solid rock
   and cargo it sweeps. Select/Z holds the full revealed chart. Ship switch teleports to the nearest pad.
+- Sonar periods: active expand (radius 0→max, full opacity, paints) then fade-out (SONAR_FADE_TIME):
+  gameplay ring opacity falls, rock-contact arcs die faster, minimap uncover dims toward residual,
+  minimap ring fades with it.
 
 - Controls rebinding: Options → Controls lists every play action; Enter/A starts listening for a key or
   button/axis. Tab/Y toggles keyboard vs gamepad view. Binds save as `bind.K.*` / `bind.P.*` lines.

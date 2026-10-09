@@ -1266,22 +1266,42 @@ void Gfx::draw_sonar(const Game& g) const {
   const Vec2 o = g.sonar.origin;
   const float r = g.sonar.radius;
   if (r < 1.f) return;
-  // Ring keeps expanding; fade softens it past max range
+  // Expand: full opacity. Fade-out: whole ring loses opacity; arcs that sit on rock die faster.
   const float fade = clampf(g.sonar.fade, 0.f, 1.f);
   if (fade < 0.02f) return;
   const int segments = std::clamp(static_cast<int>(r / 8.f), 24, 96);
-  const Rgba col = with_alpha(pal::CARGO, static_cast<uint8_t>(40 + 180 * fade));
-  const Rgba dim = with_alpha(pal::CARGO, static_cast<uint8_t>(20 + 90 * fade));
+  auto seg_alpha = [&](float wx, float wy, float base_a) -> uint8_t {
+    // Sample a few points along the outward normal so thin contact still registers
+    bool rock = g.cave.is_solid_world(wx, wy);
+    if (!rock) {
+      const float nx = (wx - o.x) / std::max(r, 1.f), ny = (wy - o.y) / std::max(r, 1.f);
+      rock = g.cave.is_solid_world(wx + nx * 4.f, wy + ny * 4.f) ||
+             g.cave.is_solid_world(wx - nx * 3.f, wy - ny * 3.f);
+    }
+    float a = base_a * fade;
+    if (rock) {
+      // Ground-contact arcs vanish quickly once fade-out begins (and stay soft even at full expand)
+      const float contact = g.sonar.fading ? (fade * fade * fade) : 0.35f;
+      a *= contact;
+    }
+    return static_cast<uint8_t>(clampf(a, 0.f, 255.f));
+  };
   SDL_Point prev{sx(g.cam, o.x + r), sy(o.y)};
   for (int i = 1; i <= segments; ++i) {
     const float a = (static_cast<float>(i) / segments) * 6.2831853f;
-    const SDL_Point cur{sx(g.cam, o.x + r * std::cos(a)), sy(o.y + r * std::sin(a))};
-    line(prev.x, prev.y, cur.x, cur.y, col);
+    const float wx = o.x + r * std::cos(a), wy = o.y + r * std::sin(a);
+    const SDL_Point cur{sx(g.cam, wx), sy(wy)};
+    const uint8_t aa = seg_alpha(wx, wy, 220.f);
+    if (aa > 8)
+      line(prev.x, prev.y, cur.x, cur.y, with_alpha(pal::CARGO, aa));
     if (r > 10.f) {
       const float r2 = r - 5.f;
       const float a0 = a - 6.2831853f / segments;
-      line(sx(g.cam, o.x + r2 * std::cos(a0)), sy(o.y + r2 * std::sin(a0)),
-           sx(g.cam, o.x + r2 * std::cos(a)), sy(o.y + r2 * std::sin(a)), dim);
+      const float wx0 = o.x + r2 * std::cos(a0), wy0 = o.y + r2 * std::sin(a0);
+      const float wx1 = o.x + r2 * std::cos(a), wy1 = o.y + r2 * std::sin(a);
+      const uint8_t ad = seg_alpha(0.5f * (wx0 + wx1), 0.5f * (wy0 + wy1), 110.f);
+      if (ad > 6)
+        line(sx(g.cam, wx0), sy(wy0), sx(g.cam, wx1), sy(wy1), with_alpha(pal::CARGO, ad));
     }
     prev = cur;
   }
