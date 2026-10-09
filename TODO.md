@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-037.1-explore-open-only-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-037.1-explore-open-only-9a093cd` → tip `ee0f82d`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
