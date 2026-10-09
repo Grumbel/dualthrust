@@ -37,11 +37,12 @@
   fuel limps instead of cutting out; map exploration awards small score.
 
 - Map is 4:3 (7680×5760). Unexplored minimap cells are radio static, not flat black.
-- Fog of war + sonar: minimap starts black; C / left-stick-click pings a ring that paints solid rock
-  and cargo it sweeps. Select/Z holds the full revealed chart. Ship switch teleports to the nearest pad.
-- Sonar periods: active expand (radius 0→max, full opacity, paints) then fade-out (SONAR_FADE_TIME):
-  gameplay ring opacity falls, rock-contact arcs die faster, minimap uncover dims toward residual,
-  minimap ring fades with it.
+- Fog of war: passive circular uncover around the ship (EXPLORE_RADIUS, LOS-limited). Minimap starts
+  as radio static; flying opens the chart. Select/Z holds the full revealed map. Ship switch teleports
+  to the nearest active pad.
+- Sonar (C / left-stick-click): search pulse for pads, cargo and deep-cave signals — not map paint.
+  Expanding ring; when the wavefront hits a target a bright arc reflects on that bearing and a pulse
+  returns toward the ship. Pads go online on ping; a small chart blob marks the hit.
 
 - Controls rebinding: Options → Controls lists every play action; Enter/A starts listening for a key or
   button/axis. Tab/Y toggles keyboard vs gamepad view. Binds save as `bind.K.*` / `bind.P.*` lines.

@@ -29,6 +29,7 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 - Y or G: new cave
 - F: fullscreen
 - F3 or Options → Debug: live-tweak gravity, thrust/mass multipliers, fuel, sonar range, legs, rope, crash limits
+- Explore: passive radius around the ship paints the minimap; sonar is a search pulse that reflects off pads/cargo/signals
 
 ## World
 

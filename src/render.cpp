@@ -948,27 +948,50 @@ void Gfx::draw_minimap(Game& g, double t) {
   be_->copy_part(minimap_, SDL_Rect{ix, iy, MM_W, MM_H}, SDL_Rect{x, y, mm_w, mm_h}, {255, 255, 255, 255});
   outline(x - pad, y - pad, mm_w + 2 * pad, mm_h + 2 * pad, with_alpha(pal::MID, 140));
 
-  // Sonar ring on the chart (same window mapping as the dots)
-  if (g.sonar.active && g.sonar.radius > 1.f) {
+  // Sonar ring + reflection arcs on the chart
+  if (g.sonar.active) {
     const float fade = clampf(g.sonar.fade, 0.f, 1.f);
-    if (fade > 0.05f) {
-      const float sx_k = static_cast<float>(mm_w) / static_cast<float>(MM_W);
-      const float sy_k = static_cast<float>(mm_h) / static_cast<float>(MM_H);
-      const float ox_w = g.sonar.origin.x * MM_K - ix;
-      const float oy_w = g.sonar.origin.y * MM_K - iy;
+    const float sx_k = static_cast<float>(mm_w) / static_cast<float>(MM_W);
+    const float sy_k = static_cast<float>(mm_h) / static_cast<float>(MM_H);
+    const float ox_w = g.sonar.origin.x * MM_K - ix;
+    const float oy_w = g.sonar.origin.y * MM_K - iy;
+    auto mm_pt = [&](float ang, float rr) {
+      return std::pair<int, int>{
+          x + static_cast<int>((ox_w + rr * std::cos(ang)) * sx_k),
+          y + static_cast<int>((oy_w + rr * std::sin(ang)) * sy_k)};
+    };
+    auto on_panel = [&](int px, int py) {
+      return px >= x && py >= y && px < x + mm_w && py < y + mm_h;
+    };
+    if (g.sonar.radius > 1.f && fade > 0.05f) {
       const float rr = g.sonar.radius * MM_K;
-      const Rgba rc = with_alpha(pal::CARGO, static_cast<uint8_t>(60 + 160 * fade));
+      const Rgba rc = with_alpha(pal::CARGO, static_cast<uint8_t>(40 + 100 * fade));
       const int segs = 48;
-      int px0 = x + static_cast<int>((ox_w + rr) * sx_k);
-      int py0 = y + static_cast<int>(oy_w * sy_k);
+      auto [px0, py0] = mm_pt(0.f, rr);
       for (int i = 1; i <= segs; ++i) {
         const float a = (static_cast<float>(i) / segs) * 6.2831853f;
-        const int px1 = x + static_cast<int>((ox_w + rr * std::cos(a)) * sx_k);
-        const int py1 = y + static_cast<int>((oy_w + rr * std::sin(a)) * sy_k);
-        // clip roughly to panel
-        if (px0 >= x && py0 >= y && px0 < x + mm_w && py0 < y + mm_h &&
-            px1 >= x && py1 >= y && px1 < x + mm_w && py1 < y + mm_h)
-          line(px0, py0, px1, py1, rc);
+        auto [px1, py1] = mm_pt(a, rr);
+        if (on_panel(px0, py0) && on_panel(px1, py1)) line(px0, py0, px1, py1, rc);
+        px0 = px1;
+        py0 = py1;
+      }
+    }
+    // Reflection segments (bright arcs at hit bearings)
+    for (const SonarReflection& e : g.sonar.echoes) {
+      if (e.age > e.life) continue;
+      const float life_u = 1.f - e.age / e.life;
+      Rgba base = pal::CARGO;
+      if (e.kind == SonarReflection::Kind::Pad) base = pal::WARN;
+      else if (e.kind == SonarReflection::Kind::Signal) base = pal::BRIGHT;
+      const float arc = 0.28f;
+      const float rr = e.hit_r * MM_K;
+      const int segs = 6;
+      auto [px0, py0] = mm_pt(e.angle - arc, rr);
+      for (int i = 1; i <= segs; ++i) {
+        const float a = e.angle - arc + (2.f * arc) * (static_cast<float>(i) / segs);
+        auto [px1, py1] = mm_pt(a, rr);
+        if (on_panel(px0, py0) && on_panel(px1, py1))
+          line(px0, py0, px1, py1, with_alpha(base, static_cast<uint8_t>(80 + 160 * life_u)));
         px0 = px1;
         py0 = py1;
       }
@@ -1265,45 +1288,83 @@ void Gfx::draw_sonar(const Game& g) const {
   if (!g.sonar.active) return;
   const Vec2 o = g.sonar.origin;
   const float r = g.sonar.radius;
-  if (r < 1.f) return;
-  // Expand: full opacity. Fade-out: whole ring loses opacity; arcs that sit on rock die faster.
   const float fade = clampf(g.sonar.fade, 0.f, 1.f);
-  if (fade < 0.02f) return;
-  const int segments = std::clamp(static_cast<int>(r / 8.f), 24, 96);
-  auto seg_alpha = [&](float wx, float wy, float base_a) -> uint8_t {
-    // Sample a few points along the outward normal so thin contact still registers
-    bool rock = g.cave.is_solid_world(wx, wy);
-    if (!rock) {
-      const float nx = (wx - o.x) / std::max(r, 1.f), ny = (wy - o.y) / std::max(r, 1.f);
-      rock = g.cave.is_solid_world(wx + nx * 4.f, wy + ny * 4.f) ||
-             g.cave.is_solid_world(wx - nx * 3.f, wy - ny * 3.f);
+  if (fade < 0.02f && g.sonar.echoes.empty()) return;
+
+  auto W = [&](float wx, float wy) { return SDL_Point{sx(g.cam, wx), sy(wy)}; };
+
+  // Main expanding ring (dim search wave)
+  if (r > 1.f && fade > 0.02f) {
+    const int segments = std::clamp(static_cast<int>(r / 8.f), 24, 96);
+    auto seg_alpha = [&](float wx, float wy, float base_a) -> uint8_t {
+      bool rock = g.cave.is_solid_world(wx, wy);
+      if (!rock) {
+        const float nx = (wx - o.x) / std::max(r, 1.f), ny = (wy - o.y) / std::max(r, 1.f);
+        rock = g.cave.is_solid_world(wx + nx * 4.f, wy + ny * 4.f) ||
+               g.cave.is_solid_world(wx - nx * 3.f, wy - ny * 3.f);
+      }
+      float a = base_a * fade;
+      if (rock) {
+        const float contact = g.sonar.fading ? (fade * fade * fade) : 0.35f;
+        a *= contact;
+      }
+      return static_cast<uint8_t>(clampf(a, 0.f, 255.f));
+    };
+    SDL_Point prev = W(o.x + r, o.y);
+    for (int i = 1; i <= segments; ++i) {
+      const float a = (static_cast<float>(i) / segments) * 6.2831853f;
+      const float wx = o.x + r * std::cos(a), wy = o.y + r * std::sin(a);
+      const SDL_Point cur = W(wx, wy);
+      const uint8_t aa = seg_alpha(wx, wy, 160.f);
+      if (aa > 8) line(prev.x, prev.y, cur.x, cur.y, with_alpha(pal::CARGO, aa));
+      prev = cur;
     }
-    float a = base_a * fade;
-    if (rock) {
-      // Ground-contact arcs vanish quickly once fade-out begins (and stay soft even at full expand)
-      const float contact = g.sonar.fading ? (fade * fade * fade) : 0.35f;
-      a *= contact;
+  }
+
+  // Reflections: bright arc on the circle at the hit bearing, then a pulse returning inward
+  constexpr float ARC = 0.28f;  // half-width of the reflected segment (radians)
+  for (const SonarReflection& e : g.sonar.echoes) {
+    if (e.age > e.life) continue;
+    const float life_u = 1.f - e.age / e.life;
+    const float ring_bright = life_u * (g.sonar.fading ? fade : 1.f);
+    Rgba base = pal::CARGO;
+    if (e.kind == SonarReflection::Kind::Pad) base = pal::WARN;
+    else if (e.kind == SonarReflection::Kind::Signal) base = pal::BRIGHT;
+
+    // Arc still on the expanding wave while the front is near the hit
+    if (r > 1.f && std::abs(r - e.hit_r) < 40.f && ring_bright > 0.05f) {
+      const int segs = 10;
+      const float a0 = e.angle - ARC;
+      SDL_Point prev = W(o.x + r * std::cos(a0), o.y + r * std::sin(a0));
+      for (int i = 1; i <= segs; ++i) {
+        const float a = a0 + (2.f * ARC) * (static_cast<float>(i) / segs);
+        const SDL_Point cur = W(o.x + r * std::cos(a), o.y + r * std::sin(a));
+        line(prev.x, prev.y, cur.x, cur.y,
+             with_alpha(base, static_cast<uint8_t>(80 + 175 * ring_bright)));
+        prev = cur;
+      }
     }
-    return static_cast<uint8_t>(clampf(a, 0.f, 255.f));
-  };
-  SDL_Point prev{sx(g.cam, o.x + r), sy(o.y)};
-  for (int i = 1; i <= segments; ++i) {
-    const float a = (static_cast<float>(i) / segments) * 6.2831853f;
-    const float wx = o.x + r * std::cos(a), wy = o.y + r * std::sin(a);
-    const SDL_Point cur{sx(g.cam, wx), sy(wy)};
-    const uint8_t aa = seg_alpha(wx, wy, 220.f);
-    if (aa > 8)
-      line(prev.x, prev.y, cur.x, cur.y, with_alpha(pal::CARGO, aa));
-    if (r > 10.f) {
-      const float r2 = r - 5.f;
-      const float a0 = a - 6.2831853f / segments;
-      const float wx0 = o.x + r2 * std::cos(a0), wy0 = o.y + r2 * std::sin(a0);
-      const float wx1 = o.x + r2 * std::cos(a), wy1 = o.y + r2 * std::sin(a);
-      const uint8_t ad = seg_alpha(0.5f * (wx0 + wx1), 0.5f * (wy0 + wy1), 110.f);
-      if (ad > 6)
-        line(sx(g.cam, wx0), sy(wy0), sx(g.cam, wx1), sy(wy1), with_alpha(pal::CARGO, ad));
+
+    // Returning pulse: segment travels from hit_r back toward the origin
+    const float ret_r = e.hit_r - e.age * g.sonar.speed * 0.85f;
+    if (ret_r > 8.f && life_u > 0.05f) {
+      const int segs = 8;
+      const float a0 = e.angle - ARC * 0.7f;
+      SDL_Point prev = W(o.x + ret_r * std::cos(a0), o.y + ret_r * std::sin(a0));
+      for (int i = 1; i <= segs; ++i) {
+        const float a = a0 + (1.4f * ARC) * (static_cast<float>(i) / segs);
+        const SDL_Point cur = W(o.x + ret_r * std::cos(a), o.y + ret_r * std::sin(a));
+        line(prev.x, prev.y, cur.x, cur.y,
+             with_alpha(base, static_cast<uint8_t>(60 + 160 * life_u)));
+        prev = cur;
+      }
+      // Spoke from origin toward the hit for a radar-return feel
+      const float spoke_r = std::max(ret_r, 12.f);
+      line(W(o.x, o.y).x, W(o.x, o.y).y,
+           W(o.x + spoke_r * std::cos(e.angle), o.y + spoke_r * std::sin(e.angle)).x,
+           W(o.x + spoke_r * std::cos(e.angle), o.y + spoke_r * std::sin(e.angle)).y,
+           with_alpha(base, static_cast<uint8_t>(30 + 90 * life_u)));
     }
-    prev = cur;
   }
 }
 

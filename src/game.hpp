@@ -94,19 +94,32 @@ struct SimEvent {
   float strength;
 };
 
-// Expanding sonar ring: paints solid cells (and cargo) it sweeps into the fog-of-war map.
-// Two periods: active expand (radius 0→max, fade=1, paints) then fade-out (radius held,
-// fade 1→0 over SONAR_FADE_TIME). During fade-out the ring, ground-contact arcs, and the
-// temporary minimap uncover all lose intensity.
+// Sonar ping: a search pulse for pads, cargo and deep-cave signals — not map uncover.
+// The wavefront expands; when it sweeps a target, a reflection segment is spawned (bright
+// arc on the circle, then a pulse returning toward the origin). Fog of war is filled by
+// passive proximity around the ship instead.
+struct SonarReflection {
+  float angle = 0.f;   // direction from origin to the hit (radians)
+  float hit_r = 0.f;   // distance of the target
+  float age = 0.f;     // seconds since registration
+  float life = 1.4f;   // total visual lifetime
+  enum class Kind : uint8_t { Pad = 0, Cargo = 1, Signal = 2 } kind = Kind::Pad;
+};
+
 struct SonarPing {
   bool active = false;
   bool fading = false;       // true once the wavefront has reached max_radius
   Vec2 origin;
   float radius = 0.f;
   float prev_radius = 0.f;
-  float max_radius = 900.f;  // world px — painting stops here
-  float speed = 720.f;       // world px per sim second
+  float max_radius = 900.f;
+  float speed = 720.f;
   float fade = 1.f;          // 1 during expand; 1→0 during fade-out
+  std::vector<SonarReflection> echoes;
+  // Avoid double-echoing the same target in one ping
+  std::vector<uint8_t> pad_hit;     // size = pads, 1 if already reflected
+  std::vector<Entity> cargo_hit;
+  std::vector<uint8_t> signal_hit;
 };
 
 struct Game {
@@ -134,14 +147,10 @@ struct Game {
   float dbg_mass_mul = 1.f;
   float dbg_thrust_mul = 1.f;
 
-  // Fog of war: one byte per cave cell, 0 = unknown, 1..255 = reveal strength (sonar distance fade).
+  // Fog of war: one byte per cave cell, 0 = unknown, 1..255 = reveal strength.
+  // Filled by passive proximity around the ship (and a small blob when sonar tags a target).
   // Size GW*GH after the first cave generate; reset when the cave regenerates.
   std::vector<uint8_t> revealed;
-  // Per-ping paint bookkeeping so fade-out can dim the temporary uncover toward a residual.
-  // sonar_touch = peak strength written this ping (0 = not touched); sonar_base = revealed
-  // value before this ping's first touch (so older exploration is not wiped).
-  std::vector<uint8_t> sonar_touch;
-  std::vector<uint8_t> sonar_base;
   bool reveal_dirty = true;  // minimap texture needs a rebuild
   SonarPing sonar;
 

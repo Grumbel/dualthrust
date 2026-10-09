@@ -50,6 +50,8 @@ inline float SONAR_COOLDOWN = 0.9f;   // seconds between pings
 inline float SONAR_MAX_RADIUS = 900.f; // world px — painting stops here
 inline float SONAR_SPEED = 720.f;      // world px per sim second
 inline float SONAR_FADE_TIME = 0.9f;   // seconds of fade-out after the wave reaches max range
+inline float EXPLORE_RADIUS = 260.f;   // passive minimap uncover around the ship (world px)
+inline float EXPLORE_FADE = 0.75f;     // full strength out to this fraction of EXPLORE_RADIUS
 
 // Score (session): exploration-friendly rewards, not win conditions
 inline constexpr int SCORE_PAD_LANDING = 100;

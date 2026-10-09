@@ -44,7 +44,7 @@ the cable itself.
 on pads), hard hits, crashes, caves visited, crates picked up and delivered. They are kept forever in
 `$XDG_STATE_HOME/dualthrust/stats` (default `~/.local/state/dualthrust/stats`).
 
-The cave is a bounded 7680 × 5760 px (4:3) map with rock on all sides. The minimap at the bottom is a zoomed-in chart
+The cave is a bounded 7680 × 5760 px (4:3) map with rock on all sides. The minimap starts as radio static and uncovers as you fly (a circular region around the ship). It is a zoomed-in chart
 of the stretch around you (one pixel per 16 world px; unexplored cells are green radio static) that scrolls with the
 ship and stops at the map edges. It shows revealed landing pads (yellow), crates (cyan), your ship (blinking) and a
 box for what the main view shows.
@@ -92,7 +92,7 @@ stripes, each with hydraulic landing struts and a winch under the belly.
 | **Y** or **G** | New cave |
 | **Tab**, mouse wheel, or D-pad up/down | Zoom: Near / Medium / Far |
 | **S** | Next ship (lands on the nearest pad) |
-| **C** / left-stick click | Sonar ping (reveals map) |
+| **C** / left-stick click | Sonar search pulse (reflections off pads, cargo, signals) |
 | **Z** / **Select** | Hold: full revealed map |
 | **X** | Swap left/right engines |
 | **F** or **Alt+Enter** | Fullscreen |

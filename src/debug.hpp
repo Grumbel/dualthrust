@@ -44,6 +44,8 @@ struct DebugDefaults {
   float sonar_max_radius = 900.f;
   float sonar_speed = 720.f;
   float sonar_fade_time = 0.9f;
+  float explore_radius = 260.f;
+  float explore_fade = 0.75f;
   float leg_hertz = 1.0f;
   float leg_damping = 0.3f;
   float leg_mass_frac = 0.06f;
@@ -65,7 +67,7 @@ inline const DebugDefaults& debug_defaults() {
 
 // Param table. Mass/Thrust mul rows use Kind so the menu can write Game fields.
 // Order is the on-screen list order.
-inline constexpr int DEBUG_PARAM_COUNT = 35;
+inline constexpr int DEBUG_PARAM_COUNT = 37;
 
 inline DebugParam* debug_params(Game& g) {
   // Static table; mass/thrust point at g fields each call via rebinding below.
@@ -85,6 +87,8 @@ inline DebugParam* debug_params(Game& g) {
       {"SONAR SPEED", &tune::SONAR_SPEED, 100.f, 2000.f, 40.f},
       {"SONAR COOL", &tune::SONAR_COOLDOWN, 0.f, 5.f, 0.1f},
       {"SONAR FADE", &tune::SONAR_FADE_TIME, 0.15f, 3.f, 0.05f},
+      {"EXPLORE R", &tune::EXPLORE_RADIUS, 80.f, 600.f, 20.f},
+      {"EXPLORE FADE", &tune::EXPLORE_FADE, 0.3f, 0.95f, 0.05f},
       {"LEG HERTZ", &tune::LEG_HERTZ, 0.2f, 4.f, 0.1f},
       {"LEG DAMP", &tune::LEG_DAMPING, 0.05f, 2.f, 0.05f},
       {"LEG MASS %", &tune::LEG_MASS_FRACTION, 0.01f, 0.2f, 0.01f},
@@ -173,6 +177,8 @@ inline void debug_reset_all(Game& g) {
   tune::SONAR_MAX_RADIUS = d.sonar_max_radius;
   tune::SONAR_SPEED = d.sonar_speed;
   tune::SONAR_FADE_TIME = d.sonar_fade_time;
+  tune::EXPLORE_RADIUS = d.explore_radius;
+  tune::EXPLORE_FADE = d.explore_fade;
   tune::LEG_HERTZ = d.leg_hertz;
   tune::LEG_DAMPING = d.leg_damping;
   tune::LEG_MASS_FRACTION = d.leg_mass_frac;
