@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-030.1-debug-in-pause-9a093cd` → tip `caf5e82`
+- Bundle line: `dualthrust-030.1-debug-in-pause-9a093cd` → tip `31582f8`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
