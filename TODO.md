@@ -14,7 +14,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-052.1-cargo-depth-minimap-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-052.1-cargo-depth-minimap-9a093cd` → tip `bd5bd1f`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
