@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-031.1-hangar-map-pause-pad-visit-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-031.1-hangar-map-pause-pad-visit-9a093cd` → tip `3a2830a`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
