@@ -290,6 +290,15 @@ inline constexpr ThrusterDef SEESAW_T[] = {
     {-40.f, 20.f, -2.7408f, 0.85f, 3}, {40.f, 20.f, 2.7408f, 0.85f, 5},      // RS up/down → brake-left / brake-right
 };
 
+// Deliberately unbalanced: fat left bell, weak canted right. Equal triggers spin you.
+// Sticks give a little recovery (LS leftward, RS weak rightward vernier).
+inline constexpr ThrusterDef LURCH_T[] = {
+    {-48.f, 30.f, 0.05f, 1.35f, 0},   // heavy left main (slight outward cant)
+    {18.f, 36.f, -0.35f, 0.45f, 1},   // small, aft-biased right main (inward cant)
+    {-56.f, 8.f, -1.40f, 0.40f, 2},   // LS up: left-side recovery thruster
+    {52.f, 10.f, 1.25f, 0.35f, 3},    // RS up: weaker right recovery
+};
+
 inline constexpr ShipDef SHIP_DEFS[] = {
     {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f, false, STYLE_FINS},
     {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false, STYLE_DOME | STYLE_STRIPES},
@@ -314,6 +323,8 @@ inline constexpr ShipDef SHIP_DEFS[] = {
     {"Vernier", 36.f, 32.f, 22.f, 28.f, 1.2f, 1400.f, 420.f, false, STYLE_FINS | STYLE_DOME, VERNIER_T, 4},
     {"Bidraft", 42.f, 36.f, 28.f, 32.f, 1.5f, 2100.f, 430.f, false, STYLE_TANKS | STYLE_FINS | STYLE_DISH, BIDRAFT_T, 6},
     {"Seesaw", 48.f, 28.f, 34.f, 24.f, 1.35f, 1800.f, 410.f, false, STYLE_DECK | STYLE_STRIPES | STYLE_DOME, SEESAW_T, 4},
+    // Asymmetric hull: wide left tank, skinny right — engines match the imbalance
+    {"Lurch", 46.f, 34.f, 48.f, 30.f, 1.55f, 2400.f, 420.f, false, STYLE_TANKS | STYLE_FINS | STYLE_STRIPES, LURCH_T, 4},
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;

@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-034.1-minimap-symbols-zoom-9a093cd` → tip `f27ed0c`
+- Bundle line: `dualthrust-035.1-lurch-unbalanced-ship-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
@@ -53,6 +53,8 @@
 - **Vernier**: mains on triggers; **LS up/down** opposing lateral thrusters.
 - **Bidraft**: mains + LS lateral + **RS up/down** nose/belly.
 - **Seesaw**: each stick is an opposing pair (no triggers required).
+- **Lurch**: deliberately unbalanced engines (fat left, weak canted right); equal triggers yaw hard.
+  Stick-up verniers for recovery. Built for differential-thrust practice.
 
 ### Hangar / pads
 - Landed on a pad → **H** / gamepad **Y** opens Hangar: cycle ships, teleport to **visited** pads.
