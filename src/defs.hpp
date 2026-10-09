@@ -76,14 +76,12 @@ inline const SonarModeDef& sonar_mode() {
 }
 
 // Score (session): exploration-friendly rewards, not win conditions
-inline constexpr int SCORE_PAD_LANDING = 100;
-inline constexpr int SCORE_CARGO = 250;
-inline constexpr int SCORE_SIGNAL = 75;         // first sonar contact with a deep-cave signal
+inline constexpr int SCORE_PAD_LANDING = 50;
+inline constexpr int SCORE_CARGO = 200;         // base; CargoDef.score overrides when set
 inline constexpr int SCORE_REVEAL_CELL = 1;     // per newly solid-revealed cell (capped per ping)
-inline constexpr int SCORE_DEST_BONUS = 150;    // delivering cargo to its preferred pad
-inline constexpr int SCORE_ECHO = 15;           // ambient life answering a ping
-inline constexpr int SCORE_MILESTONE = 50;      // exploration tier / all-signals / all-pads
-inline float SIGNAL_PROX = 220.f;     // world px: passive cue near an unfound signal
+inline constexpr int SCORE_MILESTONE = 50;      // exploration tier / all-pads
+// Signals/echoes are ambient flavour only — no score (cargo is the objective).
+inline float SIGNAL_PROX = 220.f;  // legacy debug knob; signals no longer placed
 inline float HURT_FROM_HIT = 0.12f;   // soft hull damage added on a hard bounce (global)
 inline float HURT_REPAIR = 0.35f;     // global hurt repair rate per second on an active pad
 inline float ENGINE_DAMAGE_FROM_HIT = 0.22f;  // added to the nearest engine(s) on a hull impact
@@ -138,6 +136,9 @@ enum ShipStyle : unsigned {
   STYLE_DECK = 32     // a wide flat deck across the belly (collides): big ships with outboard thrusters
 };
 
+// Grip tiers: ship.grip must be >= cargo.grip to latch. None < Magnet < Hook < Clamp.
+inline constexpr int GRIP_NONE = 0, GRIP_MAGNET = 1, GRIP_HOOK = 2, GRIP_CLAMP = 3;
+
 // One thruster of a ship with its own control channel. Ships without a list have the classic pair (see
 // thruster_pose): left and right engines on the channels 0 and 1.
 //   channel 0 = L trigger, 1 = R trigger, 2 = LS up, 3 = RS up, 4 = LS down, 5 = RS down
@@ -160,6 +161,8 @@ struct ShipDef {
   const ThrusterDef* thrusters = nullptr;  // null: the classic left/right pair
   int thruster_n = 0;
   bool winch = false;  // cargo cable + hook (only some haulers)
+  int grip = GRIP_NONE;  // gripper tier
+  float lift_cap = 0.f;  // max cargo mass this ship can raise
 
   // Signed local Y of the engine mounts (local +y = ground side when upright)
   float eng_y() const { return engines_top ? -engine_offset_y : engine_offset_y; }
@@ -366,27 +369,27 @@ inline constexpr ThrusterDef TITAN_T[] = {
 
 inline constexpr ShipDef SHIP_DEFS[] = {
     {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f, false, STYLE_FINS},
-    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false, STYLE_DOME | STYLE_STRIPES, nullptr, 0, true},
+    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false, STYLE_DOME | STYLE_STRIPES, nullptr, 0, true, GRIP_MAGNET, 0.40f},
     {"Wide", 48.f, 28.f, 36.f, 26.f, 1.25f, 1600.f, 420.f, false, STYLE_TANKS},
     {"Barge", 64.f, 26.f, 52.f, 24.f, 1.6f, 2800.f, 440.f, false, STYLE_TANKS | STYLE_STRIPES | STYLE_DISH},
     {"Long", 26.f, 42.f, 14.f, 36.f, 1.1f, 1100.f, 390.f, false, STYLE_FINS | STYLE_DISH},
     {"Topdog", 28.f, 34.f, 16.f, 30.f, 1.05f, 950.f, 410.f, true, STYLE_DOME | STYLE_FINS},
     {"Canopy", 44.f, 30.f, 30.f, 28.f, 1.35f, 1700.f, 430.f, true, STYLE_DOME | STYLE_TANKS},
     {"Dart", 18.f, 34.f, 10.f, 30.f, 0.7f, 330.f, 470.f, false, STYLE_FINS | STYLE_DOME},
-    {"Hauler", 56.f, 34.f, 44.f, 28.f, 1.9f, 3600.f, 450.f, false, STYLE_TANKS | STYLE_STRIPES},
+    {"Hauler", 56.f, 34.f, 44.f, 28.f, 1.9f, 3600.f, 450.f, false, STYLE_TANKS | STYLE_STRIPES, nullptr, 0, true, GRIP_CLAMP, 2.00f},
     {"Spire", 20.f, 50.f, 12.f, 44.f, 1.0f, 1300.f, 400.f, false, STYLE_FINS | STYLE_DISH},
     {"Crab", 52.f, 24.f, 40.f, 22.f, 1.4f, 2000.f, 430.f, true, STYLE_TANKS | STYLE_DOME},
     {"Gnat", 14.f, 22.f, 8.f, 20.f, 0.5f, 170.f, 400.f, false, STYLE_DOME},
-    {"Orca", 40.f, 44.f, 26.f, 38.f, 2.0f, 3300.f, 460.f, false, STYLE_TANKS | STYLE_DISH | STYLE_STRIPES},
+    {"Orca", 40.f, 44.f, 26.f, 38.f, 2.0f, 3300.f, 460.f, false, STYLE_TANKS | STYLE_DISH | STYLE_STRIPES, nullptr, 0, true, GRIP_CLAMP, 1.80f},
     {"Moth", 60.f, 22.f, 48.f, 20.f, 0.9f, 1500.f, 380.f, false, STYLE_FINS | STYLE_DOME | STYLE_STRIPES},
-    {"Frigate", 80.f, 38.f, 62.f, 34.f, 3.0f, 9500.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, FRIGATE_T, 4, true},
-    {"Atlas", 70.f, 46.f, 56.f, 40.f, 3.6f, 12500.f, 410.f, false, STYLE_DECK | STYLE_TANKS | STYLE_DOME, ATLAS_T, 4, true},
-    {"Dragonfly", 66.f, 30.f, 50.f, 24.f, 2.4f, 6000.f, 430.f, false, STYLE_DECK | STYLE_FINS | STYLE_DOME, DRAGONFLY_T, 4, true},
-    {"Colossus", 100.f, 52.f, 90.f, 44.f, 5.0f, 22000.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, COLOSSUS_T, 4, true},
+    {"Frigate", 80.f, 38.f, 62.f, 34.f, 3.0f, 9500.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, FRIGATE_T, 4, true, GRIP_CLAMP, 1.60f},
+    {"Atlas", 70.f, 46.f, 56.f, 40.f, 3.6f, 12500.f, 410.f, false, STYLE_DECK | STYLE_TANKS | STYLE_DOME, ATLAS_T, 4, true, GRIP_CLAMP, 1.90f},
+    {"Dragonfly", 66.f, 30.f, 50.f, 24.f, 2.4f, 6000.f, 430.f, false, STYLE_DECK | STYLE_FINS | STYLE_DOME, DRAGONFLY_T, 4, true, GRIP_HOOK, 0.80f},
+    {"Colossus", 100.f, 52.f, 90.f, 44.f, 5.0f, 22000.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, COLOSSUS_T, 4, true, GRIP_CLAMP, 2.60f},
     // 1950s sci-fi needle rocket: very tall, narrow, classic tail fins + nose dish
     {"Rocket", 14.f, 96.f, 9.f, 88.f, 1.55f, 4200.f, 400.f, false, STYLE_FINS | STYLE_STRIPES | STYLE_DISH},  // no winch
-    {"Vernier", 36.f, 32.f, 22.f, 28.f, 1.2f, 1400.f, 420.f, false, STYLE_FINS | STYLE_DOME, VERNIER_T, 4, true},
-    {"Bidraft", 42.f, 36.f, 28.f, 32.f, 1.5f, 2100.f, 430.f, false, STYLE_TANKS | STYLE_FINS | STYLE_DISH, BIDRAFT_T, 6, true},
+    {"Vernier", 36.f, 32.f, 22.f, 28.f, 1.2f, 1400.f, 420.f, false, STYLE_FINS | STYLE_DOME, VERNIER_T, 4, true, GRIP_HOOK, 0.55f},
+    {"Bidraft", 42.f, 36.f, 28.f, 32.f, 1.5f, 2100.f, 430.f, false, STYLE_TANKS | STYLE_FINS | STYLE_DISH, BIDRAFT_T, 6, true, GRIP_HOOK, 0.70f},
     {"Seesaw", 48.f, 28.f, 34.f, 24.f, 1.35f, 1800.f, 410.f, false, STYLE_DECK | STYLE_STRIPES | STYLE_DOME, SEESAW_T, 4, false},
     // Asymmetric hull: wide left tank, skinny right — engines match the imbalance
     {"Lurch", 46.f, 34.f, 48.f, 30.f, 1.55f, 2400.f, 420.f, false, STYLE_TANKS | STYLE_FINS | STYLE_STRIPES, LURCH_T, 4, false},
@@ -395,7 +398,7 @@ inline constexpr ShipDef SHIP_DEFS[] = {
      STYLE_FINS | STYLE_STRIPES | STYLE_DISH | STYLE_TANKS, TITAN_T, 4, false},
     // Bottom lift on stick-up, top brake on stick-down
     {"Stack", 40.f, 40.f, 36.f, 38.f, 1.6f, 2600.f, 440.f, false,
-     STYLE_DECK | STYLE_STRIPES | STYLE_DISH | STYLE_TANKS, STACK_T, 4, true},
+     STYLE_DECK | STYLE_STRIPES | STYLE_DISH | STYLE_TANKS, STACK_T, 4, true, GRIP_HOOK, 0.95f},
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;
@@ -431,17 +434,22 @@ inline int auto_ui_scale_for_height(int display_h) {
   return DEFAULT_UI_SCALE;
 }
 
-// Cargo crates: half extents (px) and mass (the same units as the ships')
+// Cargo crates: half extents (px), mass (ship units), min grip, delivery score
 struct CargoDef {
   const char* name;
   float half_w, half_h, mass;
+  int grip = GRIP_HOOK;   // minimum gripper
+  int score = 200;        // points on return to base
 };
 inline constexpr CargoDef CARGO_DEFS[] = {
-    {"Parcel", 12.f, 12.f, 0.15f},
-    {"Crate", 18.f, 14.f, 0.35f},
-    {"Barrel", 11.f, 18.f, 0.30f},
-    {"Container", 26.f, 18.f, 0.70f},
-    {"Heavy", 30.f, 22.f, 1.20f},
+    // Light — magnet haulers can snag these
+    {"Parcel",    12.f, 12.f, 0.12f, GRIP_MAGNET, 100},
+    {"Crate",     18.f, 14.f, 0.35f, GRIP_HOOK,   200},
+    {"Barrel",    11.f, 18.f, 0.40f, GRIP_HOOK,   220},
+    // Needs a real clamp and a strong ship
+    {"Container", 26.f, 18.f, 0.90f, GRIP_CLAMP,  400},
+    {"Heavy",     30.f, 22.f, 1.40f, GRIP_CLAMP,  600},
+    {"Anvil",     34.f, 24.f, 2.20f, GRIP_CLAMP,  900},
 };
 inline constexpr int CARGO_DEF_COUNT = static_cast<int>(sizeof(CARGO_DEFS) / sizeof(CARGO_DEFS[0]));
 
@@ -453,7 +461,7 @@ inline float REEL_SPEED = 130.f;
 inline float REEL_SPEED_LOADED = 70.f;
 inline float HOOK_MASS_FRACTION = 0.12f;  // of the ship's mass
 inline float GRAB_REACH = 22.f;           // hook centre to the crate's edge (manual grip)
-inline bool AUTO_GRAB = true;             // magnet: latch nearest crate when the hook enters reach
+inline bool AUTO_GRAB = true;             // Magnet ships auto-latch Magnet-grade cargo in reach
 inline float AUTO_GRAB_REACH = 16.f;      // tighter than manual so fly-bys do not always snag
 inline constexpr int CARGO_COUNT = 12;
 // A crate on the hook is calmed so it hangs instead of flailing: air drag, friction in the pivot, and it no longer

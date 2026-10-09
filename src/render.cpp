@@ -123,6 +123,15 @@ struct Canvas {
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
+static const char* grip_label(int g) {
+  switch (g) {
+    case GRIP_MAGNET: return "MAGNET";
+    case GRIP_HOOK: return "HOOK";
+    case GRIP_CLAMP: return "CLAMP";
+    default: return "NONE";
+  }
+}
+
 bool Gfx::init(std::unique_ptr<Backend> backend) {
   be_ = std::move(backend);
   for (const Glyph& g : GLYPHS) glyph_bits_[g.ch - FIRST_CHAR] = g.bits;
@@ -510,7 +519,7 @@ void Gfx::draw_pads(const Game& g, double t) const {
 
     // Status label *below* the pad deck
     if (is_dest) {
-      const char* label = ghost ? "DEST?" : "DEST";
+      const char* label = ghost ? "BASE?" : "BASE";
       const int tw = text_width(label);
       text(mid - tw / 2, y + Z(28), label, with_alpha(pal::HOT, static_cast<uint8_t>(160 + 95 * pulse)));
     } else if (online) {
@@ -943,11 +952,10 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   text(m20, y, buf, pal::BRIGHT);
   y += lh;
   {
-    int found = 0;
-    for (const Game::Signal& s : g.signals) if (s.found) ++found;
-    const int total = static_cast<int>(g.signals.size());
-    std::snprintf(buf, sizeof(buf), "SIG %d/%d", found, total);
-    text(m20, y, buf, found == total && total > 0 ? pal::CARGO : pal::MID);
+    int hauled = 0;
+    // Stats track lifetime; for this cave count delivered via score is awkward — show held + tip
+    std::snprintf(buf, sizeof(buf), "HAUL %s", d.winch ? grip_label(d.grip) : "—");
+    text(m20, y, buf, d.winch ? pal::CARGO : pal::DIM);
     y += lh;
   }
   char bname[24];
@@ -985,7 +993,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
       const float cx = 0.5f * (dp.x0 + dp.x1);
       const float dx = cx - tf.pos.x, dy = dp.y - tf.pos.y;
       const float dist = std::sqrt(dx * dx + dy * dy);
-      std::snprintf(legbuf, sizeof legbuf, "DEST %s %.0f", dp.active ? "PAD" : "???", dist / PPM);
+      std::snprintf(legbuf, sizeof legbuf, "BASE %s %.0f", dp.active ? "HOME" : "???", dist / PPM);
       text(m20, y, legbuf, dp.active ? pal::WARN : pal::DIM);
       y += lh;
     }
@@ -1058,7 +1066,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
         best = {0.5f * (dp.x0 + dp.x1) - tf.pos.x, dp.y - tf.pos.y};
         best_d = best.x * best.x + best.y * best.y;
         any = true;
-        tag = dp.active ? "DEST" : "DEST?";
+        tag = dp.active ? "BASE" : "BASE?";
         col = pal::WARN;
       }
     }
@@ -1604,7 +1612,13 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
     // Bias: residual yaw with equal mains; Spin: peak differential yaw authority
     std::snprintf(line, sizeof line, "%+.2f  spin %.2f", sp.yaw_bias, sp.spin);
     row("YAW BIAS", line, std::fabs(sp.yaw_bias) > 0.05f ? pal::HOT : pal::BRIGHT);
-    row("WINCH", def.winch ? "YES" : "NO", def.winch ? pal::CARGO : pal::DIM);
+    if (def.winch) {
+      char gb[32];
+      std::snprintf(gb, sizeof gb, "%s  %.2f t", grip_label(def.grip), def.lift_cap);
+      row("GRIP", gb, pal::CARGO);
+    } else {
+      row("GRIP", "NONE", pal::DIM);
+    }
   }
 
   text_centered(w_ / 2, py + panel_h - cell_h() - L(14), menu_hint(ui, ui.page == MenuPage::Options), pal::MID);
@@ -1841,12 +1855,12 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
     fill(px - 2, py - 2, 4, 4, pal::CARGO);
   }
   int found = 0;
-  for (const Game::Signal& s : g.signals) if (s.found) ++found;
+  for (const Game::Signal& s : g.signals) if (s.found) ++found;  // legacy, unused
   const int pct = explore_percent(g);
   char line[72];
   text_centered(w_ / 2, dy - cell_h() - L(10), "MAP  (HOLD TO PAUSE)", pal::BRIGHT);
   std::snprintf(line, sizeof line, "EXPLORED %d%%   PADS %d/%d   SIGNALS %d/%d   SCORE %d", pct, n_vis,
-                n_act, found, static_cast<int>(g.signals.size()), g.score);
+                n_act, g.score);
   text_centered(w_ / 2, dy + dh + L(8), line, pal::MID);
   text_centered(w_ / 2, dy + dh + L(8) + cell_h() + L(4),
                 "PAD: BRIGHT=VISITED  AMBER=FOUND", pal::DIM);

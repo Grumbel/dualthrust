@@ -429,28 +429,44 @@ void cargo_system(Game& g, float dt) {
     const float speed = length(from_b2(b2Body_GetLinearVelocity(c.body)));
     c.rest_time = (speed < 8.f && e != held) ? c.rest_time + dt : 0.f;
     if (!c.picked || c.rest_time < 1.f) return;
+    // Return-to-base: only the home pad (index 0) counts as a delivery
+    if (g.cave.pads.empty()) return;
+    const int base = 0;
+    const LandingPad& p = g.cave.pads[static_cast<size_t>(base)];
     const float bottom = t.pos.y + c.def->half_h;
-    for (int pi = 0; pi < static_cast<int>(g.cave.pads.size()); ++pi) {
-      const LandingPad& p = g.cave.pads[static_cast<size_t>(pi)];
-      if (!p.active || std::abs(bottom - p.y) >= 12.f || t.pos.x < p.x0 || t.pos.x > p.x1) continue;
-      c.picked = false;
-      stat_add(g, &Stats::cargo_delivered, 1);
-      g.score += tune::SCORE_CARGO;
-      if (c.dest_pad == pi) {
-        g.score += tune::SCORE_DEST_BONUS;
-        notice(g, "+400 DEST");
-      } else {
-        notice(g, "+250 CARGO");
+    if (!p.active || std::abs(bottom - p.y) >= 12.f || t.pos.x < p.x0 || t.pos.x > p.x1) return;
+
+    const int pts = c.def->score > 0 ? c.def->score : tune::SCORE_CARGO;
+    c.picked = false;
+    stat_add(g, &Stats::cargo_delivered, 1);
+    g.score += pts;
+    char msg[32];
+    std::snprintf(msg, sizeof msg, "+%d %s", pts, c.def->name);
+    notice(g, msg);
+    beep(g, SimEventKind::Delivered);
+
+    // Respawn this crate deeper in the cave so hauling stays the loop
+    if (B2_IS_NON_NULL(c.body) && b2Body_IsValid(c.body)) {
+      // Find a floor spot away from base
+      for (int tries = 0; tries < 40; ++tries) {
+        const float x = g.rng.range(Cave::CELL * 20.f, Cave::WORLD_W - Cave::CELL * 20.f);
+        const float floor = g.cave.floor_below(x, Cave::WORLD_H * 0.15f);
+        if (floor <= 0.f || floor >= Cave::WORLD_H - 40.f) continue;
+        if (std::abs(x - 0.5f * (p.x0 + p.x1)) < 400.f) continue;
+        const Vec2 pos{x, floor - c.def->half_h - 1.f};
+        if (g.cave.is_solid_world(pos.x, pos.y)) continue;
+        b2Body_SetTransform(c.body, to_b2(pos), b2MakeRot(0.f));
+        b2Body_SetLinearVelocity(c.body, {0.f, 0.f});
+        b2Body_SetAngularVelocity(c.body, 0.f);
+        b2Body_SetAwake(c.body, true);
+        t.pos = pos;
+        t.angle = 0.f;
+        c.dest_pad = base;  // always home
+        c.rest_time = 0.f;
+        break;
       }
-      beep(g, SimEventKind::Delivered);
-      // Next trip: pick a different active pad if possible
-      c.dest_pad = -1;
-      for (int k = 0; k < static_cast<int>(g.cave.pads.size()); ++k) {
-        const int j = (pi + 1 + k) % static_cast<int>(g.cave.pads.size());
-        if (g.cave.pads[static_cast<size_t>(j)].active && j != pi) { c.dest_pad = j; break; }
-      }
-      return;
     }
+    return;
   });
 }
 
@@ -620,9 +636,7 @@ void ensure_cargo(Game& g) {
     const Vec2 pos{s.x, s.floor_y - def.half_h - 1.f};
     Entity e = g.ecs.create();
     g.ecs.add<Transform>(e, {pos, 0.f});
-    int dest = -1;
-    if (!g.cave.pads.empty())
-      dest = g.rng.range_i(0, static_cast<int>(g.cave.pads.size()) - 1);
+    const int dest = g.cave.pads.empty() ? -1 : 0;  // always return to base (pad 0)
     g.ecs.add<Cargo>(e, {g.phys.create_cargo(pos, 0.f, def), &def, false, 0.f, dest});
   }
 }
@@ -742,12 +756,45 @@ Entity nearest_crate(Game& g, float reach) {
   return best;
 }
 
+static const char* grip_name(int g) {
+  switch (g) {
+    case GRIP_MAGNET: return "MAGNET";
+    case GRIP_HOOK: return "HOOK";
+    case GRIP_CLAMP: return "CLAMP";
+    default: return "NONE";
+  }
+}
+
+// Can this ship latch this crate? Grip tier + lift capacity.
+static bool can_lift(const ShipDef& ship, const CargoDef& cargo, char* why, size_t why_n) {
+  if (!ship.winch || ship.grip <= GRIP_NONE) {
+    if (why && why_n) std::snprintf(why, why_n, "NO WINCH");
+    return false;
+  }
+  if (ship.grip < cargo.grip) {
+    if (why && why_n) std::snprintf(why, why_n, "NEED %s", grip_name(cargo.grip));
+    return false;
+  }
+  if (cargo.mass > ship.lift_cap + 0.001f) {
+    if (why && why_n) std::snprintf(why, why_n, "TOO HEAVY");
+    return false;
+  }
+  return true;
+}
+
 void grab_crate(Game& g, Entity best) {
   if (best == NULL_ENTITY) return;
   Rope& r = g.ecs.get<Rope>(g.ship);
   if (r.held != NULL_ENTITY) return;
   Body& body = g.ecs.get<Body>(g.ship);
   Cargo& c = g.ecs.get<Cargo>(best);
+  const ShipDef& ship = *g.ecs.get<Hull>(g.ship).def;
+  char why[24];
+  if (!can_lift(ship, *c.def, why, sizeof why)) {
+    notice(g, why);
+    beep(g, SimEventKind::NoTarget);
+    return;
+  }
   b2RevoluteJointDef jd = b2DefaultRevoluteJointDef();  // hangs from the hook like a pendulum
   jd.bodyIdA = body.b.hook;
   jd.bodyIdB = c.body;
@@ -790,17 +837,32 @@ void toggle_grip(Game& g) {
     beep(g, SimEventKind::NoTarget);
     return;
   }
-  grab_crate(g, best);
+  grab_crate(g, best);  // prints NEED CLAMP / TOO HEAVY if refused
 }
 
 // Magnet: cable out and empty → latch a crate that drifts into AUTO_GRAB_REACH.
 void auto_grab_update(Game& g) {
   if (!rope::AUTO_GRAB) return;
-  if (!g.ecs.get<Hull>(g.ship).def->winch) return;
+  const ShipDef& ship = *g.ecs.get<Hull>(g.ship).def;
+  // Only magnet grippers auto-latch, and only Magnet-grade parcels
+  if (!ship.winch || ship.grip != GRIP_MAGNET) return;
   Rope& r = g.ecs.get<Rope>(g.ship);
   if (!r.out || r.held != NULL_ENTITY) return;
   if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
-  Entity best = nearest_crate(g, rope::AUTO_GRAB_REACH);
+  Entity best = NULL_ENTITY;
+  float best_d = rope::AUTO_GRAB_REACH;
+  Body& body = g.ecs.get<Body>(g.ship);
+  if (B2_IS_NULL(body.b.hook)) return;
+  g.ecs.view<Cargo, Transform>([&](Entity e, Cargo& c, Transform&) {
+    if (!c.def || c.def->grip > GRIP_MAGNET) return;
+    if (!can_lift(ship, *c.def, nullptr, 0)) return;
+    if (!b2Body_IsEnabled(c.body)) return;
+    const b2Vec2 lp = b2Body_GetLocalPoint(c.body, b2Body_GetPosition(body.b.hook));
+    const float dx = std::max(std::abs(lp.x) * PPM - c.def->half_w, 0.f);
+    const float dy = std::max(std::abs(lp.y) * PPM - c.def->half_h, 0.f);
+    const float d = std::sqrt(dx * dx + dy * dy);
+    if (d < best_d) { best_d = d; best = e; }
+  });
   if (best != NULL_ENTITY) grab_crate(g, best);
 }
 
@@ -927,7 +989,9 @@ void place_echoes(Game& g) {
 }
 
 void place_signals(Game& g) {
+  // Signal beacons retired — cargo return-to-base is the objective.
   g.signals.clear();
+  return;
   constexpr int WANT = 8;
   for (int tries = 0; tries < 400 && static_cast<int>(g.signals.size()) < WANT; ++tries) {
     const float x = g.rng.range(Cave::CELL * 8.f, Cave::WORLD_W - Cave::CELL * 8.f);
@@ -1089,7 +1153,7 @@ void check_exploration_milestones(Game& g) {
     std::snprintf(buf, sizeof buf, "MAP %d%%", TIERS[t]);
     notice(g, buf);
   }
-  if (!g.signals_cleared && !g.signals.empty()) {
+  if (false && !g.signals_cleared && !g.signals.empty()) {
     bool all = true;
     for (const Game::Signal& s : g.signals)
       if (!s.found) { all = false; break; }
@@ -1455,7 +1519,7 @@ void update_sonar(Game& g, float dt) {
       s.signal_hit[static_cast<size_t>(i)] = 1;
       if (!sig.found) {
         sig.found = true;
-        g.score += tune::SCORE_SIGNAL;
+        /* signals no longer score */ (void)0;
         notice(g, "+75 SIGNAL");
         check_exploration_milestones(g);
       }
@@ -1472,7 +1536,7 @@ void update_sonar(Game& g, float dt) {
     const float d = std::sqrt(dx * dx + dy * dy);
     if (d < r0 || d >= r1) continue;
     echo.cool = 8.f;
-    g.score += tune::SCORE_ECHO;
+    /* echoes no longer score */ (void)0;
     if (g.residues.size() < 120)
       g.residues.push_back({echo.pos, tune::RESIDUE_TTL * 1.2f});
   }

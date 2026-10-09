@@ -365,7 +365,7 @@ void Cave::generate(unsigned s) {
 
   // --- Cargo: crates on flat floor in the main cave, away from the pads and from each other ---
   cargo.clear();
-  const int kinds = 5;  // CARGO_DEFS entries; cave.cpp does not need their sizes
+  const int kinds = 6;  // matches CARGO_DEFS (Parcel..Anvil)
   for (int attempt = 0; attempt < 600 && static_cast<int>(cargo.size()) < 12; ++attempt) {
     const int gx = rng.range_i(EDGE + 12, GW - EDGE - 12);
     int floor_gy = -1;

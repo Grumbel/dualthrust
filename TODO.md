@@ -1,8 +1,16 @@
 # TODO
 
+
+### Cargo gameplay (return-to-base)
+- Secret signal dots removed as objectives (no score, not placed).
+- Grip tiers: Magnet < Hook < Clamp. Ship must match/exceed cargo; lift_cap gates mass.
+- Magnet ships auto-grab parcels only; Hook/Clamp need manual grip.
+- Delivery only at **home pad (index 0)**; cargo then respawns deeper in the cave.
+- Cargo: Parcel(M), Crate/Barrel(H), Container/Heavy/Anvil(Clamp) with per-type scores.
+
 ## Tip
 
-- Bundle line: `dualthrust-048.1-stack-stick-up-down-9a093cd` → tip `da0cfce`
+- Bundle line: `dualthrust-049.1-cargo-base-grip-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
