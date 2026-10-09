@@ -649,19 +649,34 @@ void update_sonar(Game& g, float dt) {
       painted = true;
     }
   };
-  // How deep a solid cell sits behind the open surface (0 = open, 1 = surface, 2 = one cell in, …).
+  // Depth of solid behind open air (0 = open, 1 = face, 2 = one cell in).
   auto rock_depth = [&](int gx, int gy) -> int {
     if (!g.cave.is_solid_cell(gx, gy)) return 0;
     int best = 8;
     for (int r = 1; r <= 2; ++r) {
       for (int oy = -r; oy <= r; ++oy)
         for (int ox = -r; ox <= r; ++ox) {
-          if (std::abs(ox) != r && std::abs(oy) != r) continue;  // ring only
+          if (std::abs(ox) != r && std::abs(oy) != r) continue;
           if (!g.cave.is_solid_cell(gx + ox, gy + oy)) best = std::min(best, r);
         }
       if (best <= r) break;
     }
     return best;
+  };
+
+  // Line of sight from the ping origin to a cell centre (blocked by solid before the target).
+  auto clear_path = [&](float tx, float ty) -> bool {
+    const float dx = tx - s.origin.x, dy = ty - s.origin.y;
+    const float dist = std::sqrt(dx * dx + dy * dy);
+    if (dist < 1.f) return true;
+    const int steps = std::max(2, static_cast<int>(dist / (Cave::CELL * 0.5f)));
+    for (int i = 1; i < steps; ++i) {
+      const float u = static_cast<float>(i) / static_cast<float>(steps);
+      const float x = s.origin.x + dx * u, y = s.origin.y + dy * u;
+      const int gx = static_cast<int>(x / Cave::CELL), gy = static_cast<int>(y / Cave::CELL);
+      if (g.cave.is_solid_cell(gx, gy)) return false;
+    }
+    return true;
   };
 
   for (int gy = gy0; gy <= gy1; ++gy) {
@@ -671,17 +686,14 @@ void update_sonar(Game& g, float dt) {
       const float dx = cx - s.origin.x, dy = cy - s.origin.y;
       const float d = std::sqrt(dx * dx + dy * dy);
       if (d < r0 || d >= r1) continue;
-      // Echo from the rock face only: surface + one cell of penetration, not the solid bulk
-      if (g.cave.is_solid_cell(gx, gy)) {
-        const int depth = rock_depth(gx, gy);
-        if (depth >= 1 && depth <= 2) {
-          mark(gx, gy);
-          // Open air on the free side of the face → black on the chart (explored void)
-          for (int oy = -1; oy <= 1; ++oy)
-            for (int ox = -1; ox <= 1; ++ox)
-              if (!g.cave.is_solid_cell(gx + ox, gy + oy)) mark(gx + ox, gy + oy);
-        }
+      if (!g.cave.is_solid_cell(gx, gy)) {
+        // Open air the wavefront reaches with clear LOS → explored void (black on the chart)
+        if (clear_path(cx, cy)) mark(gx, gy);
+        continue;
       }
+      // Rock face only (slight penetration); must have LOS to the face
+      const int depth = rock_depth(gx, gy);
+      if (depth >= 1 && depth <= 2 && clear_path(cx, cy)) mark(gx, gy);
     }
   }
   // Cargo crates: paint a small blob when the wavefront reaches them
