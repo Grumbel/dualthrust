@@ -604,10 +604,13 @@ void ground_system(Game& g, float dt) {
 // Crates for the current cave (new ones when the cave changed)
 void ensure_cargo(Game& g) {
   if (g.cargo_generation == g.cave.generation) return;
+  // load_world can call this before the first place_ship / build_bodies; the world
+  // must exist before any create_cargo / DestroyBody.
+  if (!g.phys.ready()) g.phys.init();
   g.cargo_generation = g.cave.generation;
   g.dead.clear();
   g.ecs.view<Cargo>([&](Entity e, Cargo& c) {
-    b2DestroyBody(c.body);
+    if (B2_IS_NON_NULL(c.body) && b2Body_IsValid(c.body)) b2DestroyBody(c.body);
     g.dead.push_back(e);
   });
   for (Entity e : g.dead) g.ecs.destroy(e);

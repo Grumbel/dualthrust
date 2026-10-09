@@ -302,13 +302,14 @@ bool load_world(Game& g, int* ship_index_out) {
   g.sonar = {};
   g.sonar_cool = 0.f;
 
-  // Cargo: rebuild from save rows (ignore cave spots)
+  // Cargo: rebuild from save rows (ignore cave spots). World may not exist yet on cold start.
+  if (!g.phys.ready()) g.phys.init();
   ensure_cargo(g);  // creates from spots first
   // Destroy all and recreate from rows for exact state
   {
     std::vector<Entity> kill;
     g.ecs.view<Cargo>([&](Entity e, Cargo& c) {
-      b2DestroyBody(c.body);
+      if (B2_IS_NON_NULL(c.body) && b2Body_IsValid(c.body)) b2DestroyBody(c.body);
       kill.push_back(e);
     });
     for (Entity e : kill) g.ecs.destroy(e);

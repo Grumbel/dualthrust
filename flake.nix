@@ -73,9 +73,13 @@
 
             cmakeFlags = [
               "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+              "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -g -DNDEBUG"
               "-DPROJECT_VERSION_FULL=${version}"
               "-GNinja"
             ];
+            # Keep symbols so gdb/backtrace work out of the store path
+            dontStrip = true;
+            separateDebugInfo = false;
 
             meta = with pkgs.lib; {
               description = "CRT dual-engine lander controlled by gamepad triggers";
@@ -132,6 +136,8 @@
               cd "$PROJECT_BUILD_DIR"
               cmake -GNinja \
                 -DCMAKE_BUILD_TYPE="''${CMAKE_BUILD_TYPE:-Debug}" \
+                -DCMAKE_CXX_FLAGS_DEBUG="-O0 -g" \
+                -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g -DNDEBUG" \
                 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
                 "$PROJECT_SOURCE"
             '')

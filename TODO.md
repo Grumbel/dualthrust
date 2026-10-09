@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-044.1-strafe-menu-cam-pad-9a093cd` → tip `35c3c00`
+- Bundle line: `dualthrust-045.1-cargo-world-init-debug-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
