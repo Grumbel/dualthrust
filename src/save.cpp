@@ -107,6 +107,7 @@ bool save_world(const Game& g, int ship_index) {
   std::fprintf(f, "score=%d\n", g.score);
   std::fprintf(f, "last_pad=%d\n", g.last_pad);
   std::fprintf(f, "home_pad=%d\n", g.home_pad);
+  std::fprintf(f, "hauls_run=%d\n", g.hauls_run);
   std::fprintf(f, "time=%.4f\n", g.time);
   std::fprintf(f, "explore_tier=%d\n", g.explore_tier);
   std::fprintf(f, "cells_explored=%d\n", g.cells_explored);
@@ -184,7 +185,7 @@ bool load_world(Game& g, int* ship_index_out) {
 
   unsigned seed = 0;
   int ship = DEFAULT_SHIP;
-  int score = 0, last_pad = -1, explore_tier = 0, cells_explored = 0;
+  int score = 0, last_pad = -1, home_pad = 0, hauls_run = 0, explore_tier = 0, cells_explored = 0;
   int signals_cleared = 0, pads_cleared = 0;
   float time = 0.f;
   float pos_x = 0.f, pos_y = 0.f, angle = 0.f;
@@ -218,6 +219,7 @@ bool load_world(Game& g, int* ship_index_out) {
     else if (std::strcmp(key, "score") == 0) std::sscanf(val, "%d", &score);
     else if (std::strcmp(key, "last_pad") == 0) std::sscanf(val, "%d", &last_pad);
     else if (std::strcmp(key, "home_pad") == 0) std::sscanf(val, "%d", &home_pad);
+    else if (std::strcmp(key, "hauls_run") == 0) std::sscanf(val, "%d", &hauls_run);
     else if (std::strcmp(key, "time") == 0) std::sscanf(val, "%f", &time);
     else if (std::strcmp(key, "explore_tier") == 0) std::sscanf(val, "%d", &explore_tier);
     else if (std::strcmp(key, "cells_explored") == 0) std::sscanf(val, "%d", &cells_explored);
@@ -299,6 +301,7 @@ bool load_world(Game& g, int* ship_index_out) {
   g.score = score;
   g.last_pad = last_pad;
   g.home_pad = home_pad;
+  g.hauls_run = hauls_run;
   g.time = time;
   g.explore_tier = explore_tier;
   g.cells_explored = cells_explored;

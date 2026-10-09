@@ -1267,12 +1267,6 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
     SDL_Point pts[3] = {{cx, cy + s}, {cx - s, cy - s / 2}, {cx + s, cy - s / 2}};
     be_->polygon(pts, 3, c);
   };
-  // Filled diamond (signals / cargo)
-  auto diamond = [&](int cx, int cy, int s, Rgba c) {
-    if (!on_panel(cx, cy)) return;
-    SDL_Point pts[4] = {{cx, cy - s}, {cx + s, cy}, {cx, cy + s}, {cx - s, cy}};
-    be_->polygon(pts, 4, c);
-  };
   auto is_rev = [&](float wx, float wy) {
     const int gx = static_cast<int>(wx / Cave::CELL), gy = static_cast<int>(wy / Cave::CELL);
     if (!Cave::in_grid(gx, gy) || g.revealed.empty()) return true;
