@@ -40,9 +40,8 @@
 - Fog of war: passive circular uncover around the ship (EXPLORE_RADIUS, LOS-limited). Minimap starts
   as radio static; flying opens the chart. Select/Z holds the full revealed map. Ship switch teleports
   to the nearest active pad.
-- Sonar (C / left-stick-click): search pulse for pads, cargo and deep-cave signals — not map paint.
-  Expanding ring; when the wavefront hits a target a bright arc reflects on that bearing and a pulse
-  returns toward the ship. Pads go online on ping; a small chart blob marks the hit.
+- Sonar is mode-table driven (`SONAR_MODES`): REFLECT (default search pulse + reflections), PAINT (classic
+  fog annulus), BOTH. Passive explore is a separate flag. Debug: SONAR MODE / PASSIVE MAP.
 
 - Controls rebinding: Options → Controls lists every play action; Enter/A starts listening for a key or
   button/axis. Tab/Y toggles keyboard vs gamepad view. Binds save as `bind.K.*` / `bind.P.*` lines.

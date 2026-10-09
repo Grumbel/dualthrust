@@ -52,6 +52,28 @@ inline float SONAR_SPEED = 720.f;      // world px per sim second
 inline float SONAR_FADE_TIME = 0.9f;   // seconds of fade-out after the wave reaches max range
 inline float EXPLORE_RADIUS = 260.f;   // passive minimap uncover around the ship (world px)
 inline float EXPLORE_FADE = 0.75f;     // full strength out to this fraction of EXPLORE_RADIUS
+inline bool PASSIVE_EXPLORE = true;    // ship proximity paints the fog map each tick
+
+// Sonar behaviour is data-driven: pick a row, systems dispatch on the flags.
+// REFLECT = search pulse (reflections on pads/cargo/signals); PAINT = classic fog ping;
+// BOTH keeps both paths for experiments.
+struct SonarModeDef {
+  const char* name;
+  bool paint_fog;           // expanding annulus paints revealed[]
+  bool reflect_targets;     // spawn reflections on pad / cargo / signal
+  bool tag_blob_on_hit;     // small permanent chart blob on a reflect hit
+  bool activate_pad_on_hit; // pad goes online when the wavefront hits it
+};
+inline constexpr SonarModeDef SONAR_MODES[] = {
+    {"REFLECT", false, true, true, true},
+    {"PAINT", true, false, false, false},
+    {"BOTH", true, true, true, true},
+};
+inline constexpr int SONAR_MODE_COUNT = static_cast<int>(sizeof(SONAR_MODES) / sizeof(SONAR_MODES[0]));
+inline int SONAR_MODE = 0;  // index into SONAR_MODES (mutable; Debug menu)
+inline const SonarModeDef& sonar_mode() {
+  return SONAR_MODES[SONAR_MODE < 0 || SONAR_MODE >= SONAR_MODE_COUNT ? 0 : SONAR_MODE];
+}
 
 // Score (session): exploration-friendly rewards, not win conditions
 inline constexpr int SCORE_PAD_LANDING = 100;

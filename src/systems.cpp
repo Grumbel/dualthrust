@@ -892,6 +892,7 @@ static void paint_blob(Game& g, float wx, float wy, int radius_cells, uint8_t st
 // Passive minimap uncover: a circular region around the ship, LOS-limited like the old sonar.
 void update_explore(Game& g, float dt) {
   (void)dt;
+  if (!tune::PASSIVE_EXPLORE) return;
   if (g.revealed.empty()) return;
   if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
   const Vec2 o = ship_transform(g).pos;
@@ -988,14 +989,14 @@ void update_explore(Game& g, float dt) {
 void update_sonar(Game& g, float dt) {
   if (!g.sonar.active) return;
   SonarPing& s = g.sonar;
+  const SonarModeDef& mode = tune::sonar_mode();
 
-  // Age reflection pulses
+  // Age reflection pulses (drawn even while fading)
   for (SonarReflection& e : s.echoes) e.age += dt;
 
   if (s.fading) {
     const float fade_t = std::max(0.05f, tune::SONAR_FADE_TIME);
     s.fade = std::max(0.f, s.fade - dt / fade_t);
-    // Keep echoes alive a little into the fade, then drop the ping
     if (s.fade <= 0.02f) {
       s.active = false;
       s.fading = false;
@@ -1012,10 +1013,29 @@ void update_sonar(Game& g, float dt) {
     s.radius = s.max_radius;
     s.fading = true;
   }
+  if (s.prev_radius >= s.max_radius) return;
+  const float r0 = s.prev_radius, r1 = std::min(s.radius, s.max_radius);
 
-  const float r0 = s.prev_radius, r1 = s.radius;
+  auto clear_path = [&](int tgx, int tgy) -> bool {
+    const float tx = (tgx + 0.5f) * Cave::CELL, ty = (tgy + 0.5f) * Cave::CELL;
+    const float dx = tx - s.origin.x, dy = ty - s.origin.y;
+    const float dist = std::sqrt(dx * dx + dy * dy);
+    if (dist < 1.f) return true;
+    const int steps = std::max(2, static_cast<int>(dist / (Cave::CELL * 0.4f)));
+    int solid_budget = 2;
+    for (int i = 1; i <= steps; ++i) {
+      const float u = static_cast<float>(i) / static_cast<float>(steps);
+      const int gx = static_cast<int>((s.origin.x + dx * u) / Cave::CELL);
+      const int gy = static_cast<int>((s.origin.y + dy * u) / Cave::CELL);
+      if (gx == tgx && gy == tgy) return true;
+      if (g.cave.is_solid_cell(gx, gy)) {
+        if (--solid_budget < 0) return false;
+      }
+    }
+    return true;
+  };
 
-  auto los = [&](float tx, float ty) -> bool {
+  auto los_world = [&](float tx, float ty) -> bool {
     const float dx = tx - s.origin.x, dy = ty - s.origin.y;
     const float dist = std::sqrt(dx * dx + dy * dy);
     if (dist < 1.f) return true;
@@ -1023,77 +1043,159 @@ void update_sonar(Game& g, float dt) {
     int solid_budget = 2;
     for (int i = 1; i < steps; ++i) {
       const float u = static_cast<float>(i) / static_cast<float>(steps);
-      const float x = s.origin.x + dx * u, y = s.origin.y + dy * u;
-      if (g.cave.is_solid_world(x, y)) {
+      if (g.cave.is_solid_world(s.origin.x + dx * u, s.origin.y + dy * u)) {
         if (--solid_budget < 0) return false;
       }
     }
     return true;
   };
 
-  auto add_echo = [&](float tx, float ty, SonarReflection::Kind kind) {
-    const float dx = tx - s.origin.x, dy = ty - s.origin.y;
-    const float d = std::sqrt(dx * dx + dy * dy);
-    if (d < r0 || d >= r1) return false;
-    if (d > s.max_radius) return false;
-    if (!los(tx, ty)) return false;
-    SonarReflection e;
-    e.angle = std::atan2(dy, dx);
-    e.hit_r = d;
-    e.age = 0.f;
-    e.life = 1.4f;
-    e.kind = kind;
-    s.echoes.push_back(e);
-    return true;
-  };
-
-  // Landing pads: hit the deck centre; tag pad online and a chart blob
-  if (s.pad_hit.size() != g.cave.pads.size()) s.pad_hit.assign(g.cave.pads.size(), 0);
-  for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i) {
-    if (s.pad_hit[static_cast<size_t>(i)]) continue;
-    LandingPad& p = g.cave.pads[static_cast<size_t>(i)];
-    const float cx = 0.5f * (p.x0 + p.x1);
-    const float cy = p.y - 4.f;
-    if (!add_echo(cx, cy, SonarReflection::Kind::Pad)) continue;
-    s.pad_hit[static_cast<size_t>(i)] = 1;
-    if (!p.active) {
-      p.active = true;
-      notice(g, "PAD PING");
+  // --- Classic path: annulus paints the fog map (PAINT / BOTH) ---
+  if (mode.paint_fog && !g.revealed.empty()) {
+    const float pad = Cave::CELL * 2.f;
+    const int gx0 = std::max(0, static_cast<int>((s.origin.x - r1 - pad) / Cave::CELL));
+    const int gx1 = std::min(Cave::GW - 1, static_cast<int>((s.origin.x + r1 + pad) / Cave::CELL));
+    const int gy0 = std::max(0, static_cast<int>((s.origin.y - r1 - pad) / Cave::CELL));
+    const int gy1 = std::min(Cave::GH - 1, static_cast<int>((s.origin.y + r1 + pad) / Cave::CELL));
+    auto strength_at = [&](float d) -> uint8_t {
+      const float full = s.max_radius * 0.75f;
+      if (d <= full) return 255;
+      if (d >= s.max_radius) return 40;
+      const float u = (d - full) / (s.max_radius - full);
+      return static_cast<uint8_t>(255.f * (1.f - u) + 40.f * u);
+    };
+    auto rock_depth = [&](int gx, int gy) -> int {
+      if (!g.cave.is_solid_cell(gx, gy)) return 0;
+      int best = 8;
+      for (int r = 1; r <= 2; ++r) {
+        for (int oy = -r; oy <= r; ++oy)
+          for (int ox = -r; ox <= r; ++ox) {
+            if (std::abs(ox) != r && std::abs(oy) != r) continue;
+            if (!g.cave.is_solid_cell(gx + ox, gy + oy)) best = std::min(best, r);
+          }
+        if (best <= r) break;
+      }
+      return best;
+    };
+    bool painted = false;
+    int new_cells = 0;
+    auto mark = [&](int gx, int gy, uint8_t str, bool residue = false) {
+      if (!Cave::in_grid(gx, gy) || str == 0) return;
+      const size_t i = static_cast<size_t>(gy * Cave::GW + gx);
+      if (i >= g.revealed.size()) return;
+      const uint8_t old = g.revealed[i];
+      uint8_t next = str;
+      if (old > 0 && old < 255) {
+        const int boosted = static_cast<int>(old) + static_cast<int>(str) / 3 + 8;
+        next = static_cast<uint8_t>(std::min(255, std::max(static_cast<int>(str), boosted)));
+      }
+      if (next > old) {
+        if (old == 0) ++new_cells;
+        g.revealed[i] = next;
+        painted = true;
+      }
+      if (residue && g.cave.is_solid_cell(gx, gy) && next >= 80 && g.residues.size() < 120)
+        g.residues.push_back({Vec2{(gx + 0.5f) * Cave::CELL, (gy + 0.5f) * Cave::CELL}, tune::RESIDUE_TTL});
+    };
+    for (int gy = gy0; gy <= gy1; ++gy) {
+      for (int gx = gx0; gx <= gx1; ++gx) {
+        const float cx = (gx + 0.5f) * Cave::CELL, cy = (gy + 0.5f) * Cave::CELL;
+        const float dx = cx - s.origin.x, dy = cy - s.origin.y;
+        const float d = std::sqrt(dx * dx + dy * dy);
+        if (d < r0 || d >= r1) continue;
+        if (!clear_path(gx, gy)) continue;
+        const uint8_t str = strength_at(d);
+        if (!g.cave.is_solid_cell(gx, gy)) {
+          mark(gx, gy, str);
+          continue;
+        }
+        const int depth = rock_depth(gx, gy);
+        if (depth >= 1 && depth <= 2) mark(gx, gy, str, true);
+      }
     }
-    paint_blob(g, cx, p.y, 3, 255);
-    g.events.push_back({SimEventKind::SonarPing, {cx, cy}, {}, 80.f});
+    g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& tf) {
+      const float dx = tf.pos.x - s.origin.x, dy = tf.pos.y - s.origin.y;
+      const float d = std::sqrt(dx * dx + dy * dy);
+      if (d < r0 || d >= r1) return;
+      const int gx = static_cast<int>(tf.pos.x / Cave::CELL);
+      const int gy = static_cast<int>(tf.pos.y / Cave::CELL);
+      const uint8_t str = strength_at(d);
+      for (int oy = -1; oy <= 1; ++oy)
+        for (int ox = -1; ox <= 1; ++ox) mark(gx + ox, gy + oy, str);
+    });
+    if (painted) {
+      g.reveal_dirty = true;
+      discover_pads(g);
+      if (new_cells > 0) {
+        g.score += std::min(new_cells, 40) * tune::SCORE_REVEAL_CELL;
+        g.cells_explored += new_cells;
+        check_exploration_milestones(g);
+      }
+    }
   }
 
-  // Cargo crates
-  g.ecs.view<Cargo, Transform>([&](Entity e, const Cargo&, const Transform& tf) {
-    for (Entity h : s.cargo_hit)
-      if (h == e) return;
-    if (!add_echo(tf.pos.x, tf.pos.y, SonarReflection::Kind::Cargo)) return;
-    s.cargo_hit.push_back(e);
-    paint_blob(g, tf.pos.x, tf.pos.y, 2, 220);
-    notice(g, "CARGO PING");
-    g.events.push_back({SimEventKind::SonarPing, tf.pos, {}, 60.f});
-  });
+  // --- Reflect path: wavefront hits pads / cargo / signals (REFLECT / BOTH) ---
+  if (mode.reflect_targets) {
+    auto add_echo = [&](float tx, float ty, SonarReflection::Kind kind) {
+      const float dx = tx - s.origin.x, dy = ty - s.origin.y;
+      const float d = std::sqrt(dx * dx + dy * dy);
+      if (d < r0 || d >= r1 || d > s.max_radius) return false;
+      if (!los_world(tx, ty)) return false;
+      SonarReflection e;
+      e.angle = std::atan2(dy, dx);
+      e.hit_r = d;
+      e.age = 0.f;
+      e.life = 1.4f;
+      e.kind = kind;
+      s.echoes.push_back(e);
+      return true;
+    };
 
-  // Deep-cave signals
-  if (s.signal_hit.size() != g.signals.size()) s.signal_hit.assign(g.signals.size(), 0);
-  for (int i = 0; i < static_cast<int>(g.signals.size()); ++i) {
-    if (s.signal_hit[static_cast<size_t>(i)]) continue;
-    Game::Signal& sig = g.signals[static_cast<size_t>(i)];
-    if (!add_echo(sig.pos.x, sig.pos.y, SonarReflection::Kind::Signal)) continue;
-    s.signal_hit[static_cast<size_t>(i)] = 1;
-    if (!sig.found) {
-      sig.found = true;
-      g.score += tune::SCORE_SIGNAL;
-      notice(g, "+75 SIGNAL");
-      check_exploration_milestones(g);
+    if (s.pad_hit.size() != g.cave.pads.size()) s.pad_hit.assign(g.cave.pads.size(), 0);
+    for (int i = 0; i < static_cast<int>(g.cave.pads.size()); ++i) {
+      if (s.pad_hit[static_cast<size_t>(i)]) continue;
+      LandingPad& pad = g.cave.pads[static_cast<size_t>(i)];
+      const float cx = 0.5f * (pad.x0 + pad.x1);
+      const float cy = pad.y - 4.f;
+      if (!add_echo(cx, cy, SonarReflection::Kind::Pad)) continue;
+      s.pad_hit[static_cast<size_t>(i)] = 1;
+      if (mode.activate_pad_on_hit && !pad.active) {
+        pad.active = true;
+        notice(g, "PAD PING");
+      }
+      if (mode.tag_blob_on_hit) paint_blob(g, cx, pad.y, 3, 255);
+      g.events.push_back({SimEventKind::SonarPing, {cx, cy}, {}, 80.f});
     }
-    paint_blob(g, sig.pos.x, sig.pos.y, 2, 255);
-    if (g.residues.size() < 120)
-      g.residues.push_back({sig.pos, tune::RESIDUE_TTL * 1.5f});
+
+    g.ecs.view<Cargo, Transform>([&](Entity e, const Cargo&, const Transform& tf) {
+      for (Entity h : s.cargo_hit)
+        if (h == e) return;
+      if (!add_echo(tf.pos.x, tf.pos.y, SonarReflection::Kind::Cargo)) return;
+      s.cargo_hit.push_back(e);
+      if (mode.tag_blob_on_hit) paint_blob(g, tf.pos.x, tf.pos.y, 2, 220);
+      notice(g, "CARGO PING");
+      g.events.push_back({SimEventKind::SonarPing, tf.pos, {}, 60.f});
+    });
+
+    if (s.signal_hit.size() != g.signals.size()) s.signal_hit.assign(g.signals.size(), 0);
+    for (int i = 0; i < static_cast<int>(g.signals.size()); ++i) {
+      if (s.signal_hit[static_cast<size_t>(i)]) continue;
+      Game::Signal& sig = g.signals[static_cast<size_t>(i)];
+      if (!add_echo(sig.pos.x, sig.pos.y, SonarReflection::Kind::Signal)) continue;
+      s.signal_hit[static_cast<size_t>(i)] = 1;
+      if (!sig.found) {
+        sig.found = true;
+        g.score += tune::SCORE_SIGNAL;
+        notice(g, "+75 SIGNAL");
+        check_exploration_milestones(g);
+      }
+      if (mode.tag_blob_on_hit) paint_blob(g, sig.pos.x, sig.pos.y, 2, 255);
+      if (g.residues.size() < 120)
+        g.residues.push_back({sig.pos, tune::RESIDUE_TTL * 1.5f});
+    }
   }
 
-  // Ambient echoes still chirp when the wavefront passes (flavour)
+  // Ambient cave life chirps when the wavefront passes (any mode)
   for (Game::Echo& echo : g.echoes) {
     if (echo.cool > 0.f) continue;
     const float dx = echo.pos.x - s.origin.x, dy = echo.pos.y - s.origin.y;

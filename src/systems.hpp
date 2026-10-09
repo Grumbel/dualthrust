@@ -27,11 +27,11 @@ void set_winch(Game& g, bool out);  // deploy the cable fully (true) or retract 
 void toggle_grip(Game& g);         // hook takes the crate in reach, or lets go of it  // retract / extend the landing legs
 inline Transform& ship_transform(Game& g) { return g.ecs.get<Transform>(g.ship); }
 
-// Fog of war: passive proximity around the ship paints the chart; sonar is a search pulse.
+// Fog / sonar: data-driven (tune::SONAR_MODES, PASSIVE_EXPLORE). Paint and reflect paths both live.
 void reset_fog(Game& g);                 // clear revealed, stop any ping (call after cave.generate)
-void fire_sonar(Game& g);                // search pulse for pads / cargo / signals
-void update_explore(Game& g, float dt);  // passive circular uncover around the ship
-void update_sonar(Game& g, float dt);    // expand the ring, spawn reflections on hits
+void fire_sonar(Game& g);                // start a ping; behaviour from current SonarModeDef
+void update_explore(Game& g, float dt);  // passive circular uncover (if PASSIVE_EXPLORE)
+void update_sonar(Game& g, float dt);    // expand ring; paint and/or reflect per mode flags
 
 // Per-tick systems (dt = simulated seconds)
 void step_sim(Game& g, float dt);

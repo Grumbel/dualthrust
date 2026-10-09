@@ -15,7 +15,7 @@ struct DebugParam {
   const char* name;
   float* value;       // nullptr → use Game float via offset path; see kind
   float min_v, max_v, step;
-  enum class Kind { Tune, MassMul, ThrustMul } kind = Kind::Tune;
+  enum class Kind { Tune, MassMul, ThrustMul, SonarMode, PassiveExplore } kind = Kind::Tune;
 };
 
 // Stock defaults captured once so Reset can restore them.
@@ -46,6 +46,8 @@ struct DebugDefaults {
   float sonar_fade_time = 0.9f;
   float explore_radius = 260.f;
   float explore_fade = 0.75f;
+  int sonar_mode = 0;
+  bool passive_explore = true;
   float leg_hertz = 1.0f;
   float leg_damping = 0.3f;
   float leg_mass_frac = 0.06f;
@@ -67,7 +69,7 @@ inline const DebugDefaults& debug_defaults() {
 
 // Param table. Mass/Thrust mul rows use Kind so the menu can write Game fields.
 // Order is the on-screen list order.
-inline constexpr int DEBUG_PARAM_COUNT = 37;
+inline constexpr int DEBUG_PARAM_COUNT = 39;
 
 inline DebugParam* debug_params(Game& g) {
   // Static table; mass/thrust point at g fields each call via rebinding below.
@@ -89,6 +91,8 @@ inline DebugParam* debug_params(Game& g) {
       {"SONAR FADE", &tune::SONAR_FADE_TIME, 0.15f, 3.f, 0.05f},
       {"EXPLORE R", &tune::EXPLORE_RADIUS, 80.f, 600.f, 20.f},
       {"EXPLORE FADE", &tune::EXPLORE_FADE, 0.3f, 0.95f, 0.05f},
+      {"PASSIVE MAP", nullptr, 0.f, 1.f, 1.f, DebugParam::Kind::PassiveExplore},
+      {"SONAR MODE", nullptr, 0.f, 2.f, 1.f, DebugParam::Kind::SonarMode},
       {"LEG HERTZ", &tune::LEG_HERTZ, 0.2f, 4.f, 0.1f},
       {"LEG DAMP", &tune::LEG_DAMPING, 0.05f, 2.f, 0.05f},
       {"LEG MASS %", &tune::LEG_MASS_FRACTION, 0.01f, 0.2f, 0.01f},
@@ -119,6 +123,8 @@ inline float debug_param_value(Game& g, const DebugParam& p) {
   switch (p.kind) {
     case DebugParam::Kind::MassMul: return g.dbg_mass_mul;
     case DebugParam::Kind::ThrustMul: return g.dbg_thrust_mul;
+    case DebugParam::Kind::SonarMode: return static_cast<float>(tune::SONAR_MODE);
+    case DebugParam::Kind::PassiveExplore: return tune::PASSIVE_EXPLORE ? 1.f : 0.f;
     default: return p.value ? *p.value : 0.f;
   }
 }
@@ -133,6 +139,13 @@ inline void debug_param_set(Game& g, const DebugParam& p, float v) {
       break;
     case DebugParam::Kind::ThrustMul:
       g.dbg_thrust_mul = v;
+      break;
+    case DebugParam::Kind::SonarMode:
+      tune::SONAR_MODE = static_cast<int>(std::lround(v)) % tune::SONAR_MODE_COUNT;
+      if (tune::SONAR_MODE < 0) tune::SONAR_MODE += tune::SONAR_MODE_COUNT;
+      break;
+    case DebugParam::Kind::PassiveExplore:
+      tune::PASSIVE_EXPLORE = v >= 0.5f;
       break;
     default:
       if (p.value) *p.value = v;
@@ -179,6 +192,8 @@ inline void debug_reset_all(Game& g) {
   tune::SONAR_FADE_TIME = d.sonar_fade_time;
   tune::EXPLORE_RADIUS = d.explore_radius;
   tune::EXPLORE_FADE = d.explore_fade;
+  tune::SONAR_MODE = d.sonar_mode;
+  tune::PASSIVE_EXPLORE = d.passive_explore;
   tune::LEG_HERTZ = d.leg_hertz;
   tune::LEG_DAMPING = d.leg_damping;
   tune::LEG_MASS_FRACTION = d.leg_mass_frac;

@@ -1153,7 +1153,13 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
       if (i < DEBUG_PARAM_COUNT) {
         text(px + L(28), ly, params[i].name, col);
         const float v = debug_param_value(const_cast<Game&>(g), params[i]);
-        if (v >= 100.f || (v == std::floor(v) && std::fabs(v) >= 10.f))
+        if (params[i].kind == DebugParam::Kind::SonarMode) {
+          const int mi = static_cast<int>(v);
+          std::snprintf(val, sizeof val, "%s",
+                        (mi >= 0 && mi < tune::SONAR_MODE_COUNT) ? tune::SONAR_MODES[mi].name : "?");
+        } else if (params[i].kind == DebugParam::Kind::PassiveExplore) {
+          std::snprintf(val, sizeof val, "%s", v >= 0.5f ? "ON" : "OFF");
+        } else if (v >= 100.f || (v == std::floor(v) && std::fabs(v) >= 10.f))
           std::snprintf(val, sizeof val, "%.0f", v);
         else if (v >= 10.f)
           std::snprintf(val, sizeof val, "%.1f", v);

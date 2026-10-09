@@ -30,6 +30,8 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 - F: fullscreen
 - F3 or Options → Debug: live-tweak gravity, thrust/mass multipliers, fuel, sonar range, legs, rope, crash limits
 - Explore: passive radius around the ship paints the minimap; sonar is a search pulse that reflects off pads/cargo/signals
+- Fog/sonar are data-driven (`tune::SONAR_MODES`, `PASSIVE_EXPLORE`): REFLECT (default), PAINT (classic fog ping),
+  BOTH. Systems dispatch on flags — old paint path is kept, not deleted. Debug can switch modes live.
 
 ## World
 
