@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-034.1-minimap-symbols-zoom-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-034.1-minimap-symbols-zoom-9a093cd` → tip `f27ed0c`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
