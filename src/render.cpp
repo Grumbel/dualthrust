@@ -784,7 +784,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
 
   const int bars = channel_count(d);
   const int bar_h = L(10), bar_w = L(120), bar_step = L(18);
-  fill(m8, m8, L(210), bar_step * (bars + 1) + L(4) + lh * 10 + L(28), with_alpha(pal::MENU, 120));
+  fill(m8, m8, L(210), bar_step * (bars + 2) + L(4) + lh * 12 + L(28), with_alpha(pal::MENU, 120));
   int y = m16;
   for (int i = 0; i < bars; ++i) {
     fill(m20, y, bar_w, bar_h, pal::DIM);
@@ -841,6 +841,16 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   y += lh;
   const Rope& rp = g.ecs.get<Rope>(g.ship);
   action_bind_label(binds, Action::Grip, !pad, bname, sizeof bname);
+  // Winch length bar (MIN_LEN..OUT_LEN)
+  {
+    const float span = std::max(1.f, rope::OUT_LEN - rope::MIN_LEN);
+    const float u = clampf((rp.length - rope::MIN_LEN) / span, 0.f, 1.f);
+    fill(m20, y, bar_w, bar_h, pal::DIM);
+    fill(m20, y, static_cast<int>(bar_w * u), bar_h, mix(pal::MID, pal::CARGO, u));
+    outline(m20, y, bar_w, bar_h, with_alpha(pal::MID, 120));
+    text(L(148), y - L(3), "WINCH", pal::MID);
+    y += bar_step;
+  }
   if (rp.held != NULL_ENTITY) {
     const Cargo& held = g.ecs.get<Cargo>(rp.held);
     std::snprintf(legbuf, sizeof legbuf, "LOAD %s %.2f  %s", held.def->name, held.def->mass, bname);
@@ -859,19 +869,18 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", bname);
     text(m20, y, legbuf, pal::MID);
     y += lh;
-    // Magnet cue: a crate is inside auto-grab reach
-    if (rope::AUTO_GRAB && rp.out) {
+    // Proximity cue: MAGNET (auto) or NEAR (manual reach) when a crate is close to the hook
+    if (rp.out) {
+      const float reach = rope::AUTO_GRAB ? rope::AUTO_GRAB_REACH : rope::GRAB_REACH;
       bool near = false;
-      float best = rope::AUTO_GRAB_REACH;
       g.ecs.view<Cargo, Transform>([&](Entity, const Cargo& c, const Transform& ct) {
         if (!c.def) return;
         const float dx = std::max(std::abs(ct.pos.x - rp.hook_pos.x) - c.def->half_w, 0.f);
         const float dy = std::max(std::abs(ct.pos.y - rp.hook_pos.y) - c.def->half_h, 0.f);
-        const float d = std::sqrt(dx * dx + dy * dy);
-        if (d < best) { best = d; near = true; }
+        if (std::sqrt(dx * dx + dy * dy) < reach) near = true;
       });
       if (near) {
-        text(m20, y, "MAGNET", pal::CARGO);
+        text(m20, y, rope::AUTO_GRAB ? "MAGNET" : "NEAR", pal::CARGO);
         y += lh;
       }
     }
