@@ -22,6 +22,9 @@
 
 ## Notes
 
+- Exploration: sonar reveal strength fades past 75% range; deep-cave signals (+75);
+  fuel limps instead of cutting out; map exploration awards small score.
+
 - Map is 4:3 (7680×5760). Unexplored minimap cells are radio static, not flat black.
 - Fog of war + sonar: minimap starts black; C / left-stick-click pings a ring that paints solid rock
   and cargo it sweeps. Select/Z holds the full revealed chart. Ship switch teleports to the nearest pad.

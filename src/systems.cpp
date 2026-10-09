@@ -44,7 +44,7 @@ void burst(Game& g, Vec2 pos, Vec2 normal, int count, float speed, float spread,
 void exhaust_system(Game& g, float dt) {
   g.ecs.view<Thrusters, Transform, Motion, Hull, Flight>(
       [&](Entity, Thrusters& th, Transform& t, Motion& m, Hull& h, Flight& f) {
-        if (f.state != FlightState::Flying || f.fuel <= 0.f) return;
+        if (f.state != FlightState::Flying) return;
         const ShipDef& d = *h.def;
         for (int i = 0; i < thruster_count(d); ++i) {
           const ThrusterPose tp = thruster_pose(d, i);
@@ -127,12 +127,18 @@ void forces_system(Game& g) {
     const ShipBodies& sb = body.b;
     const b2Rot q = b2Body_GetRotation(sb.hull);
 
-    if (f.state != FlightState::Crashed && f.fuel > 0.f) {
+    if (f.state != FlightState::Crashed) {
+      // Power scales with fuel but floors at FUEL_LIMP so the ship can always limp home
+      const float power = f.fuel >= tune::FUEL_LIMP ? 1.f
+                          : (0.35f + 0.65f * (f.fuel / tune::FUEL_LIMP));
       for (int i = 0; i < thruster_count(d); ++i) {
         const ThrusterPose tp = thruster_pose(d, i);
-        const float level = th.level[tp.channel];
+        float level = th.level[tp.channel];
         if (level <= 0.f) continue;
-        const float force = d.mass * d.max_thrust / PPM * level * tp.power;
+        // Mild sputter on the weaker side when limping (fun feedback, not a hard fail)
+        if (f.fuel < tune::FUEL_LIMP && (tp.channel & 1))
+          level *= 0.75f + 0.25f * std::sin(g.time * 17.f + float(i));
+        const float force = d.mass * d.max_thrust / PPM * level * tp.power * power;
         const b2Vec2 at = b2Body_GetWorldPoint(sb.hull, to_b2(tp.pos));
         b2Body_ApplyForce(sb.hull, b2MulSV(force, b2RotateVector(q, {tp.push.x, tp.push.y})), at, true);
       }
@@ -629,7 +635,28 @@ void reset_fog(Game& g) {
   g.reveal_dirty = true;
   g.sonar = {};
   g.last_pad = -1;
+  g.cells_explored = 0;
+  g.signals.clear();
   for (LandingPad& p : g.cave.pads) p.active = false;
+}
+
+// Scatter a few deep-cave signals in open air for the pilot to find with sonar.
+void place_signals(Game& g) {
+  g.signals.clear();
+  constexpr int WANT = 8;
+  for (int tries = 0; tries < 400 && static_cast<int>(g.signals.size()) < WANT; ++tries) {
+    const float x = g.rng.range(Cave::CELL * 8.f, Cave::WORLD_W - Cave::CELL * 8.f);
+    const float y = g.rng.range(Cave::CELL * 8.f, Cave::WORLD_H - Cave::CELL * 8.f);
+    if (g.cave.is_solid_world(x, y)) continue;
+    // Keep away from pads so they stay distinct goals
+    bool near_pad = false;
+    for (const LandingPad& p : g.cave.pads) {
+      const float cx = 0.5f * (p.x0 + p.x1);
+      if (std::abs(x - cx) < 180.f && std::abs(y - p.y) < 120.f) { near_pad = true; break; }
+    }
+    if (near_pad) continue;
+    g.signals.push_back({Vec2{x, y}, false});
+  }
 }
 
 // Bring the pad nearest wx online and remember it as home (used at cave start).
@@ -651,10 +678,11 @@ void activate_home_pad(Game& g, float wx) {
     const int gx = static_cast<int>(x / Cave::CELL);
     for (int dy = -2; dy <= 1; ++dy) {
       if (!Cave::in_grid(gx, gy + dy)) continue;
-      g.revealed[static_cast<size_t>((gy + dy) * Cave::GW + gx)] = 1;
+      g.revealed[static_cast<size_t>((gy + dy) * Cave::GW + gx)] = 255;
     }
   }
   g.reveal_dirty = true;
+  if (g.signals.empty()) place_signals(g);
 }
 
 float home_pad_x(const Game& g) {
@@ -714,11 +742,8 @@ void fire_sonar(Game& g) {
   if (g.sonar.active || g.sonar_cool > 0.f) return;
   Flight& fl = g.ecs.get<Flight>(g.ship);
   if (fl.state == FlightState::Crashed) return;
-  if (fl.fuel < tune::FUEL_SONAR) {
-    notice(g, "LOW FUEL");
-    return;
-  }
-  fl.fuel = std::max(0.f, fl.fuel - tune::FUEL_SONAR);
+  if (fl.fuel > 0.f)
+    fl.fuel = std::max(0.f, fl.fuel - tune::FUEL_SONAR);
   const Vec2 p = ship_transform(g).pos;
   g.sonar = SonarPing{true, p, 0.f, 0.f, 960.f, 780.f, 1.f};
   g.sonar_cool = tune::SONAR_COOLDOWN;
@@ -735,7 +760,7 @@ void discover_pads(Game& g) {
       const int gx = static_cast<int>(x / Cave::CELL);
       if (!Cave::in_grid(gx, gy)) continue;
       const size_t i = static_cast<size_t>(gy * Cave::GW + gx);
-      if (i < g.revealed.size() && g.revealed[i]) {
+      if (i < g.revealed.size() && g.revealed[i] >= 80) {
         p.active = true;
         notice(g, "PAD ONLINE");
         break;
@@ -743,7 +768,7 @@ void discover_pads(Game& g) {
       // also accept the cell just above the deck (open air the ping paints)
       if (Cave::in_grid(gx, gy - 1)) {
         const size_t j = static_cast<size_t>((gy - 1) * Cave::GW + gx);
-        if (j < g.revealed.size() && g.revealed[j]) {
+        if (j < g.revealed.size() && g.revealed[j] >= 80) {
           p.active = true;
           notice(g, "PAD ONLINE");
           break;
@@ -778,11 +803,21 @@ void update_sonar(Game& g, float dt) {
   const int gy0 = std::max(0, static_cast<int>((s.origin.y - r1 - pad) / Cave::CELL));
   const int gy1 = std::min(Cave::GH - 1, static_cast<int>((s.origin.y + r1 + pad) / Cave::CELL));
   bool painted = false;
-  auto mark = [&](int gx, int gy) {
-    if (!Cave::in_grid(gx, gy)) return;
+  int new_cells = 0;
+  // Strength: full out to 75% of max range, then linear fade to a faint residual at the rim
+  auto strength_at = [&](float d) -> uint8_t {
+    const float full = s.max_radius * 0.75f;
+    if (d <= full) return 255;
+    if (d >= s.max_radius) return 40;
+    const float u = (d - full) / (s.max_radius - full);
+    return static_cast<uint8_t>(255.f * (1.f - u) + 40.f * u);
+  };
+  auto mark = [&](int gx, int gy, uint8_t str) {
+    if (!Cave::in_grid(gx, gy) || str == 0) return;
     const size_t i = static_cast<size_t>(gy * Cave::GW + gx);
-    if (!g.revealed[i]) {
-      g.revealed[i] = 1;
+    if (g.revealed[i] < str) {
+      if (g.revealed[i] == 0) ++new_cells;
+      g.revealed[i] = str;
       painted = true;
     }
   };
@@ -829,14 +864,15 @@ void update_sonar(Game& g, float dt) {
       const float d = std::sqrt(dx * dx + dy * dy);
       if (d < r0 || d >= r1) continue;
       if (!clear_path(gx, gy)) continue;
+      const uint8_t str = strength_at(d);
       if (!g.cave.is_solid_cell(gx, gy)) {
-        // Open air with clear LOS → explored void (black)
-        mark(gx, gy);
+        // Open air with clear LOS → explored void (black, strength fades with range)
+        mark(gx, gy, str);
         continue;
       }
       // Rock face (+ slight penetration); LOS already verified up to this cell
       const int depth = rock_depth(gx, gy);
-      if (depth >= 1 && depth <= 2) mark(gx, gy);
+      if (depth >= 1 && depth <= 2) mark(gx, gy, str);
     }
   }
   // Cargo crates: paint a small blob when the wavefront reaches them
@@ -846,12 +882,35 @@ void update_sonar(Game& g, float dt) {
     if (d < r0 || d >= r1) return;
     const int gx = static_cast<int>(tf.pos.x / Cave::CELL);
     const int gy = static_cast<int>(tf.pos.y / Cave::CELL);
+    const uint8_t str = strength_at(d);
     for (int oy = -1; oy <= 1; ++oy)
-      for (int ox = -1; ox <= 1; ++ox) mark(gx + ox, gy + oy);
+      for (int ox = -1; ox <= 1; ++ox) mark(gx + ox, gy + oy, str);
   });
+  // Deep-cave signals: light up on first contact
+  for (Game::Signal& sig : g.signals) {
+    if (sig.found) continue;
+    const float dx = sig.pos.x - s.origin.x, dy = sig.pos.y - s.origin.y;
+    const float d = std::sqrt(dx * dx + dy * dy);
+    if (d < r0 || d >= r1) continue;
+    if (!clear_path(static_cast<int>(sig.pos.x / Cave::CELL), static_cast<int>(sig.pos.y / Cave::CELL)))
+      continue;
+    sig.found = true;
+    g.score += tune::SCORE_SIGNAL;
+    notice(g, "+75 SIGNAL");
+    // Bright blob around the signal on the chart
+    const int sgx = static_cast<int>(sig.pos.x / Cave::CELL);
+    const int sgy = static_cast<int>(sig.pos.y / Cave::CELL);
+    for (int oy = -2; oy <= 2; ++oy)
+      for (int ox = -2; ox <= 2; ++ox) mark(sgx + ox, sgy + oy, 255);
+  }
   if (painted) {
     g.reveal_dirty = true;
     discover_pads(g);
+    if (new_cells > 0) {
+      const int bonus = std::min(new_cells, 40);  // soft cap per tick so a single ping is not a jackpot
+      g.score += bonus * tune::SCORE_REVEAL_CELL;
+      g.cells_explored += new_cells;
+    }
   }
 }
 

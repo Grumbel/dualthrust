@@ -41,15 +41,18 @@ inline constexpr float SETTLE_MAX_ANGLE = 1.2f;  // rad: leaning more than this 
 inline constexpr float UNSETTLE_SPEED = 30.f;
 inline constexpr float SETTLE_TIME = 0.5f;
 
-// Fuel (0..1): burns with thrust, refills while settled on a pad. Empty tanks cut engine force.
-inline constexpr float FUEL_BURN = 0.07f;       // fraction per second at summed channel level 1.0
-inline constexpr float FUEL_REFUEL = 0.45f;     // fraction per second on a pad
-inline constexpr float FUEL_SONAR = 0.04f;      // cost to fire a ping
-inline constexpr float SONAR_COOLDOWN = 1.2f;   // seconds between pings
+// Fuel (0..1): light drain, generous refill. Engines limp below ~20% instead of cutting out.
+inline constexpr float FUEL_BURN = 0.028f;      // fraction per second at summed channel level 1.0
+inline constexpr float FUEL_REFUEL = 0.55f;     // fraction per second on a pad
+inline constexpr float FUEL_SONAR = 0.012f;     // small ping cost (never blocks scanning)
+inline constexpr float FUEL_LIMP = 0.22f;       // below this, thrust power floors here (sputter, not stop)
+inline constexpr float SONAR_COOLDOWN = 0.9f;   // seconds between pings
 
-// Score awarded once per successful event (shown on the HUD; permanent stats stay separate)
+// Score (session): exploration-friendly rewards, not win conditions
 inline constexpr int SCORE_PAD_LANDING = 100;
 inline constexpr int SCORE_CARGO = 250;
+inline constexpr int SCORE_SIGNAL = 75;         // first sonar contact with a deep-cave signal
+inline constexpr int SCORE_REVEAL_CELL = 1;     // per newly solid-revealed cell (capped per ping)
 
 // Landing legs: spring along the strut (Hz, damping ratio), leg body mass as a fraction of the ship's
 inline constexpr float LEG_HERTZ = 1.0f;

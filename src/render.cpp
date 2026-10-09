@@ -182,42 +182,71 @@ void Gfx::build_minimap(const Cave& cave, const std::vector<uint8_t>& revealed) 
     if (!Cave::in_grid(gx, gy)) return false;
     return revealed[static_cast<size_t>(gy * Cave::GW + gx)] != 0;
   };
+  auto noise_at = [&](int gx, int gy) -> uint32_t {
+    const uint32_t h = fog_hash(static_cast<uint32_t>(gx * 73856093u) ^ static_cast<uint32_t>(gy * 19349663u));
+    const uint8_t n = static_cast<uint8_t>(h & 255u);
+    const uint8_t n2 = static_cast<uint8_t>((h >> 8) & 255u);
+    const uint8_t v = static_cast<uint8_t>(18 + (n % 50) + ((n2 & 7) == 0 ? 40 : 0));
+    return pack({static_cast<uint8_t>(v / 3), v, static_cast<uint8_t>(v / 2), 220});
+  };
+  auto lerp_u8 = [](uint8_t a, uint8_t b, float t) -> uint8_t {
+    return static_cast<uint8_t>(a + (b - a) * t);
+  };
   for (int i = 0; i < ncells; ++i) {
-    if (has_fog && !revealed[static_cast<size_t>(i)]) {
-      const int gx = i % Cave::GW, gy = i / Cave::GW;
-      const uint32_t h = fog_hash(static_cast<uint32_t>(gx * 73856093u) ^ static_cast<uint32_t>(gy * 19349663u));
-      const uint8_t n = static_cast<uint8_t>(h & 255u);
-      const uint8_t n2 = static_cast<uint8_t>((h >> 8) & 255u);
-      const uint8_t v = static_cast<uint8_t>(18 + (n % 50) + ((n2 & 7) == 0 ? 40 : 0));
-      px[static_cast<size_t>(i)] = pack({static_cast<uint8_t>(v / 3), v, static_cast<uint8_t>(v / 2), 220});
+    const int gx = i % Cave::GW, gy = i / Cave::GW;
+    const uint8_t str = has_fog ? revealed[static_cast<size_t>(i)] : static_cast<uint8_t>(255);
+    if (str == 0) {
+      px[static_cast<size_t>(i)] = noise_at(gx, gy);
       continue;
     }
+    // Fully revealed look
+    uint8_t fr, fg, fb;
     if (cave.solid[static_cast<size_t>(i)]) {
-      // Core rock fill (visible so mass reads, not only a 1px edge)
-      px[static_cast<size_t>(i)] = pack({20, 90, 40, 255});
+      fr = 20; fg = 90; fb = 40;  // rock fill
     } else {
-      px[static_cast<size_t>(i)] = pack({0, 0, 0, 255});
+      fr = 0; fg = 0; fb = 0;  // open void
+    }
+    if (str >= 250) {
+      px[static_cast<size_t>(i)] = pack({fr, fg, fb, 255});
+    } else {
+      // Outer fade band: blend revealed into radio noise by strength
+      const float t = str / 255.f;
+      const uint32_t nh = fog_hash(static_cast<uint32_t>(gx * 73856093u) ^ static_cast<uint32_t>(gy * 19349663u));
+      const uint8_t nv = static_cast<uint8_t>(18 + ((nh & 255u) % 50));
+      px[static_cast<size_t>(i)] = pack({
+          lerp_u8(static_cast<uint8_t>(nv / 3), fr, t),
+          lerp_u8(nv, fg, t),
+          lerp_u8(static_cast<uint8_t>(nv / 2), fb, t),
+          255});
     }
   }
-  // Second pass: thick high-contrast edge — surface solid + open neighbour, 2 cells deep
-  const uint32_t edge_hi = pack({160, 255, 180, 255});   // BRIGHT face
-  const uint32_t edge_md = pack({80, 200, 110, 255});    // outer rim on the open side
+  // Second pass: thick high-contrast edge on well-revealed surface rock
+  const uint32_t edge_hi = pack({160, 255, 180, 255});
+  const uint32_t edge_md = pack({80, 200, 110, 255});
   for (int gy = 0; gy < Cave::GH; ++gy) {
     for (int gx = 0; gx < Cave::GW; ++gx) {
-      if (!rev_at(gx, gy)) continue;
+      const uint8_t str = has_fog ? revealed[static_cast<size_t>(gy * Cave::GW + gx)] : static_cast<uint8_t>(255);
+      if (str < 100) continue;  // too faint for a hard edge
       if (!solid_at(gx, gy)) continue;
       bool surface = false;
       for (int oy = -1; oy <= 1 && !surface; ++oy)
         for (int ox = -1; ox <= 1 && !surface; ++ox)
           if ((ox || oy) && !solid_at(gx + ox, gy + oy)) surface = true;
       if (!surface) continue;
-      px[static_cast<size_t>(gy * Cave::GW + gx)] = edge_hi;
-      // rim into open air so the outline is ~2 px thick on the chart
+      // pack is R,G,B,A in memory - careful: our pack() order
+      if (str >= 250)
+        px[static_cast<size_t>(gy * Cave::GW + gx)] = edge_hi;
+      else {
+        const uint8_t eg = static_cast<uint8_t>(40 + 215 * t);
+        px[static_cast<size_t>(gy * Cave::GW + gx)] = pack({static_cast<uint8_t>(eg * 2 / 3), eg, static_cast<uint8_t>(eg * 3 / 4), 255});
+      }
       for (int oy = -1; oy <= 1; ++oy)
         for (int ox = -1; ox <= 1; ++ox) {
           if (!ox && !oy) continue;
           const int nx = gx + ox, ny = gy + oy;
-          if (!rev_at(nx, ny) || solid_at(nx, ny)) continue;
+          if (!Cave::in_grid(nx, ny) || solid_at(nx, ny)) continue;
+          const uint8_t ns = has_fog ? revealed[static_cast<size_t>(ny * Cave::GW + nx)] : static_cast<uint8_t>(255);
+          if (ns < 80) continue;
           px[static_cast<size_t>(ny * Cave::GW + nx)] = edge_md;
         }
     }
@@ -736,7 +765,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
 
   const int bars = channel_count(d);
   const int bar_h = L(10), bar_w = L(120), bar_step = L(18);
-  fill(m8, m8, L(210), bar_step * (bars + 1) + L(4) + lh * 8 + L(28), with_alpha(pal::MENU, 120));
+  fill(m8, m8, L(210), bar_step * (bars + 1) + L(4) + lh * 9 + L(28), with_alpha(pal::MENU, 120));
   int y = m16;
   for (int i = 0; i < bars; ++i) {
     fill(m20, y, bar_w, bar_h, pal::DIM);
@@ -751,9 +780,10 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   fill(m20, y, bar_w, bar_h, pal::DIM);
   const float fuel = clampf(fl.fuel, 0.f, 1.f);
   fill(m20, y, static_cast<int>(bar_w * fuel), bar_h,
-       fuel > 0.25f ? pal::PAD : mix(pal::HOT, pal::WARN, fuel / 0.25f));
+       fuel > tune::FUEL_LIMP ? pal::PAD : mix(pal::WARN, pal::PAD, fuel / tune::FUEL_LIMP));
   outline(m20, y, bar_w, bar_h, with_alpha(pal::MID, 120));
-  text(L(148), y - L(3), "FUEL", fuel > 0.25f ? pal::MID : pal::HOT);
+  text(L(148), y - L(3), fuel > tune::FUEL_LIMP ? "FUEL" : "LIMP",
+       fuel > tune::FUEL_LIMP ? pal::MID : pal::WARN);
   y += bar_step;
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%s%s", d.name, d.engines_top ? " TOP" : "");
@@ -762,6 +792,14 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   std::snprintf(buf, sizeof(buf), "SCORE %d", g.score);
   text(m20, y, buf, pal::BRIGHT);
   y += lh;
+  {
+    int found = 0;
+    for (const Game::Signal& s : g.signals) if (s.found) ++found;
+    const int total = static_cast<int>(g.signals.size());
+    std::snprintf(buf, sizeof(buf), "SIG %d/%d", found, total);
+    text(m20, y, buf, found == total && total > 0 ? pal::CARGO : pal::MID);
+    y += lh;
+  }
   char bname[24];
   action_bind_label(binds, Action::Pause, !pad, bname, sizeof bname);
   char linebuf[48];
@@ -886,12 +924,16 @@ void Gfx::draw_minimap(Game& g, double t) {
   auto is_rev = [&](float wx, float wy) {
     const int gx = static_cast<int>(wx / Cave::CELL), gy = static_cast<int>(wy / Cave::CELL);
     if (!Cave::in_grid(gx, gy) || g.revealed.empty()) return true;
-    return g.revealed[static_cast<size_t>(gy * Cave::GW + gx)] != 0;
+    return g.revealed[static_cast<size_t>(gy * Cave::GW + gx)] >= 60;
   };
   for (const LandingPad& p : g.cave.pads) {
     if (!p.active) continue;
     const float cx = 0.5f * (p.x0 + p.x1);
     if (is_rev(cx, p.y)) dot(cx, p.y, d_pad, pal::WARN);
+  }
+  for (const Game::Signal& sig : g.signals) {
+    if (!sig.found) continue;
+    dot(sig.pos.x, sig.pos.y, L(4), pal::CARGO);
   }
   g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) {
     if (is_rev(ct.pos.x, ct.pos.y)) dot(ct.pos.x, ct.pos.y, d_cargo, pal::CARGO);

@@ -31,7 +31,7 @@ struct Flight {
   float settle = 0.f;    // how long the ship has been resting (Flying -> Landed at SETTLE_TIME)
   int contacts = 0;      // touching contact manifolds on hull and legs this tick
   Vec2 contact_pt;       // lowest touching point (px)
-  float fuel = 1.f;      // 0..1 tank; empty engines produce no force
+  float fuel = 1.f;      // 0..1 tank; low fuel limps engines, does not hard-stop
 };
 // Box2D bodies of the ship, and the landing gear on top of them
 struct Body { ShipBodies b; };
@@ -124,9 +124,17 @@ struct Game {
   float sonar_cool = 0.f;    // seconds until the next ping is allowed
   int last_pad = -1;         // index of last pad the ship settled on (-1 = none yet)
 
-  // Fog of war: one byte per cave cell, 0 = unknown, non-zero = revealed by sonar.
+  // Fog of war: one byte per cave cell, 0 = unknown, 1..255 = reveal strength (sonar distance fade).
   // Size GW*GH after the first cave generate; reset when the cave regenerates.
   std::vector<uint8_t> revealed;
   bool reveal_dirty = true;  // minimap texture needs a rebuild
   SonarPing sonar;
+
+  // Deep-cave signals: faint beacons that light up when a ping brushes them (exploration goals).
+  struct Signal {
+    Vec2 pos;
+    bool found = false;
+  };
+  std::vector<Signal> signals;
+  int cells_explored = 0;  // cells that reached full reveal (255) at least once
 };
