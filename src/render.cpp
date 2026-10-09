@@ -1144,12 +1144,14 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
     for (int vis = 0; vis < std::min(rows, max_vis); ++vis) {
       const int i = scroll + vis;
       const bool sel = ui.debug_cursor == i;
+      const bool dirty = i < DEBUG_PARAM_COUNT && debug_param_changed(const_cast<Game&>(g), i);
       const int ly = row_y + vis * lh;
       if (sel) {
         fill(px + L(10), ly - L(3), panel_w - L(20), cell_h() + L(6), with_alpha(pal::MID, 40));
         if (std::fmod(ui.time, 0.8) < 0.55) text(px + L(28) - cell_w() - L(4), ly, ">", pal::WARN);
       }
-      const Rgba col = sel ? pal::WARN : pal::MID;
+      // Changed-from-default rows use HOT; selected still WARN; else MID
+      const Rgba col = sel ? pal::WARN : (dirty ? pal::HOT : pal::MID);
       if (i < DEBUG_PARAM_COUNT) {
         text(px + L(28), ly, params[i].name, col);
         const float v = debug_param_value(const_cast<Game&>(g), params[i]);
@@ -1178,7 +1180,7 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
     }
     const bool kbd = ui.device != InputDevice::Gamepad;
     text_centered(w_ / 2, py + panel_h - cell_h() - L(12),
-                  kbd ? "LEFT/RIGHT TWEAK  ESC BACK" : "D-PAD TWEAK  B BACK", pal::MID);
+                  kbd ? "LEFT/RIGHT TWEAK  Y RESET  ESC BACK" : "D-PAD TWEAK  Y RESET  B BACK", pal::MID);
     return;
   }
 

@@ -164,6 +164,40 @@ inline void debug_param_nudge(Game& g, int index, int dir) {
   debug_param_set(g, p, v);
 }
 
+// Defaults in the same order as debug_params() rows (must stay in sync).
+inline float debug_param_default(int index) {
+  static const float defs[DEBUG_PARAM_COUNT] = {
+      0.62f, 120.f, 0.08f, 1.2f, 8.f,           // time, gravity, drags, spin
+      1.f, 1.f,                                   // mass/thrust mul
+      0.028f, 0.55f, 0.22f, 0.012f,              // fuel
+      900.f, 720.f, 0.9f, 0.9f,                  // sonar
+      900.f, 0.75f, 1.f, 0.f,                    // explore + passive + mode
+      1.0f, 0.3f, 0.06f,                         // legs
+      120.f, 260.f, 30.f,                        // crash / hit
+      55.f, 40.f, 0.22f,                         // land
+      10.f, 0.5f,                                // settle
+      0.6f, 1.0f, 0.4f, 0.6f,                    // friction
+      300.f, 130.f, 70.f, 22.f,                  // rope
+      220.f,                                     // signal prox
+  };
+  if (index < 0 || index >= DEBUG_PARAM_COUNT) return 0.f;
+  return defs[index];
+}
+
+inline bool debug_param_changed(Game& g, int index) {
+  if (index < 0 || index >= DEBUG_PARAM_COUNT) return false;
+  const DebugParam& p = debug_params(g)[index];
+  const float cur = debug_param_value(g, p);
+  const float def = debug_param_default(index);
+  const float eps = std::max(1e-4f, p.step * 0.01f);
+  return std::fabs(cur - def) > eps;
+}
+
+inline void debug_param_reset_one(Game& g, int index) {
+  if (index < 0 || index >= DEBUG_PARAM_COUNT) return;
+  debug_param_set(g, debug_params(g)[index], debug_param_default(index));
+}
+
 inline void debug_reset_all(Game& g) {
   const DebugDefaults& d = debug_defaults();
   tune::TIME_SCALE = d.time_scale;

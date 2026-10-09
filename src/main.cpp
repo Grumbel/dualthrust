@@ -601,6 +601,11 @@ int main(int argc, char** argv) {
               if (ui.debug_cursor < DEBUG_PARAM_COUNT) debug_param_nudge(game, ui.debug_cursor, -1);
             } else if (k == SDLK_RIGHT || k == SDLK_d) {
               if (ui.debug_cursor < DEBUG_PARAM_COUNT) debug_param_nudge(game, ui.debug_cursor, +1);
+            } else if (k == SDLK_y) {
+              if (ui.debug_cursor < DEBUG_PARAM_COUNT) {
+                debug_param_reset_one(game, ui.debug_cursor);
+                show_toast("PARAM RESET");
+              }
             } else if (k == SDLK_ESCAPE) menu_back();
             else if (enter || k == SDLK_SPACE) {
               if (ui.debug_cursor >= DEBUG_PARAM_COUNT) {
@@ -703,6 +708,11 @@ int main(int argc, char** argv) {
               if (ui.debug_cursor < DEBUG_PARAM_COUNT) debug_param_nudge(game, ui.debug_cursor, -1);
             } else if (b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
               if (ui.debug_cursor < DEBUG_PARAM_COUNT) debug_param_nudge(game, ui.debug_cursor, +1);
+            } else if (b == SDL_CONTROLLER_BUTTON_Y) {
+              if (ui.debug_cursor < DEBUG_PARAM_COUNT) {
+                debug_param_reset_one(game, ui.debug_cursor);
+                show_toast("PARAM RESET");
+              }
             } else if (b == SDL_CONTROLLER_BUTTON_B) menu_back();
             else if (b == SDL_CONTROLLER_BUTTON_A) {
               if (ui.debug_cursor >= DEBUG_PARAM_COUNT) {
