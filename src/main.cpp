@@ -279,6 +279,16 @@ int main(int argc, char** argv) {
   UserConfig user = load_config();
   BindMap binds;
   load_binds(binds);
+  // Legacy defaults put NextShip on right-stick click (felt like a mid-flight respawn).
+  // Always strip that button from Respawn / NextShip so old configs stay fixed.
+  {
+    const InputSrc rst = btn_src(SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+    for (Action a : {Action::Respawn, Action::NextShip}) {
+      const int i = static_cast<int>(a);
+      for (int s = 0; s < BIND_SLOTS; ++s)
+        if (binds.pad[i][s] == rst) binds.pad[i][s] = {};
+    }
+  }
   if (opt.ship >= 0) user.ship = opt.ship;
   if (user.ship < 0 || user.ship >= SHIP_DEF_COUNT) user.ship = DEFAULT_SHIP;
   if (opt.zoom >= 0) user.zoom = opt.zoom;

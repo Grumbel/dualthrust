@@ -171,6 +171,14 @@ inline void set_default_binds(BindMap& m) {
   B(Action::Respawn, 1, SDL_CONTROLLER_BUTTON_A);  // A also respawns when crashed (handled in play logic)
 }
 
+// Remove a pad button from every action (used to drop legacy RIGHTSTICK→respawn/ship binds).
+inline void scrub_pad_button(BindMap& m, SDL_GameControllerButton button) {
+  const InputSrc victim = btn_src(button);
+  for (int a = 0; a < ACTION_COUNT; ++a)
+    for (int s = 0; s < BIND_SLOTS; ++s)
+      if (m.pad[a][s] == victim) m.pad[a][s] = {};
+}
+
 // Clear every slot on either device that matches `src`, then write `src` into the first free
 // slot of `action` for that device. Returns false if the source was empty.
 inline bool assign_bind(BindMap& m, Action action, InputSrc src, bool keyboard) {
