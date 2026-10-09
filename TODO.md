@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-041.1-winch-per-ship-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-041.1-winch-per-ship-9a093cd` → tip `c3c801d`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
