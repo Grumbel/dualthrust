@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-042.1-engine-contact-damage-9a093cd` → tip (HEAD)
+- Bundle line: `dualthrust-042.1-engine-contact-damage-9a093cd` → tip `77b44e0`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
