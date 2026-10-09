@@ -837,6 +837,22 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
     std::snprintf(legbuf, sizeof legbuf, "HOOK %s  %s", rp.out ? "OUT" : "IN", bname);
     text(m20, y, legbuf, pal::MID);
     y += lh;
+    // Magnet cue: a crate is inside auto-grab reach
+    if (rope::AUTO_GRAB && rp.out) {
+      bool near = false;
+      float best = rope::AUTO_GRAB_REACH;
+      g.ecs.view<Cargo, Transform>([&](Entity, const Cargo& c, const Transform& ct) {
+        if (!c.def) return;
+        const float dx = std::max(std::abs(ct.pos.x - rp.hook_pos.x) - c.def->half_w, 0.f);
+        const float dy = std::max(std::abs(ct.pos.y - rp.hook_pos.y) - c.def->half_h, 0.f);
+        const float d = std::sqrt(dx * dx + dy * dy);
+        if (d < best) { best = d; near = true; }
+      });
+      if (near) {
+        text(m20, y, "MAGNET", pal::CARGO);
+        y += lh;
+      }
+    }
   }
   {
     char pb[24], qb[24];
@@ -1155,7 +1171,8 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
           const int mi = static_cast<int>(v);
           std::snprintf(val, sizeof val, "%s",
                         (mi >= 0 && mi < tune::SONAR_MODE_COUNT) ? tune::SONAR_MODES[mi].name : "?");
-        } else if (params[i].kind == DebugParam::Kind::PassiveExplore) {
+        } else if (params[i].kind == DebugParam::Kind::PassiveExplore ||
+                   params[i].kind == DebugParam::Kind::AutoGrab) {
           std::snprintf(val, sizeof val, "%s", v >= 0.5f ? "ON" : "OFF");
         } else if (v >= 100.f || (v == std::floor(v) && std::fabs(v) >= 10.f))
           std::snprintf(val, sizeof val, "%.0f", v);

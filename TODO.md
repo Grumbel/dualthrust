@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-018.1-scrub-rstick-respawn-9a093cd` → tip `062ca07`
+- Bundle line: `dualthrust-021.1-magnet-hud-debug-9a093cd` → tip `62c1e26`
 - Base of this work line: `9a093cd`
 
 ## Roadmap
@@ -24,6 +24,7 @@
 - [x] UI scale option
 - [x] Debug menu (title → Debug, or F3 in play): live tune + Y resets one row; changed rows highlight
 - [x] Data-driven sonar modes (REFLECT / PAINT / BOTH) + passive explore
+- [x] Magnet auto-grab + HUD MAGNET cue + Debug AUTO GRAB
 - [x] Bidirectional stick thrust (channels 4/5 = stick-down) + Vernier / Bidraft / Seesaw ships
 - [x] Zoom cycle action (Tab); zoom in/out unbound on pad by default
 - [x] Menu nav stack (Options → Controls → Back → Options → Back works)
