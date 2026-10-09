@@ -821,7 +821,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   action_bind_label(binds, Action::Grip, !pad, bname, sizeof bname);
   if (rp.held != NULL_ENTITY) {
     const Cargo& held = g.ecs.get<Cargo>(rp.held);
-    std::snprintf(legbuf, sizeof legbuf, "LOAD %.1f  %s", held.def->mass, bname);
+    std::snprintf(legbuf, sizeof legbuf, "LOAD %s %.2f  %s", held.def->name, held.def->mass, bname);
     text(m20, y, legbuf, pal::CARGO);
     y += lh;
     if (held.dest_pad >= 0 && held.dest_pad < static_cast<int>(g.cave.pads.size())) {

@@ -518,31 +518,26 @@ void set_winch(Game& g, bool out) {
   beep(g, out ? SimEventKind::HookOut : SimEventKind::HookIn);
 }
 
-void toggle_grip(Game& g) {
-  Rope& r = g.ecs.get<Rope>(g.ship);
+Entity nearest_crate(Game& g, float reach) {
   Body& body = g.ecs.get<Body>(g.ship);
-  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
-  if (r.held != NULL_ENTITY) {  // let go
-    release_crate(g);
-    notice(g, "RELEASED");
-    beep(g, SimEventKind::Release);
-    return;
-  }
-  // The crate whose edge is nearest the hook, within reach
   Entity best = NULL_ENTITY;
-  float best_d = rope::GRAB_REACH;
+  float best_d = reach;
   g.ecs.view<Cargo, Transform>([&](Entity e, Cargo& c, Transform&) {
     if (!b2Body_IsEnabled(c.body)) return;
     const b2Vec2 lp = b2Body_GetLocalPoint(c.body, b2Body_GetPosition(body.b.hook));
-    const float dx = std::max(std::abs(lp.x) * PPM - c.def->half_w, 0.f), dy = std::max(std::abs(lp.y) * PPM - c.def->half_h, 0.f);
+    const float dx = std::max(std::abs(lp.x) * PPM - c.def->half_w, 0.f);
+    const float dy = std::max(std::abs(lp.y) * PPM - c.def->half_h, 0.f);
     const float d = std::sqrt(dx * dx + dy * dy);
     if (d < best_d) { best_d = d; best = e; }
   });
-  if (best == NULL_ENTITY) {
-    notice(g, "NOTHING IN REACH");
-    beep(g, SimEventKind::NoTarget);
-    return;
-  }
+  return best;
+}
+
+void grab_crate(Game& g, Entity best) {
+  if (best == NULL_ENTITY) return;
+  Rope& r = g.ecs.get<Rope>(g.ship);
+  if (r.held != NULL_ENTITY) return;
+  Body& body = g.ecs.get<Body>(g.ship);
   Cargo& c = g.ecs.get<Cargo>(best);
   b2RevoluteJointDef jd = b2DefaultRevoluteJointDef();  // hangs from the hook like a pendulum
   jd.bodyIdA = body.b.hook;
@@ -568,6 +563,34 @@ void toggle_grip(Game& g) {
   c.picked = true;
   notice(g, "CARGO PICKED UP");
   beep(g, SimEventKind::Grab);
+}
+
+void toggle_grip(Game& g) {
+  Rope& r = g.ecs.get<Rope>(g.ship);
+  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
+  if (r.held != NULL_ENTITY) {  // let go
+    release_crate(g);
+    notice(g, "RELEASED");
+    beep(g, SimEventKind::Release);
+    return;
+  }
+  Entity best = nearest_crate(g, rope::GRAB_REACH);
+  if (best == NULL_ENTITY) {
+    notice(g, "NOTHING IN REACH");
+    beep(g, SimEventKind::NoTarget);
+    return;
+  }
+  grab_crate(g, best);
+}
+
+// Magnet: cable out and empty → latch a crate that drifts into AUTO_GRAB_REACH.
+void auto_grab_update(Game& g) {
+  if (!rope::AUTO_GRAB) return;
+  Rope& r = g.ecs.get<Rope>(g.ship);
+  if (!r.out || r.held != NULL_ENTITY) return;
+  if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
+  Entity best = nearest_crate(g, rope::AUTO_GRAB_REACH);
+  if (best != NULL_ENTITY) grab_crate(g, best);
 }
 
 void toggle_legs(Game& g) {
@@ -1274,6 +1297,7 @@ void step_sim(Game& g, float dt) {
   g.phys.step(dt);
   sync_system(g);
   cargo_system(g, dt);
+  auto_grab_update(g);
   impact_system(g);
   ground_system(g, dt);
   event_system(g);

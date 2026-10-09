@@ -363,7 +363,9 @@ inline float OUT_LEN = 300.f;  // cable fully deployed
 inline float REEL_SPEED = 130.f;
 inline float REEL_SPEED_LOADED = 70.f;
 inline float HOOK_MASS_FRACTION = 0.12f;  // of the ship's mass
-inline float GRAB_REACH = 22.f;           // hook centre to the crate's edge
+inline float GRAB_REACH = 22.f;           // hook centre to the crate's edge (manual grip)
+inline bool AUTO_GRAB = true;             // magnet: latch nearest crate when the hook enters reach
+inline float AUTO_GRAB_REACH = 16.f;      // tighter than manual so fly-bys do not always snag
 inline constexpr int CARGO_COUNT = 12;
 // A crate on the hook is calmed so it hangs instead of flailing: air drag, friction in the pivot, and it no longer
 // collides with the ship (a swinging crate would otherwise snag legs and engines and yank the ship around)
