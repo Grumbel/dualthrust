@@ -785,6 +785,13 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   text(L(148), y - L(3), fuel > tune::FUEL_LIMP ? "FUEL" : "LIMP",
        fuel > tune::FUEL_LIMP ? pal::MID : pal::WARN);
   y += bar_step;
+  if (fl.hurt > 0.02f) {
+    fill(m20, y, bar_w, bar_h, pal::DIM);
+    fill(m20, y, static_cast<int>(bar_w * clampf(fl.hurt, 0.f, 1.f)), bar_h, mix(pal::WARN, pal::HOT, fl.hurt));
+    outline(m20, y, bar_w, bar_h, with_alpha(pal::MID, 120));
+    text(L(148), y - L(3), "DMG", pal::WARN);
+    y += bar_step;
+  }
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%s%s", d.name, d.engines_top ? " TOP" : "");
   text(m20, y, buf, pal::BRIGHT);
@@ -842,8 +849,34 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   const struct { const char* s; bool ok; } status[] = {
       {on_pad ? "PAD OK" : "NO PAD", on_pad}, {ok_v ? "SPEED OK" : "SPEED HI", ok_v}, {ok_a ? "ATT OK" : "ATT BAD", ok_a}};
   const int rx = w_ - text_width("SPEED OK") - m24;
-  fill(rx - L(12), m8, w_ - rx + L(4), lh * 3 + m16, with_alpha(pal::MENU, 120));
+  fill(rx - L(12), m8, w_ - rx + L(4), lh * 4 + m16, with_alpha(pal::MENU, 120));
   for (int i = 0; i < 3; ++i) text(rx, m16 + lh * i, status[i].s, status[i].ok ? pal::PAD : pal::HOT);
+  // Compass: direction to nearest undiscovered signal (exploration cue, not a hard objective)
+  {
+    float best_d = 1e12f;
+    Vec2 best{};
+    bool any = false;
+    for (const Game::Signal& sig : g.signals) {
+      if (sig.found) continue;
+      const float dx = sig.pos.x - tf.pos.x, dy = sig.pos.y - tf.pos.y;
+      const float d = dx * dx + dy * dy;
+      if (d < best_d) { best_d = d; best = {dx, dy}; any = true; }
+    }
+    if (any) {
+      const float len = std::sqrt(best_d);
+      const float ang = std::atan2(best.y, best.x);
+      char cbuf[32];
+      std::snprintf(cbuf, sizeof cbuf, "SIG %.0f", len / PPM);
+      text(rx, m16 + lh * 3, cbuf, pal::CARGO);
+      // small arrow next to the label
+      const int ax = rx - L(18), ay = m16 + lh * 3 + cell_h() / 2;
+      const int ex = ax + static_cast<int>(std::cos(ang) * L(10));
+      const int ey = ay + static_cast<int>(std::sin(ang) * L(10));
+      line(ax, ay, ex, ey, pal::CARGO);
+    } else if (!g.signals.empty()) {
+      text(rx, m16 + lh * 3, "SIG DONE", pal::PAD);
+    }
+  }
 
   if (g.notice_timer > 0.f)
     text_centered(w_ / 2, L(48) + (fl.state != FlightState::Flying ? 2 * lh + L(8) : 0), g.notice,
@@ -1112,6 +1145,15 @@ void Gfx::draw_title(const Game& g, const UiState& ui) const {
 // Frame
 // ---------------------------------------------------------------------------
 
+void Gfx::draw_residues(const Game& g) const {
+  for (const Game::Residue& r : g.residues) {
+    const float u = clampf(r.life / tune::RESIDUE_TTL, 0.f, 1.f);
+    const int s = std::max(2, Z(3));
+    const int x = sx(g.cam, r.pos.x) - s / 2, y = sy(r.pos.y) - s / 2;
+    fill(x, y, s, s, with_alpha(pal::CARGO, static_cast<uint8_t>(30 + 140 * u)));
+  }
+}
+
 void Gfx::draw_sonar(const Game& g) const {
   if (!g.sonar.active) return;
   const Vec2 o = g.sonar.origin;
@@ -1158,8 +1200,25 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
   const int sy = dy + static_cast<int>(tf.pos.y / Cave::CELL * scale);
   const int sz = std::max(3, L(6));
   fill(sx - sz / 2, sy - sz / 2, sz, sz, pal::HOT);
+  // Found signals on the chart
+  for (const Game::Signal& sig : g.signals) {
+    if (!sig.found) continue;
+    const int px = dx + static_cast<int>(sig.pos.x / Cave::CELL * scale);
+    const int py = dy + static_cast<int>(sig.pos.y / Cave::CELL * scale);
+    fill(px - 2, py - 2, 4, 4, pal::CARGO);
+  }
+  int found = 0;
+  for (const Game::Signal& s : g.signals) if (s.found) ++found;
+  const int total_cells = Cave::GW * Cave::GH;
+  int lit = 0;
+  if (!g.revealed.empty())
+    for (uint8_t v : g.revealed) if (v >= 80) ++lit;
+  const int pct = total_cells > 0 ? (lit * 100) / total_cells : 0;
+  char line[64];
   text_centered(w_ / 2, dy - cell_h() - L(10), "MAP", pal::BRIGHT);
-  text_centered(w_ / 2, dy + dh + L(8), "HOLD TO VIEW", pal::MID);
+  std::snprintf(line, sizeof line, "EXPLORED %d%%   SIGNALS %d/%d   SCORE %d", pct, found,
+                static_cast<int>(g.signals.size()), g.score);
+  text_centered(w_ / 2, dy + dh + L(8), line, pal::MID);
 }
 
 void Gfx::draw(Game& g, const UiState& ui, const BindMap& binds) {
@@ -1180,6 +1239,7 @@ void Gfx::draw(Game& g, const UiState& ui, const BindMap& binds) {
   draw_cargo(g, t);
   draw_rope(g, t);
   draw_ship(g, t);
+  draw_residues(g);
   draw_sonar(g);
 
   const Flight& fl = g.ecs.get<Flight>(g.ship);

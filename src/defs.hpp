@@ -53,6 +53,9 @@ inline constexpr int SCORE_PAD_LANDING = 100;
 inline constexpr int SCORE_CARGO = 250;
 inline constexpr int SCORE_SIGNAL = 75;         // first sonar contact with a deep-cave signal
 inline constexpr int SCORE_REVEAL_CELL = 1;     // per newly solid-revealed cell (capped per ping)
+inline constexpr float HURT_FROM_HIT = 0.12f;   // soft damage added on a hard bounce
+inline constexpr float HURT_REPAIR = 0.35f;     // repair rate per second while on an active pad
+inline constexpr float RESIDUE_TTL = 1.4f;      // seconds a scan glow lingers on rock
 
 // Landing legs: spring along the strut (Hz, damping ratio), leg body mass as a fraction of the ship's
 inline constexpr float LEG_HERTZ = 1.0f;

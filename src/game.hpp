@@ -32,6 +32,7 @@ struct Flight {
   int contacts = 0;      // touching contact manifolds on hull and legs this tick
   Vec2 contact_pt;       // lowest touching point (px)
   float fuel = 1.f;      // 0..1 tank; low fuel limps engines, does not hard-stop
+  float hurt = 0.f;      // 0..1 soft damage from hard bumps; repairs on a pad
 };
 // Box2D bodies of the ship, and the landing gear on top of them
 struct Body { ShipBodies b; };
@@ -137,4 +138,11 @@ struct Game {
   };
   std::vector<Signal> signals;
   int cells_explored = 0;  // cells that reached full reveal (255) at least once
+
+  // Brief phosphor ghosts left on rock faces the last ping painted (world-space residues)
+  struct Residue {
+    Vec2 pos;
+    float life = 0.f;
+  };
+  std::vector<Residue> residues;
 };

@@ -129,14 +129,15 @@ void forces_system(Game& g) {
 
     if (f.state != FlightState::Crashed) {
       // Power scales with fuel but floors at FUEL_LIMP so the ship can always limp home
-      const float power = f.fuel >= tune::FUEL_LIMP ? 1.f
-                          : (0.35f + 0.65f * (f.fuel / tune::FUEL_LIMP));
+      float power = f.fuel >= tune::FUEL_LIMP ? 1.f
+                    : (0.35f + 0.65f * (f.fuel / tune::FUEL_LIMP));
+      power *= 1.f - 0.45f * f.hurt;  // soft damage trims thrust; still flies
       for (int i = 0; i < thruster_count(d); ++i) {
         const ThrusterPose tp = thruster_pose(d, i);
         float level = th.level[tp.channel];
         if (level <= 0.f) continue;
-        // Mild sputter on the weaker side when limping (fun feedback, not a hard fail)
-        if (f.fuel < tune::FUEL_LIMP && (tp.channel & 1))
+        // Mild sputter when limping or hurt (fun feedback, not a hard fail)
+        if ((f.fuel < tune::FUEL_LIMP || f.hurt > 0.2f) && (tp.channel & 1))
           level *= 0.75f + 0.25f * std::sin(g.time * 17.f + float(i));
         const float force = d.mass * d.max_thrust / PPM * level * tp.power * power;
         const b2Vec2 at = b2Body_GetWorldPoint(sb.hull, to_b2(tp.pos));
@@ -287,6 +288,10 @@ void impact_system(Game& g) {
       } else if (speed > tune::HIT_MIN_SPEED) {
         g.events.push_back({SimEventKind::Bounce, pos, n, speed});
         stat_add(g, &Stats::hard_hits, 1);
+        // Soft damage: a hard bump hurts the engines a little (repaired on pads)
+        Flight& fl = g.ecs.get<Flight>(g.ship);
+        if (fl.state != FlightState::Crashed)
+          fl.hurt = std::min(1.f, fl.hurt + tune::HURT_FROM_HIT * clampf((speed - tune::HIT_MIN_SPEED) / 80.f, 0.3f, 1.f));
       }
     }
   });
@@ -358,8 +363,10 @@ void ground_system(Game& g, float dt) {
     const float demand = th.level[0] + th.level[1] + th.level[2] + th.level[3];
     if (f.state != FlightState::Crashed && f.fuel > 0.f && demand > 0.02f)
       f.fuel = std::max(0.f, f.fuel - tune::FUEL_BURN * demand * 0.25f * dt);
-    if (f.state == FlightState::Landed && touching_pad(g.cave, f.contact_pt))
+    if (f.state == FlightState::Landed && touching_pad(g.cave, f.contact_pt)) {
       f.fuel = std::min(1.f, f.fuel + tune::FUEL_REFUEL * dt);
+      if (f.hurt > 0.f) f.hurt = std::max(0.f, f.hurt - tune::HURT_REPAIR * dt);
+    }
   });
 }
 
@@ -637,6 +644,7 @@ void reset_fog(Game& g) {
   g.last_pad = -1;
   g.cells_explored = 0;
   g.signals.clear();
+  g.residues.clear();
   for (LandingPad& p : g.cave.pads) p.active = false;
 }
 
@@ -812,13 +820,24 @@ void update_sonar(Game& g, float dt) {
     const float u = (d - full) / (s.max_radius - full);
     return static_cast<uint8_t>(255.f * (1.f - u) + 40.f * u);
   };
-  auto mark = [&](int gx, int gy, uint8_t str) {
+  auto mark = [&](int gx, int gy, uint8_t str, bool residue = false) {
     if (!Cave::in_grid(gx, gy) || str == 0) return;
     const size_t i = static_cast<size_t>(gy * Cave::GW + gx);
-    if (g.revealed[i] < str) {
-      if (g.revealed[i] == 0) ++new_cells;
-      g.revealed[i] = str;
+    const uint8_t old = g.revealed[i];
+    // Echo memory: a second pass brightens an existing fade-band cell toward full
+    uint8_t next = str;
+    if (old > 0 && old < 255) {
+      const int boosted = static_cast<int>(old) + static_cast<int>(str) / 3 + 8;
+      next = static_cast<uint8_t>(std::min(255, std::max(static_cast<int>(str), boosted)));
+    }
+    if (next > old) {
+      if (old == 0) ++new_cells;
+      g.revealed[i] = next;
       painted = true;
+    }
+    if (residue && g.cave.is_solid_cell(gx, gy) && next >= 80) {
+      if (g.residues.size() < 120)
+        g.residues.push_back({Vec2{(gx + 0.5f) * Cave::CELL, (gy + 0.5f) * Cave::CELL}, tune::RESIDUE_TTL});
     }
   };
   // Depth of solid behind open air (0 = open, 1 = face, 2 = one cell in).
@@ -872,7 +891,7 @@ void update_sonar(Game& g, float dt) {
       }
       // Rock face (+ slight penetration); LOS already verified up to this cell
       const int depth = rock_depth(gx, gy);
-      if (depth >= 1 && depth <= 2) mark(gx, gy, str);
+      if (depth >= 1 && depth <= 2) mark(gx, gy, str, true);
     }
   }
   // Cargo crates: paint a small blob when the wavefront reaches them
@@ -918,6 +937,14 @@ void step_sim(Game& g, float dt) {
   g.time += dt;
   g.notice_timer = std::max(0.f, g.notice_timer - dt / tune::TIME_SCALE);
   g.sonar_cool = std::max(0.f, g.sonar_cool - dt);
+  for (size_t i = 0; i < g.residues.size();) {
+    g.residues[i].life -= dt;
+    if (g.residues[i].life <= 0.f) {
+      g.residues[i] = g.residues.back();
+      g.residues.pop_back();
+    } else
+      ++i;
+  }
   // Ground is needed around the ship and around every crate that is moving
   static std::vector<Vec2> anchors;
   anchors.assign(1, ship_transform(g).pos);

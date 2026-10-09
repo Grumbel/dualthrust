@@ -60,6 +60,7 @@ class Gfx {
   void draw_rope(const Game& g, double t) const;
   void draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const;
   void draw_minimap(Game& g, double t);
+  void draw_residues(const Game& g) const;
   void draw_sonar(const Game& g) const;
   void draw_full_map(const Game& g, const UiState& ui) const;
   void draw_menu(const Game& g, const UiState& ui, const BindMap& binds) const;
