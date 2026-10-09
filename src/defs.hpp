@@ -158,6 +158,7 @@ struct ShipDef {
   unsigned style = 0;
   const ThrusterDef* thrusters = nullptr;  // null: the classic left/right pair
   int thruster_n = 0;
+  bool winch = false;  // cargo cable + hook (only some haulers)
 
   // Signed local Y of the engine mounts (local +y = ground side when upright)
   float eng_y() const { return engines_top ? -engine_offset_y : engine_offset_y; }
@@ -358,7 +359,7 @@ inline constexpr ThrusterDef TITAN_T[] = {
 
 inline constexpr ShipDef SHIP_DEFS[] = {
     {"Narrow", 22.f, 30.f, 12.f, 26.f, 0.85f, 450.f, 380.f, false, STYLE_FINS},
-    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false, STYLE_DOME | STYLE_STRIPES},
+    {"Medium", 32.f, 32.f, 20.f, 28.f, 1.0f, 900.f, 400.f, false, STYLE_DOME | STYLE_STRIPES, nullptr, 0, true},
     {"Wide", 48.f, 28.f, 36.f, 26.f, 1.25f, 1600.f, 420.f, false, STYLE_TANKS},
     {"Barge", 64.f, 26.f, 52.f, 24.f, 1.6f, 2800.f, 440.f, false, STYLE_TANKS | STYLE_STRIPES | STYLE_DISH},
     {"Long", 26.f, 42.f, 14.f, 36.f, 1.1f, 1100.f, 390.f, false, STYLE_FINS | STYLE_DISH},
@@ -371,20 +372,20 @@ inline constexpr ShipDef SHIP_DEFS[] = {
     {"Gnat", 14.f, 22.f, 8.f, 20.f, 0.5f, 170.f, 400.f, false, STYLE_DOME},
     {"Orca", 40.f, 44.f, 26.f, 38.f, 2.0f, 3300.f, 460.f, false, STYLE_TANKS | STYLE_DISH | STYLE_STRIPES},
     {"Moth", 60.f, 22.f, 48.f, 20.f, 0.9f, 1500.f, 380.f, false, STYLE_FINS | STYLE_DOME | STYLE_STRIPES},
-    {"Frigate", 80.f, 38.f, 62.f, 34.f, 3.0f, 9500.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, FRIGATE_T, 4},
-    {"Atlas", 70.f, 46.f, 56.f, 40.f, 3.6f, 12500.f, 410.f, false, STYLE_DECK | STYLE_TANKS | STYLE_DOME, ATLAS_T, 4},
-    {"Dragonfly", 66.f, 30.f, 50.f, 24.f, 2.4f, 6000.f, 430.f, false, STYLE_DECK | STYLE_FINS | STYLE_DOME, DRAGONFLY_T, 4},
-    {"Colossus", 100.f, 52.f, 90.f, 44.f, 5.0f, 22000.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, COLOSSUS_T, 4},
+    {"Frigate", 80.f, 38.f, 62.f, 34.f, 3.0f, 9500.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, FRIGATE_T, 4, true},
+    {"Atlas", 70.f, 46.f, 56.f, 40.f, 3.6f, 12500.f, 410.f, false, STYLE_DECK | STYLE_TANKS | STYLE_DOME, ATLAS_T, 4, true},
+    {"Dragonfly", 66.f, 30.f, 50.f, 24.f, 2.4f, 6000.f, 430.f, false, STYLE_DECK | STYLE_FINS | STYLE_DOME, DRAGONFLY_T, 4, true},
+    {"Colossus", 100.f, 52.f, 90.f, 44.f, 5.0f, 22000.f, 400.f, false, STYLE_DECK | STYLE_TANKS | STYLE_STRIPES | STYLE_DISH, COLOSSUS_T, 4, true},
     // 1950s sci-fi needle rocket: very tall, narrow, classic tail fins + nose dish
-    {"Rocket", 14.f, 96.f, 9.f, 88.f, 1.55f, 4200.f, 400.f, false, STYLE_FINS | STYLE_STRIPES | STYLE_DISH},
-    {"Vernier", 36.f, 32.f, 22.f, 28.f, 1.2f, 1400.f, 420.f, false, STYLE_FINS | STYLE_DOME, VERNIER_T, 4},
-    {"Bidraft", 42.f, 36.f, 28.f, 32.f, 1.5f, 2100.f, 430.f, false, STYLE_TANKS | STYLE_FINS | STYLE_DISH, BIDRAFT_T, 6},
-    {"Seesaw", 48.f, 28.f, 34.f, 24.f, 1.35f, 1800.f, 410.f, false, STYLE_DECK | STYLE_STRIPES | STYLE_DOME, SEESAW_T, 4},
+    {"Rocket", 14.f, 96.f, 9.f, 88.f, 1.55f, 4200.f, 400.f, false, STYLE_FINS | STYLE_STRIPES | STYLE_DISH},  // no winch
+    {"Vernier", 36.f, 32.f, 22.f, 28.f, 1.2f, 1400.f, 420.f, false, STYLE_FINS | STYLE_DOME, VERNIER_T, 4, true},
+    {"Bidraft", 42.f, 36.f, 28.f, 32.f, 1.5f, 2100.f, 430.f, false, STYLE_TANKS | STYLE_FINS | STYLE_DISH, BIDRAFT_T, 6, true},
+    {"Seesaw", 48.f, 28.f, 34.f, 24.f, 1.35f, 1800.f, 410.f, false, STYLE_DECK | STYLE_STRIPES | STYLE_DOME, SEESAW_T, 4, false},
     // Asymmetric hull: wide left tank, skinny right — engines match the imbalance
-    {"Lurch", 46.f, 34.f, 48.f, 30.f, 1.55f, 2400.f, 420.f, false, STYLE_TANKS | STYLE_FINS | STYLE_STRIPES, LURCH_T, 4},
+    {"Lurch", 46.f, 34.f, 48.f, 30.f, 1.55f, 2400.f, 420.f, false, STYLE_TANKS | STYLE_FINS | STYLE_STRIPES, LURCH_T, 4, false},
     // Super-heavy needle: taller than Rocket, twin mains + nose RCS
     {"Titan", 24.f, 128.f, 32.f, 108.f, 3.2f, 16000.f, 520.f, false,
-     STYLE_FINS | STYLE_STRIPES | STYLE_DISH | STYLE_TANKS, TITAN_T, 4},
+     STYLE_FINS | STYLE_STRIPES | STYLE_DISH | STYLE_TANKS, TITAN_T, 4, false},
 };
 inline constexpr int SHIP_DEF_COUNT = static_cast<int>(sizeof(SHIP_DEFS) / sizeof(SHIP_DEFS[0]));
 inline constexpr int DEFAULT_SHIP = 1;

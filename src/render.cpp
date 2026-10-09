@@ -681,10 +681,12 @@ void Gfx::draw_ship(const Game& g, double t) const {
     const float w = hg.belly_hw() - 3.f;
     for (float x = -w; x < w - 3.f; x += 6.f) seg({x, belly}, {x + 3.f, belly - 4.f});
   }
-  // Winch housing under the belly, with the cable eye
-  seg({-5.f, belly}, {-5.f, belly + 5.f});
-  seg({5.f, belly}, {5.f, belly + 5.f});
-  seg({-5.f, belly + 5.f}, {5.f, belly + 5.f});
+  // Winch housing under the belly (haulers only)
+  if (d.winch) {
+    seg({-5.f, belly}, {-5.f, belly + 5.f});
+    seg({5.f, belly}, {5.f, belly + 5.f});
+    seg({-5.f, belly + 5.f}, {5.f, belly + 5.f});
+  }
   // Landing legs: a hydraulic strut (sleeve on the hull, rod out to the foot plate) with a hinge and a foot
   for (int i = 0; i < 2; ++i) {
     const float side = i == 0 ? -1.f : 1.f;
@@ -827,6 +829,7 @@ void Gfx::draw_cargo(const Game& g, double t) const {
 
 // The cable (a chain of ticked links, sagging when slack) and the hook
 void Gfx::draw_rope(const Game& g, double t) const {
+  if (!g.ecs.has<Hull>(g.ship) || !g.ecs.get<Hull>(g.ship).def->winch) return;
   const Rope& r = g.ecs.get<Rope>(g.ship);
   const Flight& fl = g.ecs.get<Flight>(g.ship);
   const Rgba col = fl.state == FlightState::Crashed ? pal::HOT : pal::ROPE;
@@ -962,6 +965,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
   text(m20, y, legbuf, legs.deployed ? pal::MID : pal::WARN);
   y += lh;
   const Rope& rp = g.ecs.get<Rope>(g.ship);
+  if (d.winch) {
   action_bind_label(binds, Action::Grip, !pad, bname, sizeof bname);
   // Winch length bar (MIN_LEN..OUT_LEN)
   {
@@ -1007,6 +1011,7 @@ void Gfx::draw_hud(const Game& g, const UiState& ui, const BindMap& binds) const
       }
     }
   }
+  }  // d.winch
   {
     char pb[24], qb[24];
     action_bind_label(binds, Action::PrevPad, !pad, pb, sizeof pb);
@@ -1533,7 +1538,7 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
   const int lh = cell_h() + L(9);
   const int stat_rows = ui.page == MenuPage::Stats ? STAT_FIELD_COUNT : 0;  // read-only lines above the items
   // Options: ship performance block under the list (mass, inertia, TWR, bias…)
-  const int ship_info_rows = (ui.page == MenuPage::Options) ? 5 : 0;
+  const int ship_info_rows = (ui.page == MenuPage::Options) ? 6 : 0;
   const int panel_w = std::min(w_ - L(20), L(560));
   const int panel_h = L(78) + (stat_rows + page.count) * lh + (stat_rows ? L(10) : 0) +
                       (ship_info_rows ? L(12) + ship_info_rows * (cell_h() + L(4)) : 0) + L(44);
@@ -1601,6 +1606,7 @@ void Gfx::draw_menu(const Game& g, const UiState& ui, const BindMap& binds) cons
     // Bias: residual yaw with equal mains; Spin: peak differential yaw authority
     std::snprintf(line, sizeof line, "%+.2f  spin %.2f", sp.yaw_bias, sp.spin);
     row("YAW BIAS", line, std::fabs(sp.yaw_bias) > 0.05f ? pal::HOT : pal::BRIGHT);
+    row("WINCH", def.winch ? "YES" : "NO", def.winch ? pal::CARGO : pal::DIM);
   }
 
   text_centered(w_ / 2, py + panel_h - cell_h() - L(14), menu_hint(ui, ui.page == MenuPage::Options), pal::MID);

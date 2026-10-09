@@ -2,7 +2,7 @@
 
 ## Tip
 
-- Bundle line: `dualthrust-040.1-titan-stick-primary-9a093cd` → tip `1ddf84f`
+- Bundle line: `dualthrust-041.1-winch-per-ship-9a093cd` → tip (HEAD)
 - Base of this work line: `9a093cd`
 
 ## Roadmap
@@ -56,7 +56,9 @@
 - **Lurch**: deliberately unbalanced engines (fat left, weak canted right); equal primary input yaws hard.
   Trigger verniers for recovery. Built for differential-thrust practice.
 - **Titan**: super-heavy needle rocket; twin primary mains (sticks) + small top L/R RCS (triggers).
-- Controls: sticks = primary L/R, triggers = secondary (classic 2-engine ships fold triggers into primary at 85%).
+- Controls: sticks = primary L/R, triggers = secondary
+- Winch/hook only on haulers (`ShipDef.winch`): Medium, Frigate, Atlas, Dragonfly, Colossus, Vernier, Bidraft.
+  Rockets / racers (Narrow, Rocket, Titan, Lurch, Seesaw) have no cable. (classic 2-engine ships fold triggers into primary at 85%).
 
 ### Hangar / pads
 - Landed on a pad → **H** / gamepad **Y** opens Hangar: cycle ships, teleport to **visited** pads.

@@ -367,6 +367,7 @@ void sync_system(Game& g) {
   });
   g.ecs.view<Body, Rope, Hull>([&](Entity, Body& body, Rope& r, Hull& h) {
     const ShipBodies& sb = body.b;
+    if (!h.def->winch || B2_IS_NULL(sb.hook)) return;
     r.anchor = from_b2(b2Body_GetWorldPoint(sb.hull, to_b2({0.f, winch_y(*h.def)})));
     r.hook_pos = from_b2(b2Body_GetPosition(sb.hook));
     r.hook_angle = b2Rot_GetAngle(b2Body_GetRotation(sb.hook));
@@ -405,7 +406,8 @@ void cargo_activation(Game& g) {
 
 // Reel the cable in and out
 void rope_system(Game& g, float dt) {
-  g.ecs.view<Body, Rope>([&](Entity, Body& body, Rope& r) {
+  g.ecs.view<Body, Rope, Hull>([&](Entity, Body& body, Rope& r, Hull& h) {
+    if (!h.def->winch || B2_IS_NULL(body.b.cable) || B2_IS_NULL(body.b.hook)) return;
     const float speed = r.held != NULL_ENTITY ? rope::REEL_SPEED_LOADED : rope::REEL_SPEED;
     const float before = r.length;
     const float target = r.out ? rope::OUT_LEN : rope::MIN_LEN;  // all the way out or all the way in
@@ -715,8 +717,10 @@ void place_ship(Game& g, Vec2 pos, float angle) {
 }
 
 void debug_rope(Game& g, float len) {
+  if (!g.ecs.get<Hull>(g.ship).def->winch) return;
   Rope& r = g.ecs.get<Rope>(g.ship);
   const ShipBodies& sb = g.ecs.get<Body>(g.ship).b;
+  if (B2_IS_NULL(sb.cable) || B2_IS_NULL(sb.hook)) return;
   r.length = clampf(len, rope::MIN_LEN, rope::OUT_LEN);
   r.out = len > rope::MIN_LEN;
   b2DistanceJoint_SetLengthRange(sb.cable, 0.05f, r.length / PPM);
@@ -727,6 +731,7 @@ void debug_rope(Game& g, float len) {
 
 void set_winch(Game& g, bool out) {
   if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
+  if (!g.ecs.get<Hull>(g.ship).def->winch) return;
   Rope& r = g.ecs.get<Rope>(g.ship);
   if (r.out == out) return;
   r.out = out;
@@ -781,6 +786,7 @@ void grab_crate(Game& g, Entity best) {
 }
 
 void toggle_grip(Game& g) {
+  if (!g.ecs.get<Hull>(g.ship).def->winch) return;
   Rope& r = g.ecs.get<Rope>(g.ship);
   if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
   if (r.held != NULL_ENTITY) {  // let go
@@ -801,6 +807,7 @@ void toggle_grip(Game& g) {
 // Magnet: cable out and empty → latch a crate that drifts into AUTO_GRAB_REACH.
 void auto_grab_update(Game& g) {
   if (!rope::AUTO_GRAB) return;
+  if (!g.ecs.get<Hull>(g.ship).def->winch) return;
   Rope& r = g.ecs.get<Rope>(g.ship);
   if (!r.out || r.held != NULL_ENTITY) return;
   if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;

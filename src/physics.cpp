@@ -453,8 +453,8 @@ ShipBodies Physics::create_ship(const ShipDef& d, Vec2 pos, float angle, Vec2 ve
     s.joint[i] = b2CreatePrismaticJoint(world_, &jd);
   }
 
-  // --- Hook on its cable, tucked under the winch ---
-  {
+  // --- Hook on its cable, tucked under the winch (haulers only) ---
+  if (d.winch) {
     const Vec2 winch{0.f, winch_y(d)};
     b2BodyDef hb = b2DefaultBodyDef();
     hb.type = b2_dynamicBody;
