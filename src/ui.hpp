@@ -103,8 +103,12 @@ inline const MenuPageDef& page_def(MenuPage p) {
 struct UiState {
   Screen screen = Screen::Title;
   MenuPage page = MenuPage::Title;
-  MenuPage options_back = MenuPage::Title;  // the page Options / Statistics was opened from
-  int back_cursor = 0;                      // its cursor, restored on the way back
+  // Navigation stack: push before opening a sub-page, pop on Back / Escape.
+  // Fixes Options→Controls overwriting the return target so Options→Back broke.
+  static constexpr int NAV_MAX = 4;
+  MenuPage nav_page[NAV_MAX] = {};
+  int nav_cursor[NAV_MAX] = {};
+  int nav_depth = 0;
   int cursor = 0;
   bool fullscreen = false;
   bool swap_engines = false;

@@ -323,8 +323,8 @@ int main(int argc, char** argv) {
   ui.ui_scale = ui_scale_init;
   if (opt.play) ui.screen = Screen::Play;
   else if (opt.screen == "pause") { ui.screen = Screen::Pause; ui.page = MenuPage::Pause; }
-  else if (opt.screen == "stats") { ui.screen = Screen::Pause; ui.page = MenuPage::Stats; ui.options_back = MenuPage::Pause; }
-  else if (opt.screen == "options") { ui.screen = Screen::Pause; ui.page = MenuPage::Options; ui.options_back = MenuPage::Pause; }
+  else if (opt.screen == "stats") { ui.screen = Screen::Pause; ui.page = MenuPage::Stats; ui.nav_depth = 1; ui.nav_page[0] = MenuPage::Pause; ui.nav_cursor[0] = 0; }
+  else if (opt.screen == "options") { ui.screen = Screen::Pause; ui.page = MenuPage::Options; ui.nav_depth = 1; ui.nav_page[0] = MenuPage::Pause; ui.nav_cursor[0] = 0; }
   Audio audio;
   audio.init();
   audio.set_enabled(ui.sound);
@@ -416,6 +416,22 @@ int main(int argc, char** argv) {
     ui.page = p;
     ui.cursor = cursor;
   };
+  // Push current page onto the nav stack, then open `p` (cursor 0 unless given).
+  auto push_page = [&](MenuPage p, int cursor = 0) {
+    if (ui.nav_depth < UiState::NAV_MAX) {
+      ui.nav_page[ui.nav_depth] = ui.page;
+      ui.nav_cursor[ui.nav_depth] = ui.cursor;
+      ui.nav_depth += 1;
+    }
+    open_page(p, cursor);
+  };
+  // Pop the nav stack; returns false if empty (caller handles top-level back).
+  auto pop_page = [&]() -> bool {
+    if (ui.nav_depth <= 0) return false;
+    ui.nav_depth -= 1;
+    open_page(ui.nav_page[ui.nav_depth], ui.nav_cursor[ui.nav_depth]);
+    return true;
+  };
   auto menu_move = [&](int d) {
     const int n = page_def(ui.page).count;
     ui.cursor = (ui.cursor + n + d) % n;
@@ -423,6 +439,7 @@ int main(int argc, char** argv) {
   auto start_game = [&] {
     new_game_at(first_pad_x());
     ui.screen = Screen::Play;
+    ui.nav_depth = 0;
   };
   // delta = +1/-1 from left/right; `confirm` = Enter/A (cycles forward, wrapping sliders too)
   auto activate = [&](int delta, bool confirm) {
@@ -442,21 +459,17 @@ int main(int argc, char** argv) {
         ui.screen = Screen::Play;
         break;
       case MenuAction::NewCave: new_cave(); ui.screen = Screen::Play; break;
-      case MenuAction::Options: ui.options_back = ui.page; ui.back_cursor = ui.cursor; open_page(MenuPage::Options); break;
-      case MenuAction::Stats: ui.options_back = ui.page; ui.back_cursor = ui.cursor; open_page(MenuPage::Stats); break;
+      case MenuAction::Options: push_page(MenuPage::Options); break;
+      case MenuAction::Stats: push_page(MenuPage::Stats); break;
       case MenuAction::Controls:
-        ui.options_back = ui.page;
-        ui.back_cursor = ui.cursor;
         ui.controls_cursor = 0;
         ui.rebinding = false;
         ui.rebind_keyboard = ui.device != InputDevice::Gamepad;
-        open_page(MenuPage::Controls);
+        push_page(MenuPage::Controls);
         break;
       case MenuAction::Debug:
-        ui.options_back = ui.page;
-        ui.back_cursor = ui.cursor;
         ui.debug_cursor = 0;
-        open_page(MenuPage::Debug);
+        push_page(MenuPage::Debug);
         break;
       case MenuAction::ResetBinds:
         set_default_binds(binds);
@@ -467,9 +480,9 @@ int main(int argc, char** argv) {
         debug_reset_all(game);
         show_toast("TUNE RESET");
         break;
-      case MenuAction::MainMenu: ui.screen = Screen::Title; open_page(MenuPage::Title); break;
+      case MenuAction::MainMenu: ui.screen = Screen::Title; ui.nav_depth = 0; open_page(MenuPage::Title); break;
       case MenuAction::Quit: persist_config(); running = false; break;
-      case MenuAction::Back: open_page(ui.options_back, ui.back_cursor); break;  // back on the entry it came from
+      case MenuAction::Back: if (!pop_page()) { /* top-level */ } break;
       case MenuAction::Ship: cycle_ship(delta); break;
       case MenuAction::Zoom: zoom_to(game.cam.zoom + delta, true); break;
       case MenuAction::UiScale: {
@@ -500,13 +513,16 @@ int main(int argc, char** argv) {
       case MenuPage::Options:
       case MenuPage::Stats:
       case MenuPage::Controls:
-      case MenuPage::Debug: open_page(ui.options_back, ui.back_cursor); break;
+      case MenuPage::Debug:
+        if (!pop_page()) open_page(MenuPage::Pause);
+        break;
       default: break;
     }
   };
   auto open_pause = [&] {
     flush_stats();
     ui.screen = Screen::Pause;
+    ui.nav_depth = 0;
     open_page(MenuPage::Pause);
   };
 
@@ -602,11 +618,12 @@ int main(int argc, char** argv) {
 
           if (ui.screen == Screen::Play) {
             if (k == SDLK_F3) {
-              ui.options_back = MenuPage::Pause;
-              ui.back_cursor = 0;
-              ui.debug_cursor = 0;
               ui.screen = Screen::Pause;
-              open_page(MenuPage::Debug);
+              ui.page = MenuPage::Pause;
+              ui.cursor = 0;
+              ui.nav_depth = 0;
+              ui.debug_cursor = 0;
+              push_page(MenuPage::Debug);
               break;
             }
             if (action_pressed_key(binds, Action::Pause, sc)) open_pause();
