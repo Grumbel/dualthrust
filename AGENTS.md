@@ -31,7 +31,7 @@ dualthrust-configure && dualthrust-build && dualthrust-run
 
 ## World
 
-- Bounded map, 24000×4800 px, ringed by solid rock (4 cells at the sides, 4 at roof and floor); nothing wraps
+- Bounded 4:3 map, 7680×5760 px, ringed by solid rock (4 cells at the sides, 4 at roof and floor); nothing wraps
 - 2D cellular cave: main tunnel, branches, stalactites/mites, pillars, pads
 - Camera scrolls freely with velocity look-ahead; background star dots for motion reference
 - Main tunnel runs side to side; pads are only placed in the main connected cave

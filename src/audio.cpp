@@ -207,6 +207,19 @@ void Audio::render(float* out, int frames) {
               std::exp(-t * 1.5f) * 0.85f;
           break;
         }
+        case SimEventKind::SonarPing: {  // falling chirp + short static burst (active scan)
+          life = 0.85f;
+          const float f = 1400.f * std::exp(-t * 3.2f) + 180.f;
+          const float env = std::min(t / 0.02f, 1.f) * std::exp(-t * 2.4f);
+          s = (std::sin(t * TAU * f) * 0.35f + noise() * 0.12f * std::exp(-t * 8.f)) * env;
+          // faint echo of the same sweep
+          if (t > 0.18f) {
+            const float te = t - 0.18f;
+            const float fe = 1100.f * std::exp(-te * 3.5f) + 160.f;
+            s += std::sin(te * TAU * fe) * std::exp(-te * 3.f) * 0.12f;
+          }
+          break;
+        }
       }
       s *= v.amp;
       l += s;

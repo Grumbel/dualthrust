@@ -606,6 +606,7 @@ void fire_sonar(Game& g) {
   if (g.ecs.get<Flight>(g.ship).state == FlightState::Crashed) return;
   const Vec2 p = ship_transform(g).pos;
   g.sonar = SonarPing{true, p, 0.f, 0.f, 960.f, 780.f};
+  g.events.push_back({SimEventKind::SonarPing, p, {}, 200.f});
 }
 
 void update_sonar(Game& g, float dt) {

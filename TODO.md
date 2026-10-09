@@ -21,6 +21,7 @@
 
 ## Notes
 
+- Map is 4:3 (7680×5760). Unexplored minimap cells are radio static, not flat black.
 - Fog of war + sonar: minimap starts black; C / left-stick-click pings a ring that paints solid rock
   and cargo it sweeps. Select/Z holds the full revealed chart. Ship switch teleports to the nearest pad.
 

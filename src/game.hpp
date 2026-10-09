@@ -84,7 +84,7 @@ struct Camera {
 
 // Landed / Crashed / Bounce come out of the simulation; the rest are feedback for the pilot's own actions
 // (beeps), pushed straight to `fired`
-enum class SimEventKind { Landed, Crashed, Bounce, HookOut, HookIn, Grab, Release, NoTarget, Delivered, LegsOut, LegsIn };
+enum class SimEventKind { Landed, Crashed, Bounce, HookOut, HookIn, Grab, Release, NoTarget, Delivered, LegsOut, LegsIn, SonarPing };
 struct SimEvent {
   SimEventKind kind;
   Vec2 pos, normal;

@@ -42,13 +42,13 @@ struct RockBand {
 constexpr RockBand ROCK_BANDS[Cave::MAX_DEPTH] = {{160, 100}, {140, 70}, {115, 40}, {90, 18}, {65, 0}};
 constexpr int TILE = static_cast<int>(Cave::CELL);
 
-// World chunks: 30x30 cells; divides the 24000 x 4800 world exactly (50 x 10 chunks)
+// World chunks: 30x30 cells; divides the 7680 x 5760 (4:3) world exactly (16 x 12 chunks)
 constexpr int CHUNK_CELLS = 30;
 constexpr int CHUNK = CHUNK_CELLS * TILE;
 constexpr int CHUNKS_X = static_cast<int>(Cave::WORLD_W) / CHUNK, CHUNKS_Y = static_cast<int>(Cave::WORLD_H) / CHUNK;
 
-// Minimap: one texel per cave cell (16 world px); the panel shows the stretch of the map around the ship
-constexpr int MM_W = 400, MM_H = 100;
+// Minimap: one texel per cave cell; panel is a 4:3 window around the ship
+constexpr int MM_W = 240, MM_H = 180;
 constexpr float MM_K = 1.f / Cave::CELL;  // screen px per world px
 
 uint32_t pack(Rgba c) {  // RGBA32 byte order is R,G,B,A in memory
@@ -159,20 +159,37 @@ void Gfx::build_overlay() {
   overlay_ = be_->create_texture(w_, h_, reinterpret_cast<const uint8_t*>(px.data()), false);
 }
 
+// Cheap integer hash for radio-static fog (stable per cell, no extra state).
+uint32_t fog_hash(uint32_t x) {
+  x ^= x >> 16;
+  x *= 0x7feb352du;
+  x ^= x >> 15;
+  x *= 0x846ca68bu;
+  x ^= x >> 16;
+  return x;
+}
+
 void Gfx::build_minimap(const Cave& cave, const std::vector<uint8_t>& revealed) {
   be_->destroy_texture(minimap_);
   std::vector<uint32_t> px(static_cast<size_t>(Cave::GW) * Cave::GH);
   const bool has_fog = revealed.size() == static_cast<size_t>(Cave::GW) * Cave::GH;
   for (int i = 0; i < Cave::GW * Cave::GH; ++i) {
     if (has_fog && !revealed[static_cast<size_t>(i)]) {
-      px[i] = pack({0, 0, 0, 0});
+      // Unexplored: green-tinted radio noise (not flat black) so the chart reads as "unknown"
+      const int gx = i % Cave::GW, gy = i / Cave::GW;
+      const uint32_t h = fog_hash(static_cast<uint32_t>(gx * 73856093u) ^ static_cast<uint32_t>(gy * 19349663u));
+      const uint8_t n = static_cast<uint8_t>(h & 255u);
+      const uint8_t n2 = static_cast<uint8_t>((h >> 8) & 255u);
+      // Dense static with occasional brighter flecks
+      const uint8_t v = static_cast<uint8_t>(18 + (n % 50) + ((n2 & 7) == 0 ? 40 : 0));
+      px[static_cast<size_t>(i)] = pack({static_cast<uint8_t>(v / 3), v, static_cast<uint8_t>(v / 2), 220});
       continue;
     }
     // Solid returns: green rock; open revealed cells are a faint void so tunnels read as outlines
     if (cave.solid[static_cast<size_t>(i)])
-      px[i] = pack(with_alpha(pal::MID, 160));
+      px[static_cast<size_t>(i)] = pack(with_alpha(pal::MID, 160));
     else
-      px[i] = pack(with_alpha(pal::DIM, 40));
+      px[static_cast<size_t>(i)] = pack(with_alpha(pal::DIM, 40));
   }
   minimap_ = be_->create_texture(Cave::GW, Cave::GH, reinterpret_cast<const uint8_t*>(px.data()), false);
   minimap_generation_ = cave.generation;

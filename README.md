@@ -44,7 +44,7 @@ the cable itself.
 on pads), hard hits, crashes, caves visited, crates picked up and delivered. They are kept forever in
 `$XDG_STATE_HOME/dualthrust/stats` (default `~/.local/state/dualthrust/stats`).
 
-The cave is a bounded 24000 × 4800 px map with rock on all sides. The minimap at the bottom is a zoomed-in map of the stretch around you (one pixel per 16 world px, about 6400 × 1600
+The cave is a bounded 7680 × 5760 px (4:3) map with rock on all sides. The minimap at the bottom is a zoomed-in chart of the stretch around you (one pixel per 16 world px; unexplored cells show radio static
 px) that scrolls with the ship and stops at the map edges. It shows the landing pads (yellow), the crates (cyan), your
 ship (blinking) and a box for what the main view shows.
 

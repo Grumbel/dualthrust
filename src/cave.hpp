@@ -36,11 +36,12 @@ inline constexpr ContourCase CONTOUR_CASES[16] = {
 
 // A bounded map ringed by rock on all sides. Rock is a boolean grid; draw-side data is baked in generate().
 struct Cave {
-  static constexpr float WORLD_W = 24000.f;
-  static constexpr float WORLD_H = 4800.f;
+  // 4:3 playfield (was 5:1 ultra-wide). Chunk tiles are 480 px; both axes must divide cleanly.
+  static constexpr float WORLD_W = 7680.f;   // 16 chunks
+  static constexpr float WORLD_H = 5760.f;   // 12 chunks
   static constexpr float CELL = 16.f;
-  static constexpr int GW = static_cast<int>(WORLD_W / CELL);  // 1500
-  static constexpr int GH = static_cast<int>(WORLD_H / CELL);  // 300
+  static constexpr int GW = static_cast<int>(WORLD_W / CELL);  // 480
+  static constexpr int GH = static_cast<int>(WORLD_H / CELL);  // 360
   static constexpr int MAX_DEPTH = 5;
 
   std::vector<uint8_t> solid;    // GW * GH, 1 = rock

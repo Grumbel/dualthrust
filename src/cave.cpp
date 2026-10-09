@@ -324,7 +324,7 @@ void Cave::generate(unsigned s) {
 
   // --- Landing pads with tall cleared shafts for safe spawn ---
   constexpr int PAD_CLEARANCE = 18;    // cells of open air above a pad
-  constexpr float PAD_MIN_DX = 480.f;  // min horizontal separation
+  constexpr float PAD_MIN_DX = 360.f;  // min horizontal separation (4:3 map)
   constexpr float PAD_MIN_DY = 220.f;  // min vertical separation if near in X
   const Grid main_cave = largest_open_region(solid);  // pads in sealed pockets would trap the player
   auto pads_overlap = [&](float x0, float x1, float y) {

@@ -419,6 +419,8 @@ int main(int argc, char** argv) {
   };
 
   // --- Menus: pages are data (ui.hpp); this is their behaviour ---
+  // Navigation is hardcoded (arrows / D-pad, Enter-Space / A, Escape / B) and ignores the
+  // rebindable play map so Options → Controls stays reachable no matter how the pad is remapped.
   auto open_page = [&](MenuPage p, int cursor = 0) {
     ui.page = p;
     ui.cursor = cursor;
