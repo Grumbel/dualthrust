@@ -383,7 +383,21 @@ void Cave::generate(unsigned s) {
     for (const auto& p : pads) if (x > p.x0 - 200.f && x < p.x1 + 200.f && std::abs(floor_gy * CELL - p.y) < 400.f) clash = true;
     for (const auto& k : cargo) if (std::abs(k.x - x) < 320.f && std::abs(k.floor_y - floor_gy * CELL) < 300.f) clash = true;
     if (clash) continue;
-    cargo.push_back({x, floor_gy * CELL, rng.range_i(0, kinds - 1)});
+    // Depth bias: light parcels near the surface, clamps/anvils in the deep
+    const float depth = static_cast<float>(floor_gy) / static_cast<float>(GH);
+    int kind;
+    const float r = rng.next();
+    if (depth < 0.35f) {
+      kind = (r < 0.55f) ? 0 : 1;                     // Parcel / Crate
+    } else if (depth < 0.55f) {
+      kind = (r < 0.35f) ? 0 : (r < 0.70f ? 1 : 2); // Parcel / Crate / Barrel
+    } else if (depth < 0.72f) {
+      kind = (r < 0.25f) ? 1 : (r < 0.55f ? 2 : (r < 0.85f ? 3 : 4)); // Crate..Heavy
+    } else {
+      kind = (r < 0.30f) ? 3 : (r < 0.70f ? 4 : 5); // Container / Heavy / Anvil
+    }
+    kind = std::clamp(kind, 0, kinds - 1);
+    cargo.push_back({x, floor_gy * CELL, kind});
   }
 
   bake();

@@ -469,6 +469,14 @@ void cargo_system(Game& g, float dt) {
     stat_add(g, &Stats::cargo_delivered, 1);
     g.hauls_run += 1;
     g.score += pts;
+    // Milestone bonuses for sustained hauling
+    if (g.hauls_run == 5 || g.hauls_run == 10 || g.hauls_run == 25) {
+      const int bonus = g.hauls_run * 20;
+      g.score += bonus;
+      char mb[32];
+      std::snprintf(mb, sizeof mb, "+%d HAUL x%d", bonus, g.hauls_run);
+      notice(g, mb);
+    }
     char msg[40];
     if (dist_bonus > 0.05f)
       std::snprintf(msg, sizeof msg, "+%d %s (+%d%%)", pts, c.def->name,
@@ -1559,15 +1567,16 @@ void update_sonar(Game& g, float dt) {
       g.events.push_back({SimEventKind::SonarPing, tf.pos, {}, 60.f});
     });
 
-    if (s.signal_hit.size() != g.signals.size()) s.signal_hit.assign(g.signals.size(), 0);
-    for (int i = 0; i < static_cast<int>(g.signals.size()); ++i) {
+    // Signal beacons retired — sonar no longer hunts for them.
+    if (false && s.signal_hit.size() != g.signals.size()) s.signal_hit.assign(g.signals.size(), 0);
+    for (int i = 0; false && i < static_cast<int>(g.signals.size()); ++i) {
       if (s.signal_hit[static_cast<size_t>(i)]) continue;
       Game::Signal& sig = g.signals[static_cast<size_t>(i)];
       if (!add_echo(sig.pos.x, sig.pos.y, SonarReflection::Kind::Signal)) continue;
       s.signal_hit[static_cast<size_t>(i)] = 1;
       if (!sig.found) {
         sig.found = true;
-        /* signals no longer score */ (void)0;
+        (void)0;
         notice(g, "+75 SIGNAL");
         check_exploration_milestones(g);
       }

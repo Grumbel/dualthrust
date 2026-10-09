@@ -1294,25 +1294,19 @@ void Gfx::draw_minimap(Game& g, const UiState& ui, double t) {
     auto [px, py] = to_panel(cxw, p.y);
     tri_down(px, py, is_dest ? pad_s + L(2) : pad_s, col);
   }
-  // Signals: diamond
-  for (const Game::Signal& sig : g.signals) {
-    if (!sig.found) continue;
-    auto [px, py] = to_panel(sig.pos.x, sig.pos.y);
-    diamond(px, py, L(4), pal::CARGO);
+  // Cargo: squares — bright if this ship can lift them, dim otherwise
+  {
+    const ShipDef& sd = *g.ecs.get<Hull>(g.ship).def;
+    g.ecs.view<Cargo, Transform>([&](Entity, const Cargo& c, const Transform& ct) {
+      if (!c.def || !b2Body_IsEnabled(c.body)) return;
+      if (!is_rev(ct.pos.x, ct.pos.y)) return;
+      auto [px, py] = to_panel(ct.pos.x, ct.pos.y);
+      if (!on_panel(px, py)) return;
+      const bool can = sd.winch && sd.grip >= c.def->grip && c.def->mass <= sd.lift_cap + 0.001f;
+      const int s = std::max(2, L(3) + (c.def->grip >= GRIP_CLAMP ? 1 : 0));
+      fill(px - s / 2, py - s / 2, s, s, can ? pal::CARGO : with_alpha(pal::DIM, 160));
+    });
   }
-  // Echoes that just answered a ping flash on the chart
-  for (const Game::Echo& e : g.echoes) {
-    if (e.cool < 6.5f || e.cool > 8.f) continue;
-    auto [px, py] = to_panel(e.pos.x, e.pos.y);
-    diamond(px, py, L(3), with_alpha(pal::BRIGHT, 200));
-  }
-  // Cargo: small square
-  g.ecs.view<Cargo, Transform>([&](Entity, const Cargo&, const Transform& ct) {
-    if (!is_rev(ct.pos.x, ct.pos.y)) return;
-    auto [px, py] = to_panel(ct.pos.x, ct.pos.y);
-    const int s = L(4);
-    if (on_panel(px, py)) fill(px - s / 2, py - s / 2, s, s, pal::CARGO);
-  });
 
   // Viewport box, clipped to the panel
   const int vw = static_cast<int>(g.cam.vw * MM_K * sx_k), vh = static_cast<int>(g.cam.vh * MM_K * sy_k);
@@ -1880,23 +1874,24 @@ void Gfx::draw_full_map(const Game& g, const UiState& ui) const {
     if (!pad.visited)  // hollow look: dark centre for unvisited
       fill(px - ps / 4, py - ps / 4, std::max(1, ps / 2), std::max(1, ps / 2), with_alpha(pal::BG, 220));
   }
-  // Found signals on the chart
-  for (const Game::Signal& sig : g.signals) {
-    if (!sig.found) continue;
-    const int px = dx + static_cast<int>(sig.pos.x / Cave::CELL * scale);
-    const int py = dy + static_cast<int>(sig.pos.y / Cave::CELL * scale);
-    fill(px - 2, py - 2, 4, 4, pal::CARGO);
-  }
-  int found = 0;
-  for (const Game::Signal& s : g.signals) if (s.found) ++found;  // legacy, unused
+  // Cargo on the chart
+  int cargo_n = 0;
+  g.ecs.view<Cargo, Transform>([&](Entity, const Cargo& c, const Transform& ct) {
+    if (!c.def || !b2Body_IsEnabled(c.body)) return;
+    ++cargo_n;
+    const int px = dx + static_cast<int>(ct.pos.x / Cave::CELL * scale);
+    const int py = dy + static_cast<int>(ct.pos.y / Cave::CELL * scale);
+    const int s = c.def->grip >= GRIP_CLAMP ? 4 : 3;
+    fill(px - s / 2, py - s / 2, s, s, pal::CARGO);
+  });
   const int pct = explore_percent(g);
   char line[72];
   text_centered(w_ / 2, dy - cell_h() - L(10), "MAP  (HOLD TO PAUSE)", pal::BRIGHT);
-  std::snprintf(line, sizeof line, "EXPLORED %d%%   PADS %d/%d   SIGNALS %d/%d   SCORE %d", pct, n_vis,
-                n_act, g.score);
+  std::snprintf(line, sizeof line, "EXPLORED %d%%   PADS %d/%d   CARGO %d   HAULS %d   SCORE %d",
+                pct, n_vis, n_act, cargo_n, g.hauls_run, g.score);
   text_centered(w_ / 2, dy + dh + L(8), line, pal::MID);
   text_centered(w_ / 2, dy + dh + L(8) + cell_h() + L(4),
-                "PAD: BRIGHT=VISITED  AMBER=FOUND", pal::DIM);
+                "PAD: BRIGHT=VISITED   CARGO: SQUARES", pal::DIM);
 }
 
 void Gfx::draw(Game& g, const UiState& ui, const BindMap& binds) {
